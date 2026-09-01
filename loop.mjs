@@ -126,11 +126,13 @@ if (!s3cached && !state.gate_pass) { if (build) log('s3: no recorded gate pass f
 if (!s3cached) {
 checkBudget('s3');
 const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-alt', 's3-repair'];
+const gateFails = [];
 for (const attempt of s3attempts) {
   const input = attempt === 's3-repair'
     ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
-    : `${shared}GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
+    : `${shared}GATE OUTPUTS (both ensemble attempts):\n${(gateFails.length ? gateFails : [fs.readFileSync('gate-out.txt', 'utf8')]).join('\n---\n')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed — minimal diff, fix BOTH failures):\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
+  if (!build.trim()) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log(`${attempt}: empty response — previous artifacts left untouched on disk`); break; }
   fs.writeFileSync('artifact-build.txt', build);
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
   const sections = [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)];
@@ -143,6 +145,7 @@ for (const attempt of s3attempts) {
   fs.writeFileSync('gate-out.txt', g);
   log('gate: ' + g.trim().split('\n').pop());
   if (ok && /GATE PASS/.test(g)) { outcomes.s3 = 'PASS'; state.gate_pass = true; state.gate_at = Date.now(); state.s3_hash = digest(build); break; }
+  gateFails.push(attempt + ': ' + g.trim().split('\n').pop());
   if (attempt === 's3-repair') { outcomes.s3 = 'FAIL'; state.gate_pass = false; }
   else log('S3 gate failed; running repair round');
 }

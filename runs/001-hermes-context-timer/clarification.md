@@ -2,7 +2,7 @@
 
 ## Gate output (after repair round)
 ```
-GATE FAIL: type-change: DST/x dir->file not reconciled
+GATE FAIL: sync-hermes-context.sh missing
 
 ```
 
