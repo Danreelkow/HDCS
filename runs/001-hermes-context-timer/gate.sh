@@ -40,6 +40,13 @@ cmp -s "$SRC/x" "$DST/x" || fail "type-change: DST/x content mismatch"
 rm -rf "$SRC" "$DST"; mkdir -p "$SRC/x"; printf 'inner\n' > "$SRC/x/y"; mkdir -p "$DST"; printf 'was-file\n' > "$DST/x"
 TC2OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "type-change inverse exited nonzero: $TC2OUT"
 [ -d "$DST/x" ] && cmp -s "$SRC/x/y" "$DST/x/y" || fail "type-change inverse: DST file x not converted to dir with matching content"
+# symlink-swap fixture (run 018 S4 finding): DST symlink must be REPLACED, never followed
+rm -rf "$SRC" "$DST" /tmp/hdcs-gate-outside; mkdir -p "$SRC"; printf 'real\n' > "$SRC/x"
+mkdir -p "$DST"; printf 'outside-victim\n' > /tmp/hdcs-gate-outside; ln -s /tmp/hdcs-gate-outside "$DST/x"
+SSOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "symlink-swap run exited nonzero: $SSOUT"
+[ -f "$DST/x" ] && [ ! -L "$DST/x" ] || fail "symlink-swap: DST/x still a symlink (must be replaced by the real file)"
+cmp -s "$SRC/x" "$DST/x" || fail "symlink-swap: DST/x content mismatch"
+grep -q outside-victim /tmp/hdcs-gate-outside || fail "symlink-swap: cp FOLLOWED the symlink and clobbered a file outside DST"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

@@ -1,14 +1,63 @@
 # hermes-context sync
 
-One-way mirror of the hermes-context register from the host mount into the
-workspace. The source path is /opt/data/workspace/hermes-context/ and is
-treated as read-only w.r.t. sync; nothing ever writes back to the host mount.
+Mirrors the contents of `/opt/data/workspace/hermes-context/` (read-only host
+mount) into `/workspace/hermes-context/` (user workspace). Stale files and
+subtrees in the destination are deleted at every depth so DST always equals
+SRC (contents + recursive structure + symlinks, including dangling symlinks;
+metadata/timestamps are not compared).
 
-The destination default is /workspace/hermes-context/. The sync is an exact
-recursive mirror: contents, directory structure, and symlinks are mirrored;
-stale entries and stale subtrees are deleted at any depth so the destination
-end state always equals the source end state. Metadata such as timestamps and
-hardlinks is deliberately not compared or preserved (see KNOWN_LIMITATIONS).
+## Standalone use
 
-## Install (user-level only, no root)
+    ~/.local/bin/sync-hermes-context.sh
 
+Override paths via environment or flags:
+
+    HERMES_CONTEXT_SRC=/path/src HERMES_CONTEXT_DST=/path/dst \
+      ~/.local/bin/sync-hermes-context.sh
+    ~/.local/bin/sync-hermes-context.sh --src=/path/src --dst=/path/dst
+
+## Dry-run
+
+    ~/.local/bin/sync-hermes-context.sh --dry-run
+
+Prints planned actions only. Performs ZERO writes of any kind — no staging
+directory, no log entry, no change to the destination.
+
+## Install entrypoint
+
+    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+
+## Enable the timer (systemd user units)
+
+    mkdir -p ~/.config/systemd/user
+    cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable --now hermes-context.timer
+
+The timer fires every 6 hours (`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`)
+and runs `%h/.local/bin/sync-hermes-context.sh` (Type=oneshot).
+
+## Log
+
+Sync activity is appended to `~/.cache/hermes-context/sync.log` (outside the
+mirrored tree). Logging is skipped entirely in dry-run mode.
+
+## Safety
+
+- Source and destination identity/ancestor/symlink-into-source conflicts are
+  refused before any destructive operation.
+- The destination is never touched until a staged copy has been verified
+  against the source (content compare); verification failure exits nonzero.
+- The script refuses to run if the destination boundary-contains its own
+  concrete owned paths (log parent, entrypoint dir) or if the staging base
+  (TMPDIR included) resolves inside SRC or DST — refused before any staging
+  directory is created, so the refusal performs zero writes.
+
+## KNOWN_LIMITATIONS
+
+- Filenames containing newline characters are outside the verified corpus;
+  behavior with such names is unspecified.
+- Exotic environment combinations beyond the concrete-path guard (e.g.
+  unusual TMPDIR layouts, symlinked cache/entrypoint parents resolving in
+  unexpected places) are not exhaustively guarded; such combos are recorded
+  here as known limitations and are non-blocking.

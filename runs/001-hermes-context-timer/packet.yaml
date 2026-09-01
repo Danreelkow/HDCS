@@ -1,39 +1,42 @@
-reg: {domain: cs-programming, canon: shell/systemd ops vocabulary — rsync flags, systemctl --user, unit directives, realpath, exit codes}
+reg: {domain: cs-programming, canon: shell/systemd ops — rsync/cp flags, systemctl --user unit directives, mktemp/realpath, idempotency & mirror semantics}
 intent: >
-  deliver artifact dir with sync-hermes-context.sh (rsync primary, cp/tar fallback,
-  --dry-run zero-write, idempotent, one-line summary log, A11/A12/A13/A14 guards,
-  A9-class self-verification) + hermes-context.service/.timer (systemctl --user,
-  OnCalendar every 6h) + README (install, source-change, dry-run test, A7 sync-strategy
-  wording); standing one-way mirror SRC -> DST per A5/A9.
+  deliver artifact dir {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
+  implementing standing host->workspace one-way mirror of SRC -> DST;
+  dual sync path (rsync --delete | cp -a + recursive reconcile) converging to identical end state;
+  systemd user timer 6h; script standalone-capable; self-verification enforces A9 mirror class with nonzero exit on mismatch
 must_keep:
   - "source path is /opt/data/workspace/hermes-context/"
   - "dry-run mode that performs no writes"
   - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical SRC/DST? -> A: /opt/data/workspace/hermes-context/ -> /workspace/hermes-context/ (A1)"
-  - "Q2: sync direction? -> A: one-way host -> workspace, no writeback (A2)"
-  - "Q3: scheduler? -> A: user timer, standalone fallback (A3)"
-  - "Q4: rsync absent? -> A: cp -a/tar fallback, contents-sync, no nesting (A4)"
-  - "Q5: stale files? -> A: exact recursive mirror, delete, both paths converge (A5/A7)"
-  - "Q6: dry-run writes? -> A: zero writes incl. logs; DST byte-identical (A6)"
-  - "Q7: log/entrypoint placement? -> A: outside DST always (A8)"
-  - "Q8: mirror equivalence class? -> A: contents+structure+symlinks only (A9)"
-  - "Q9: severity bar? -> A: A10; destructive-misconfig guards A11/A12; verified-copy A13; env-class A14"
+  - "Q1: canonical source/destination? -> A: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (exists, holds INDEX.md, agents/, config/) [A1]"
+  - "Q2: sync direction? -> A: host -> workspace one-way; no writes back to host mount [A2]"
+  - "Q3: scheduler level? -> A: systemd user timer (systemctl --user), every 6h; script also standalone-capable [A3]"
+  - "Q4: rsync availability? -> A: optional; fallback cp -a + reconcile, contents-sync (src/ -> dst/), no nesting [A4]"
+  - "Q5: mirror semantics? -> A: exact mirror, stale deleted recursively, both paths converge [A5,A7]"
+  - "Q6: dry-run purity? -> A: zero writes incl. log; DST byte-identical post-dry-run [A6]"
+  - "Q7: log/install placement? -> A: log outside DST always (~/.cache); entrypoints outside mirrored tree [A8]"
+  - "Q8: equivalence class of mirror? -> A: contents + structure + symlinks only; metadata/timestamps/hardlinks out of scope [A9]"
+  - "Q9: severity bar? -> A: fail on normal-operation defects only; exotic env -> +open [A10]"
+  - "Q10: destructive-misconfig guard? -> A: SRC==DST guard; never rm -rf DST before verified copy [A11,A12]"
+  - "Q11: verified copy definition? -> A: content-compared staging per A9 class; stage->verify->touch DST order is law [A13]"
+  - "Q12: env-var interaction class? -> A: generalized concrete-owned-path guard [A14], boundary-aware, no over-broad walls [A15]"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
 handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
 constraints:
-  - "MUST_KEEP verbatim: source path /opt/data/workspace/hermes-context/"
-  - "MUST_KEEP: dry-run performs no writes (zero-write, incl. logs, A6)"
-  - "MUST_KEEP: systemd user units, no root (A3)"
-  - "A5/A7/A9: recursive exact mirror, both sync paths, self-verify nonzero on mismatch"
-  - "A8: log + entrypoints outside mirrored tree"
-  - "A11/A12/A13: guard realpath identity; stage -> verify -> touch DST; no rm -rf pre-verified-copy"
-  - "A14: refuse DST colliding with script-owned paths (log/stage/entrypoints/TMPDIR); env theme closed"
-  - "A10: FAIL bar = normal-operation defects only; exotics -> KNOWN_LIMITATIONS in +open"
+  - "SRC=/opt/data/workspace/hermes-context/ verbatim as default; DST default /workspace/hermes-context/"
+  - "--dry-run: zero writes, DST byte-identical [A6]"
+  - "user-level systemd, no root [A3]"
+  - "mirror = contents+structure+symlinks; verify exits nonzero on mismatch [A9]"
+  - "realpath identity/ancestor guards before any destructive op [A11,A12]"
+  - "stage -> verify -> touch DST ordering enforced [A13]"
+  - "concrete-owned-path guard, boundary-aware [A14,A15]"
+  - "no_resurrect: S4 verdicts A5,A6,A7,A8 closed; judge cites A14/A15 for env class, not re-derive"
 paths:
-  - /workspace/hdcs/artifact/sync-hermes-context.sh
-  - /workspace/hdcs/artifact/hermes-context.service
-  - /workspace/hdcs/artifact/hermes-context.timer
-  - /workspace/hdcs/artifact/README.md
-  - /workspace/hdcs/artifact/context.hcdl
-budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+  - /opt/data/workspace/hermes-context/          # SRC, must_keep
+  - /workspace/hermes-context/                   # DST
+  - "~/.local/bin/sync-hermes-context.sh"        # entrypoint, outside mirrored tree
+  - "~/.config/systemd/user/hermes-context.service"
+  - "~/.config/systemd/user/hermes-context.timer"
+  - "~/.cache/hermes-context/sync.log"           # log, outside DST always
+budgets: {tokens: 12000|estimate, lines: 60, fix_cycles: 2, questions: 2}
