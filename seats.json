@@ -9,10 +9,10 @@
   "s5_fallback": "z-ai/glm-5.3-flash",
   "doctrine": "cheapest seat default -> mechanical gate -> on gate fail escalate one tier -> ladder exhausted = human",
   "aux": {
-    "titler": "amazon/nova-micro-v1",
-    "session_context": "amazon/nova-micro-v1",
+    "titler": "nvidia/nemotron-3.5-lightning:free",
+    "session_context": "thinkingmachines/inkling-small:free",
     "compaction_summarizer": "z-ai/glm-5.3-flash",
-    "note": "2026-09-01: aux split — titling/distills are mechanical -> nova (cheapest clean bench); compaction stays glm (lossless long-context condensation, quality loss compounds). Supersedes the 2026-08-30 all-deepseek aux standard."
+    "note": "2026-09-01 v2 (operator correction): aux shops the WHOLE openrouter catalog, not the seat-bench whitelist — :free tier at $0 for mechanical text work; distinct vendors per seat for rate-limit resilience. Nova is EXCELLENT at tool use and stays at s3_tool/s5 — it is not a text-audit model. Compaction stays glm (lossless condensation bar)."
   },
   "excluded": {
     "qwen/qwen3-coder-next": "user-excluded; run-to-run variance (0/5 vs 4/6 on identical brief)",
