@@ -1,105 +1,151 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way SRC->DST mirror of the hermes context tree.
-# stage -> verify -> destroy/reconcile DST; source never modified.
-# Guards: identity / ancestor / DST-symlink-into-SRC (exit 2, zero writes).
-# --dry-run: plan only, zero filesystem writes, exit 0.
+# sync-hermes-context.sh — one-way mirror SRC -> DST (A2), rsync primary,
+# cp -a fallback, stage -> verify -> touch-DST (A13). Standalone-capable.
+# A17: env parameterization is the contract; defaults are the production values.
 set -euo pipefail
 
-usage() {
-  cat <<'EOF'
-Usage: sync-hermes-context.sh [--dry-run|-h|--help]
-Environment:
-  HERMES_CONTEXT_SRC      source tree      (default /opt/data/workspace/hermes-context/)
-  HERMES_CONTEXT_DST      destination tree (default /workspace/hermes-context/)
-  HERMES_CONTEXT_LOG_DIR  log directory    (default ~/.cache/hermes-context/)
-Modes:
-  (none)      real run: stage SRC, verify, reconcile DST, append one log line
-  --dry-run   compute and print plan only; writes nothing anywhere, exit 0
-EOF
-}
-
-die() { echo "sync-hermes-context: $1" >&2; exit "${2:-1}"; }
-
-case "${1:-}" in
-  -h|--help) usage; exit 0 ;;
-  "") ;;
-  --dry-run) DRY=1 ;;
-  *) usage >&2; exit 1 ;;
-esac
-DRY=${DRY:-0}
+# ---------- argument / env parse ----------
+DRY_RUN="${HERMES_CTX_DRY_RUN:-${DRY_RUN:-0}}"
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY_RUN=1 ;;
+    -h|--help) echo "usage: sync-hermes-context.sh [--dry-run]"; exit 0 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
+  esac
+done
 
 SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
 DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-LOG_DIR="${HERMES_CONTEXT_LOG_DIR:-$HOME/.cache/hermes-context}"
-LOG_FILE="$LOG_DIR/hermes-context.log"
+LOG="${HERMES_CTX_LOG:-$HOME/.cache/hermes-context/sync.log}"
 
-# --- guards (before ANY write; refusal exits produce zero writes) -------------
-[ -n "$SRC" ] && [ -n "$DST" ] || die "HERMES_CONTEXT_SRC/DST required" 2
-[ -d "$SRC" ] || die "source does not exist or is not a directory: $SRC" 2
+guard() { echo "REFUSAL: $*" >&2; exit 2; }
 
-RS=$(realpath -e "$SRC") || die "cannot resolve source: $SRC" 2
-# component-boundary ancestor check, not string-prefix
-RD=$(realpath -m "$DST")
-if [ "$RS" = "$RD" ]; then die "SRC == DST refused" 2; fi
-case "$RD/" in "$RS"/*) die "DST is inside SRC refused" 2 ;; esac
-case "$RS/" in "$RD"/*) die "SRC is inside DST refused" 2 ;; esac
-# DST symlink resolving into SRC
-if [ -L "$DST" ]; then
-  RL=$(realpath "$DST") || die "cannot resolve DST symlink" 2
-  [ "$RL" = "$RS" ] && die "DST symlink -> SRC refused" 2
-  case "$RL/" in "$RS"/*) die "DST symlink resolves inside SRC refused" 2 ;; esac
+# ---------- guards first (A12/A18): precede every destructive op ----------
+[ -d "$SRC" ] || guard "SRC nonexistent or not a directory: $SRC"
+SRC_REAL="$(realpath -e "$SRC")" || guard "cannot resolve SRC: $SRC"
+
+if [ -e "$DST" ] && [ ! -d "$DST" ]; then
+  guard "DST exists and is not a directory: $DST"
 fi
-# A14/A8: refuse a script-owned log path (HERMES_CONTEXT_LOG_DIR) inside SRC or DST
-HL=$(realpath -m "$LOG_DIR")
-[ "$HL" = "$RS" ] && die "log dir inside SRC refused (A8)" 2
-case "$HL/" in "$RS"/*) die "log dir inside SRC refused (A8)" 2 ;; esac
-[ "$HL" = "$RD" ] && die "log dir inside DST refused (A8)" 2
-case "$HL/" in "$RD"/*) die "log dir inside DST refused (A8)" 2 ;; esac
-LOG_FILE="$HL/hermes-context.log"
+DST_REAL="$(realpath -m "$DST")"
 
-if [ "$DRY" = 1 ]; then
-  echo "DRY-RUN plan for $RS -> $RD:"
+[ "$SRC_REAL" != "$DST_REAL" ] || guard "identity paths (realpath): $SRC_REAL"
+case "$DST_REAL/" in "$SRC_REAL"/*) guard "DST inside SRC (ancestry): $DST_REAL" ;; esac
+case "$SRC_REAL/" in "$DST_REAL"/*) guard "SRC inside DST (ancestry): $SRC_REAL" ;; esac
+
+# log-path guard (A8): log must live outside DST and outside SRC, always
+LOG_REAL="$(realpath -m "$LOG")"
+case "$LOG_REAL" in
+  "$DST_REAL"|"$DST_REAL"/*) guard "log path inside DST (A8): $LOG_REAL" ;;
+  "$SRC_REAL"|"$SRC_REAL"/*) guard "log path inside SRC (A2 no write-back): $LOG_REAL" ;;
+esac
+
+# helper: is a staging base admissible? concrete, real, and NOT the DST/SRC
+# itself nor anywhere inside them (A8: staging parent must be outside owned paths)
+base_ok() {
+  local b
+  b="$(realpath -m "$1" 2>/dev/null)" || return 1
+  [ -d "$b" ] || return 1
+  case "$b" in
+    "$DST_REAL"|"$DST_REAL"/*) return 1 ;;
+    "$SRC_REAL"|"$SRC_REAL"/*) return 1 ;;
+  esac
+  return 0
+}
+
+if [ "$DRY_RUN" = "1" ]; then
+  # ---------- dry-run branch (A6/A16): zero writes to every target, incl. logs ----------
   if command -v rsync >/dev/null 2>&1; then
-    echo "  stage: rsync -a --delete $RS/ <stage>/"
+    echo "DRY-RUN plan (rsync): mirror $SRC_REAL/ -> $DST_REAL/ (recursive, delete stale, symlinks preserved)"
+    rsync -rlptgoD --delete --dry-run --itemize-changes "$SRC_REAL/" "$DST_REAL/"
   else
-    echo "  stage: cp -a $RS/. <stage>/"
+    echo "DRY-RUN plan (rsync absent; cp -a fallback):"
+    echo "  would copy $SRC_REAL/. -> staging -> verify -> $DST_REAL/"
+    echo "  would delete stale DST entries not present in SRC"
+    find "$SRC_REAL" -mindepth 1 | sed "s|^$SRC_REAL|  would create/update: $DST_REAL|"
   fi
-  echo "  verify: diff -r --no-dereference SRC vs stage"
-  echo "  reconcile: replace $RD with verified stage (stale subtrees deleted)"
-  echo "  log: one line to $LOG_FILE"
+  echo "DRY-RUN complete: nothing written (no DST, no log, no temp files)."
   exit 0
 fi
 
-# --- real run: stage ----------------------------------------------------------
-STAGE=$(mktemp -d /tmp/hermes-context-stage.XXXXXX) || die "mktemp failed" 1
+# ---------- live path (A13): stage -> verify -> touch-DST ----------
+# staging dir: concrete owned path, parent outside DST and SRC, TMPDIR fallback
+# (A8/A14/A15). Candidate chain: TMPDIR -> /tmp -> parent of DST (never inside
+# DST or SRC; if /tmp IS the DST, e.g. DST=/tmp, we must not stage there).
+TBASE=""
+for cand in "${TMPDIR:-}" "/tmp" "$(dirname "$DST_REAL")"; do
+  [ -n "$cand" ] || continue
+  if base_ok "$cand"; then
+    TBASE="$(realpath -m "$cand")"
+    break
+  fi
+done
+[ -n "$TBASE" ] || guard "no admissible staging base outside DST/SRC (A8)"
+mkdir -p "$TBASE" 2>/dev/null || true
+STAGE="$(mktemp -d "$TBASE/hermes-sync.XXXXXX")"
+# post-create re-check: parent of STAGE must not be inside DST/SRC (A8 boundary)
+STAGE_PARENT="$(dirname "$(realpath "$STAGE")")"
+case "$STAGE_PARENT" in
+  "$DST_REAL"|"$DST_REAL"/*|"$SRC_REAL"|"$SRC_REAL"/*)
+    rm -rf "$STAGE"; guard "staging parent inside DST/SRC (A8): $STAGE_PARENT" ;;
+esac
 cleanup() { rm -rf "$STAGE"; }
 trap cleanup EXIT
 
+TRANSPORT="rsync"
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --delete "$RS/" "$STAGE/" || { echo "staging failed" >&2; exit 1; }
+  # stage via rsync (A4): src/ -> dst trailing-slash semantics
+  rsync -a --delete "$SRC_REAL/" "$STAGE/"
 else
-  # fallback: fresh temp dir + cp -a (stale-subtree deletion is inherent: stage
-  # is empty, then DST is fully replaced by the verified stage after verify)
-  cp -a "$RS/." "$STAGE/" || { echo "staging failed" >&2; exit 1; }
+  TRANSPORT="cp -a fallback"
+  mkdir -p "$STAGE"
+  cp -a "$SRC_REAL/." "$STAGE/"
+  # prune stale staging entries: anything in stage not in SRC must go (A5)
+  while IFS= read -r line; do
+    case "$line" in
+      "Only in "*": "*)
+        name="${line##*: }"
+        dir="${line#Only in }"; dir="${dir%%: *}"
+        rm -rf -- "${dir:?}/${name:?}"
+        ;;
+    esac
+  done < <(diff -rq --no-dereference "$SRC_REAL" "$STAGE" 2>/dev/null || true)
 fi
 
-# --- self-verify at A9 class (contents + structure + symlinks) ----------------
-if ! diff -r --no-dereference -q "$RS" "$STAGE" >/dev/null 2>&1; then
-  echo "self-verify failed: staged copy diverges from SRC; DST untouched" >&2
+# ---------- verify (A11): abort before touching DST on any mismatch ----------
+if ! diff -rq --no-dereference "$SRC_REAL" "$STAGE" >/dev/null 2>&1; then
+  echo "VERIFY FAILED: staged mirror does not equal SRC; aborting, DST untouched." >&2
   exit 1
 fi
 
-# --- only after verify passes: destroy/reconcile DST --------------------------
-if [ -e "$RD" ] || [ -L "$RD" ]; then
-  rm -rf "$RD" || { echo "DST teardown failed; stage preserved: $STAGE" >&2; exit 1; }
+# count changes vs current DST (before push) for the summary
+CHANGES=0
+if [ -d "$DST_REAL" ]; then
+  CHANGES="$(diff -rq --no-dereference "$STAGE" "$DST_REAL" 2>/dev/null | wc -l || true)"
+else
+  CHANGES="new"
 fi
-mkdir -p "$(dirname "$RD")"
-mv "$STAGE" "$RD" || { echo "DST promote failed" >&2; exit 1; }
-trap - EXIT
 
-# --- log (real runs only; never under DST) ------------------------------------
-mkdir -p "$HL"
-echo "$(date -Is) synced $RS -> $RD (rsync=$(command -v rsync >/dev/null 2>&1 && echo yes || echo no))" >> "$LOG_FILE"
+# ---------- touch-DST ----------
+if [ "$TRANSPORT" = "rsync" ]; then
+  rsync -a --delete "$STAGE/" "$DST_REAL/"
+else
+  mkdir -p "$DST_REAL"
+  find "$DST_REAL" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+  cp -a "$STAGE/." "$DST_REAL/"
+fi
 
+# final sanity: DST now mirrors SRC (A5/A9)
+if ! diff -rq --no-dereference "$SRC_REAL" "$DST_REAL" >/dev/null 2>&1; then
+  echo "POST-PUSH VERIFY FAILED: DST does not mirror SRC." >&2
+  exit 1
+fi
+
+# ---------- one-line summary to LOG (dry-run never reaches here) ----------
+mkdir -p "$(dirname "$LOG_REAL")"
+printf '%s transport=%s status=OK changes=%s src=%s dst=%s\n' \
+  "$(date -Is)" "$TRANSPORT" "$CHANGES" "$SRC_REAL" "$DST_REAL" >> "$LOG_REAL"
+
+echo "sync complete: transport=$TRANSPORT changes=$CHANGES"
 exit 0
 

@@ -1,17 +1,14 @@
-A1: SRC := /opt/data/workspace/hermes-context/, DST := /workspace/hermes-context/
-A2: ∀ sync -> one-way SRC->DST, no writeback
-A3: schedule := systemctl --user timer 6h; script standalone when systemd absent
-A4: rsync-optional; fallback cp -a/tar pipe; sync CONTENTS src/ -> dst, no nesting
-A5_mirror: ∀ path -> DST end state == SRC end state, recursive
-A6_dryrun_purity: --dry-run -> zero writes ∀ target incl. logs; DST stays nonexistent (Q16)
-A7: fallback reconcile recursive, stale subtrees deleted ∀ depth
-A8_placement: log & entrypoints outside mirrored tree (log ~/.cache, entrypoints ~/.local/bin | /workspace/hdcs/bin)
-A9_verify_class: equivalence := contents+structure+symlinks; metadata/timestamps/hardlinks ∉ scope
-A10: severity bar — FAIL ∀ normal-operation defects; adversarial -> KNOWN_LIMITATIONS (+open)
-A11: SRC==DST rejected; source survival outranks freshness; stage+verify precede ∀ DST destruction
-A12: guards := realpath identity/ancestor/symlink-into-SRC, both paths, pre-destruction
-A13: verified := content-compared staging copy (A9 class); order stage->verify->touch DST; self-verify exit≠0 on staging failure
-A14: env-interaction guard := protected-path on script-owned concrete paths; adversarial residue -> KNOWN_LIMITATIONS
-A15: guard breadth := concrete instantiated paths, component-boundary comparison, ¬string-prefix
-A17: HERMES_CONTEXT_SRC/DST env override = mandated gate contract; deployed paths production values only
-open: []
+A1: SRC := /opt/data/workspace/hermes-context/ ; DST := /workspace/hermes-context/
+A2: sync := one-way SRC->DST, ¬write-back
+A3: scheduler := systemctl --user timer (OnUnitActiveSec=6h); script standalone-capable
+A4: transport := rsync primary; fallback cp -a/tar-pipe; sync src/ -> dst (trailing-slash semantics)
+A5_mirror: ∀ run -> DST end state == mirror(SRC), recursive; stale entries deleted
+A6: dry-run -> zero writes ∀ target incl. logs; DST byte-identical or nonexistent after
+A7: mirror class := contents+structure+symlinks; ¬metadata/timestamps/hardlinks
+A8: owned paths concrete, parent ∉ DST; TMPDIR fallback
+A9: convergence ∀ depth, both transports
+A10: severity bar: normal-operation defect -> FAIL; exotic -> KNOWN_LIMITATIONS
+A11: source survival > freshness; A12: refuse degenerate/identity paths (realpath identity/ancestry)
+A13: order := stage -> verify -> touch-DST
+A14/A15: gate-not-wall; A16: dry-run purity; A17: env parameterization is contract, defaults = production values; A18: guards precede ∀ destructive op
+open: ∅

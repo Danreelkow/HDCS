@@ -1,39 +1,43 @@
-# Build a Hermes Context Sync Tool
+What we're building: a script that keeps a folder of Hermes context files automatically copied from one location to another, plus the pieces that run it on a schedule.
 
-## What we're making
-A folder with four files: a shell script called `sync-hermes-context.sh`, two systemd service files (`hermes-context.service` and `hermes-context.timer`), and a README explaining how it all works.
+**Folders involved**
 
-## What the script does
-It copies files one way only — from the host machine into the workspace. The source is `/opt/data/workspace/hermes-context/` and the destination is `/workspace/hermes-context/`. It copies the *contents* of the source folder into the destination, so you never end up with the source folder nested inside the destination. Nothing ever gets written back to the host.
+- The source of truth is `/opt/data/workspace/hermes-context/` on the host.
+- The copy lives at `/workspace/hermes-context/`.
+- The script and docs go in `/workspace/hdcs/hermes-sync/`, the script itself into `~/.local/bin/`, and two small systemd files into `~/.config/systemd/user/`.
+- A simple one-line log of each run goes to `~/.cache/hermes-context/sync.log`.
 
-The main tool for copying is `rsync` with archive mode and delete enabled, so the destination ends up exactly matching the source. If `rsync` isn't installed, the script detects that and falls back to `cp -a` or a tar pipe instead.
+**How it works**
 
-## Key behaviors
-- **Dry-run mode:** a `--dry-run` flag shows what would happen without writing anything. This must hold in every code path, including the fallback copy method.
-- **Idempotent:** running it once or a hundred times gives the same result — the destination always converges to match the source.
-- **Simple logging:** each real run prints a one-line summary.
-- **Standalone:** the script works on its own, so it can also be called from cron or an installer on systems without systemd.
+- Copying goes one way only: host to workspace. Nothing is ever written back to the source.
+- The copy is a true mirror: if a file disappears or changes at the source, the copy matches — old files are deleted. The tool of choice is rsync with its delete option; if rsync isn't installed, the script falls back to plain copying (using `cp -a`, with a tar-pipe as a last resort).
+- "Mirror" means files, folder structure, and symbolic links match exactly. It does not promise matching timestamps, permissions metadata, or hardlinks.
+- The script is idempotent: running it again changes nothing if things already match, and it prints one short summary line per run.
 
-## Scheduling
-A systemd *user* timer runs the sync every six hours. These are user-level units installed under `~/.config/systemd/user/` and managed with `systemctl --user` — no root access needed, and no `User=` line in the unit files.
+**Scheduling**
 
-## Answers settled during planning
-- Source path confirmed as `/opt/data/workspace/hermes-context/` (the host-side Hermes context mount).
-- Destination `/workspace/hermes-context/` already exists and contains `INDEX.md`, an `agents/` folder, and a `config/` folder.
-- Sync direction is one-way, host to workspace; no write-back.
-- Privilege model is user-level systemd, no root.
-- If systemd isn't available, the script runs standalone.
-- If rsync is missing, fall back to `cp -a` or a tar pipe.
-- Copy granularity: contents of source into destination, never nested.
-- No remaining questions — all requirements are covered.
+- A systemd user timer runs the sync every six hours using `systemctl --user`, so no root or admin rights are needed.
+- The script also works fine when run by hand, on its own.
 
-## How the work proceeds
-The build runs in four phases: plan, build, verify, deliver. A separate verifier checks the result, and up to two fix cycles are allowed if something fails. The final gate is either READY or NOT READY.
+**Dry-run mode**
 
-## Deliverables (exact locations)
-- `/workspace/hermes-context-artifact/sync-hermes-context.sh`
-- `/workspace/hermes-context-artifact/hermes-context.service`
-- `/workspace/hermes-context-artifact/hermes-context.timer`
-- `/workspace/hermes-context-artifact/README.md`
+- There's a dry-run option that performs the entire check but writes absolutely nothing — not even log entries. After a dry run, the destination is either byte-identical to before or didn't exist and still doesn't.
 
-The output should stay around 60 lines, with at most two fix cycles and at most two clarifying questions.
+**Safety guards**
+
+- Before any destructive operation, the script checks that the source and destination are genuinely different folders — it refuses to run if they're the same path, one contains the other, or the paths are degenerate (empty, root, etc.). It uses real resolved paths for this comparison, not just the typed strings.
+- Deletions happen safely: changes are staged first, verified, and only then applied to the destination — the destination is never touched until the new state is confirmed good.
+- Scratch/temp files are created only in concrete, owned locations outside the destination folder, with a fallback to the system temp directory if needed.
+- Protecting the source matters more than having the freshest copy: if anything looks risky, the source is left untouched.
+
+**Environment overrides**
+
+- The paths are set as sensible defaults, but they can be overridden with environment variables — that's the intended design, not a loophole. Deployed default paths don't lock the script down.
+
+**Quality bar**
+
+- Bugs that would appear in normal everyday use must be fixed before delivery. Truly exotic edge cases can be documented in a "known limitations" section instead.
+
+**Process**
+
+- Work proceeds in phases: plan, build, verify (by someone other than the builder), deliver. If verification fails, there are at most two fix-and-recheck rounds before we stop and report honestly what's done, what was decided, and what's still open.

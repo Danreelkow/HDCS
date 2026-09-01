@@ -1,37 +1,55 @@
-### Hermes Context Sync Setup
+### Sync Hermes Context Directory
 
 **Objective:**
-Create an artifact directory that includes a script, service, timer, and README to synchronize the contents of a source directory to a workspace directory.
+To deliver a standing synchronization of the Hermes context directory using rsync and systemd user units, ensuring that the destination directory mirrors the source directory exactly.
 
 **Details:**
+
 - The source directory is `/opt/data/workspace/hermes-context/`.
 - The destination directory is `/workspace/hermes-context/`.
-- The synchronization is one-way from the host to the workspace, with no write-back to the source directory.
-- Use `rsync` with the `-a --delete` flags for the primary sync method. If `rsync` is not available, use `cp -a` or a tar pipe as a fallback.
-- Perform a dry-run mode that does not make any changes.
-- The systemd units will be user-level, meaning no root privileges are required.
-- The script must run independently if systemd is not available.
-- Ensure that the contents of the source directory are copied to the destination directory without nesting the source directory inside the destination.
+- The synchronization will use rsync as the primary tool, with `cp -a` as a fallback.
+- A dry-run mode is available that performs no actual writes.
+- Systemd user units will manage the synchronization schedule without requiring root access.
+- The synchronization will be idempotent and log a one-line summary after each run.
+- The process includes a verification step before finalizing the destination directory.
+- The synchronization ensures that the source directory's contents, structure, and symlinks are mirrored exactly in the destination directory, excluding metadata, timestamps, and hardlinks.
+- The systemd timer will run the synchronization every 6 hours.
+- The process guards against destructive operations by ensuring that source and destination paths are distinct and verifying the integrity of the synchronization.
 
-**Resolved Points:**
-- The source path is `/opt/data/workspace/hermes-context/`.
-- The destination path is `/workspace/hermes-context/`.
-- The sync direction is one-way from the host to the workspace.
-- The privilege model uses user-level systemd units.
-- If systemd is not available, the script must run independently.
-- If `rsync` is not available, use `cp -a` or a tar pipe.
-- The source contents will be copied directly to the destination without nesting.
+**Key Points:**
+
+- Source path: `/opt/data/workspace/hermes-context/`
+- Dry-run mode: performs no writes
+- Systemd user units: no root access required
+- Synchronization direction: one-way from host to workspace
+- Scheduler: systemctl --user timer
+- Mirror semantics: exact mirror, including deletion of stale files
+- Dry-run scope: no writes, including logs
+- Equivalence class: contents, structure, and symlinks only
+- Destructive-op guards: source and destination paths are distinct, verification step, and refusal of degenerate paths
+- Owned-path placement: concrete owned paths outside the destination directory
+- Environment override: no restrictions, defaults are production values
 
 **Workflow:**
-The workflow consists of planning, building, verifying, and delivering the artifact. The builders are dynamic, and the verifier is decorrelated. The artifact is ready after two fix cycles.
+
+- The workflow includes planning, building, verifying, and delivering phases.
+- The builders are dynamic, and the verifier is decorrelated.
+- The gate status is either READY or NOT_READY.
+- The maximum fix cycles allowed are 2.
 
 **Paths:**
-- `/workspace/hermes-context-artifact/sync-hermes-context.sh`
-- `/workspace/hermes-context-artifact/hermes-context.service`
-- `/workspace/hermes-context-artifact/hermes-context.timer`
-- `/workspace/hermes-context-artifact/README.md`
+
+- `/workspace/hdcs/hermes-sync/`
+- `/opt/data/workspace/hermes-context/`
+- `/workspace/hermes-context/`
+- `~/.config/systemd/user/hermes-context.service`
+- `~/.config/systemd/user/hermes-context.timer`
+- `~/.local/bin/`
+- `~/.cache/hermes-context/sync.log`
 
 **Budgets:**
-- Estimated tokens: 60
-- Maximum fix cycles: 2
+
+- Tokens: estimated
+- Lines: 60
+- Fix cycles: 2
 - Questions: 2
