@@ -1,41 +1,72 @@
-# hermes-context sync
+# hermes-context-sync
 
-## Purpose
+One-way mirror of the hermes context directory into the workspace:
 
-Keeps the hermes context directory in the workspace (`/workspace/hermes-context/`)
-in sync with the read-only host mount (`/opt/data/workspace/hermes-context/`).
-Sync is **one-way**: host → workspace. The source is never written to.
+- **SRC** (read-only, never written to): `/opt/data/workspace/hermes-context/`
+- **DST** (written, mirrored exactly): `/workspace/hermes-context/`
 
-## Defaults and overrides
+The end state of DST always matches SRC, including deletions (mirror semantics).
 
-- Source: `/opt/data/workspace/hermes-context/` (override: `HERMES_CONTEXT_SRC`)
-- Destination: `/workspace/hermes-context/` (override: `HERMES_CONTEXT_DST`)
-- Log file: `/tmp/hermes-context-sync.log` (override: `HERMES_CONTEXT_LOG`)
+## Configuration
 
-Tool selection: `rsync` if available, otherwise `cp -a`, otherwise a `tar` pipe.
-Fallbacks never delete files (the script, units, and README live inside the
-destination and are protected).
+Override via environment variables:
 
-## Dry-run
+- `HERMES_CONTEXT_SRC` — source directory (default `/opt/data/workspace/hermes-context/`)
+- `HERMES_CONTEXT_DST` — destination directory (default `/workspace/hermes-context/`)
+- `HERMES_CONTEXT_LOG` — optional log file path (default empty = no logging)
 
-Preview changes without writing anything:
+## Usage
 
-    /workspace/hermes-context/sync-hermes-context.sh --dry-run
+Standalone (no systemd, no rsync required):
 
-## Standalone usage
+    ./sync-hermes-context.sh
 
-Run a real sync once:
+### Flags
 
-    /workspace/hermes-context/sync-hermes-context.sh
+- `--dry-run` — print the planned sync (itemized plan or rsync dry-run output) to
+  stdout **only**. Zero writes to DST and zero writes to the log, even if
+  `HERMES_CONTEXT_LOG` points inside DST. Never creates DST or the log file.
+- `--log FILE` — override the log path for this invocation (real runs only).
 
-Each run prints exactly one summary line:
-`mode=<sync|dry-run> tool=<rsync|cp|tar> dir=host->workspace transferred=N skipped=M status=<ok|error>`
+## Sync strategy
 
-## Install as systemd user units (no root required)
+1. **Primary**: `rsync -a --delete SRC/ DST/` (used when `rsync` is on PATH).
+2. **Fallback**: if `rsync` is unavailable:
+   - `mkdir -p DST`
+   - `cp -a SRC/. DST/`
+   - reconciliation pass: delete any top-level entry in DST absent from SRC.
 
-    cp /workspace/hermes-context/hermes-context.service /workspace/hermes-context/hermes-context.timer ~/.config/systemd/user/
+Both paths produce an identical end state (verified: same
+`find "$DST" -printf '%P %y\n' | sort` output when GNU find is available; the
+script itself avoids GNU extensions and works with BusyBox find/coreutils).
+
+## Logging
+
+A single line (timestamp, mode, src, dst) is appended to the log file on real
+runs only, and only if a log path is configured. Dry runs never touch the log.
+
+## systemd user units
+
+Install the script (then make executable):
+
+    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+
+(Or edit `hermes-context.service` to use an absolute path to the script.)
+
+Copy `hermes-context.service` and `hermes-context.timer` to
+`~/.config/systemd/user/`, then:
+
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
 
-The timer fires every 6 hours (`OnCalendar=*-*-* 00/6:00:00`) and is
-`Persistent=true`, so a missed run (e.g. machine off) runs at next boot.
+The timer runs every 6 hours (`OnCalendar=*-*-* 00/6:00:00`) with
+`Persistent=true` to catch missed runs. Units are user units — no root
+required, no `User=` directive.
+
+## Safety
+
+- SRC is only ever read; nothing is ever written to `/opt/data/workspace/hermes-context/`.
+- SRC is never nested inside DST (contents are synced, `SRC/.` → `DST/`).
+- Stale files in DST are removed by both sync paths (mirror, not accumulate).
+- The script uses no GNU-only constructs (`find -printf`, `date -I`), so it runs
+  under BusyBox as well as GNU userland.

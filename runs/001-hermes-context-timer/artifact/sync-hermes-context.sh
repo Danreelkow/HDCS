@@ -1,88 +1,90 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way sync of hermes context from host mount to workspace
-# Usage: sync-hermes-context.sh [--dry-run]
-set -u -o pipefail
+# sync-hermes-context.sh — one-way mirror of the hermes context into the workspace.
+# Standalone-runnable (no systemd, no rsync required). Never writes to SRC.
+# BusyBox-compatible: uses no find -printf, only POSIX-safe constructs.
+set -euo pipefail
 
 SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
 DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-LOG_FILE="${HERMES_CONTEXT_LOG:-/tmp/hermes-context-sync.log}"
-DRY=0
-[ "${1:-}" = "--dry-run" ] && DRY=1
+LOG="${HERMES_CONTEXT_LOG:-}"
+DRY_RUN=0
 
-MODE="sync"
-[ "$DRY" -eq 1 ] && MODE="dry-run"
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --dry-run) DRY_RUN=1 ;;
+    --log)
+      shift
+      [ "$#" -gt 0 ] || { echo "error: --log requires a FILE argument" >&2; exit 2; }
+      LOG="$1"
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
-TOOL="unknown"
-TRANSFERRED=0
-SKIPPED=0
-
-summary() {
-    # $1 = ok|error
-    local line
-    line="mode=${MODE} tool=${TOOL} dir=host->workspace transferred=${TRANSFERRED} skipped=${SKIPPED} status=$1"
-    echo "$line"
-    echo "$line" >>"$LOG_FILE" 2>/dev/null || true
-}
-
-fail() {
-    echo "ERROR: $*" >&2
-    summary error
-    exit 1
-}
-
-# Validate source (read-only; never write to SRC)
 if [ ! -d "$SRC" ]; then
-    fail "source directory not found: $SRC"
+  echo "error: SRC directory does not exist: $SRC" >&2
+  exit 1
 fi
 
-# Ensure destination exists (skip in dry-run: zero mutations)
-if [ "$DRY" -eq 0 ]; then
-    mkdir -p "$DST" || fail "cannot create destination: $DST"
+# List top-level entry names of a directory, one per line, sorted (read-only).
+list_entries() {
+  # $1 = directory
+  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    [ -e "$entry" ] || continue
+    printf '%s\n' "${entry##*/}"
+  done | sort
+}
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  # Dry run: zero writes to any fs target (DST, log), stdout only.
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete --dry-run "$SRC"/ "$DST"/
+  else
+    echo "planned copy:"
+    list_entries "$SRC" | while IFS= read -r entry; do
+      if [ -e "$DST/$entry" ]; then
+        echo "  update: $entry"
+      else
+        echo "  copy:   $entry"
+      fi
+    done
+    echo "planned deletions:"
+    if [ -d "$DST" ]; then
+      list_entries "$DST" | while IFS= read -r entry; do
+        if [ ! -e "$SRC/$entry" ]; then
+          echo "  delete: $entry"
+        fi
+      done
+    fi
+  fi
+  exit 0
 fi
 
-# Files living inside DST that must never be deleted by fallbacks
-PROTECTED=(sync-hermes-context.sh hermes-context.service hermes-context.timer README.md)
+# Real run
+mkdir -p "$DST"
 
 if command -v rsync >/dev/null 2>&1; then
-    TOOL="rsync"
-    # Trailing slashes => sync contents, no nesting.
-    # Excludes protect the script/units/README that live inside DST itself.
-    CMD=(rsync -a --delete
-         --exclude='sync-hermes-context.sh'
-         --exclude='hermes-context.service'
-         --exclude='hermes-context.timer'
-         --exclude='README.md'
-         --itemize-changes)
-    [ "$DRY" -eq 1 ] && CMD+=(--dry-run)
-    OUT="$("${CMD[@]}" "${SRC}/" "${DST}/")" || fail "rsync failed"
-    # Itemized lines beginning with >f, <f, .f, *deleting etc. indicate changes
-    TRANSFERRED=$(printf '%s\n' "$OUT" | grep -cE '^[<>ch.]f|\*deleting' || true)
-    TOTAL=$(find "$SRC" -type f | wc -l)
-    SKIPPED=$(( TOTAL > TRANSFERRED ? TOTAL - TRANSFERRED : 0 ))
-elif command -v cp >/dev/null 2>&1; then
-    TOOL="cp"
-    # Read-only comparison first (works for both dry-run and counting)
-    DIFFOUT="$(diff -rq "$SRC" "$DST" 2>/dev/null || true)"
-    TRANSFERRED=$(printf '%s\n' "$DIFFOUT" | grep -c . || true)
-    TOTAL=$(find "$SRC" -type f | wc -l)
-    SKIPPED=$(( TOTAL > TRANSFERRED ? TOTAL - TRANSFERRED : 0 ))
-    if [ "$DRY" -eq 0 ]; then
-        # No --delete semantics: idempotent overwrite; never removes script/units/README
-        cp -a "${SRC}/." "${DST}/" || fail "cp fallback failed"
-    fi
-elif command -v tar >/dev/null 2>&1; then
-    TOOL="tar"
-    DIFFOUT="$(diff -rq "$SRC" "$DST" 2>/dev/null || true)"
-    TRANSFERRED=$(printf '%s\n' "$DIFFOUT" | grep -c . || true)
-    TOTAL=$(find "$SRC" -type f | wc -l)
-    SKIPPED=$(( TOTAL > TRANSFERRED ? TOTAL - TRANSFERRED : 0 ))
-    if [ "$DRY" -eq 0 ]; then
-        tar -C "$SRC" -cf - . | tar -C "$DST" -xf - || fail "tar pipe fallback failed"
-    fi
+  rsync -a --delete "$SRC"/ "$DST"/
 else
-    fail "no sync tool available (rsync, cp, tar)"
+  mkdir -p "$DST"
+  cp -a "$SRC"/. "$DST"/
+  # Reconciliation pass: delete entries in DST not present in SRC (mirror --delete)
+  list_entries "$DST" | while IFS= read -r entry; do
+    if [ ! -e "$SRC/$entry" ]; then
+      rm -rf -- "$DST/$entry"
+    fi
+  done
 fi
 
-summary ok
+if [ -n "$LOG" ]; then
+  printf '%s mode=%s src=%s dst=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+    "$(command -v rsync >/dev/null 2>&1 && echo rsync || echo cp-fallback)" \
+    "$SRC" "$DST" >> "$LOG"
+fi
+
 exit 0
 

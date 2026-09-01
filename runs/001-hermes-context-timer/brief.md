@@ -1,41 +1,31 @@
-build brief → B1
-state: s0 := dst=/workspace/hermes-context/ exists (INDEX.md, agents/, config/); src=/opt/data/workspace/hermes-context/ (host mount, read-only for us); no sync artifacts yet; systemd user units go in ~/.config/systemd/user/; no root available.
+build brief -> B1
+state: s0 := validated hdcs/1 packet; artifact dir hermes-context-sync/ does not yet exist. Canonical facts: SRC=/opt/data/workspace/hermes-context/; DST=/workspace/hermes-context/ (contains INDEX.md, agents/, config/); one-way mirror host->workspace; rsync primary (rsync -a --delete), fallback cp -a + delete-reconciliation pass; identical end state either path; --dry-run => zero writes to DST and to log (even if HERMES_CONTEXT_LOG resides inside DST); systemd --user units (OnCalendar every 6h, WantedBy=default.target); script standalone-runnable without systemd and without rsync; never nest SRC inside DST; never write to SRC.
 Δ := 
-1. Write /workspace/hermes-context/sync-hermes-context.sh:
-   - shebang #!/usr/bin/env bash; set -u -o pipefail
-   - SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"; DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-   - DRY=0; [ "${1:-}" = "--dry-run" ] && DRY=1
-   - validate SRC is a directory; else log error, exit 1
-   - mkdir -p DST (skip in dry-run)
-   - if command -v rsync: base cmd = rsync -a --delete "SRC/" "DST/" (trailing slashes => contents sync, no nesting); dry-run adds --dry-run
-   - elif cp available: dry-run => list files that would change (find SRC -newer marker or diff -rq SRC DST, read-only); else rm -rf DST contents (except script? no — script lives in /workspace/hermes-context/, not inside DST... DST IS /workspace/hermes-context/ — wait, DST holds INDEX.md etc. and script is sibling at /workspace/hermes-context/sync-hermes-context.sh which IS inside DST. cp fallback must NOT delete the script/units/README: use cp -a "SRC/." "DST/" without --delete semantics, or exclude script+units+README from deletion) — resolved: cp fallback = cp -a "SRC/." "DST/" (no delete; idempotent overwrite); tar pipe fallback = tar -C "$SRC" -cf - . | tar -C "$DST" -xf -
-   - both fallbacks: dry-run => perform read-only comparison (diff -rq SRC DST) and report would-transfer count, zero writes
-   - count transferred/skipped (rsync: parse --stats or use -i; fallback: diff -rq counts)
-   - exactly one summary line to stdout+log: "mode=<sync|dry-run> tool=<rsync|cp|tar> dir=host->workspace transferred=N skipped=M status=<ok|error>"
-   - any tool failure => nonzero exit, error to stderr, summary line with status=error
-   - chmod +x script
-   expected: executable script at /workspace/hermes-context/sync-hermes-context.sh; `bash -n` passes; `--dry-run` run exits 0, prints one summary line, DST mtimes/contents unchanged (checksum before/after identical)
-2. Write /workspace/hermes-context/hermes-context.service:
-   - [Unit] Description=Hermes context sync host->workspace
-   - [Service] Type=oneshot; ExecStart=%h/workspace/hermes-context/sync-hermes-context.sh
-   expected: valid ini; `systemd-analyze verify` (if available) passes or no systemd present => syntax check only
-3. Write /workspace/hermes-context/hermes-context.timer:
-   - [Unit] Description=Run hermes-context sync every 6h
-   - [Timer] OnCalendar=*-*-* 00/6:00:00; Persistent=true; Unit=hermes-context.service
-   - [Install] WantedBy=timers.target
-   expected: valid ini; OnCalendar parses (systemd-analyze calendar '*-*-* 00/6:00:00' => valid, 6h cadence)
-4. Write /workspace/hermes-context/README.md:
-   - purpose, one-way direction, src/dst defaults + env overrides, --dry-run usage, standalone usage, install: cp units to ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now hermes-context.timer
-   expected: README exists, mentions all four commands above verbatim
+1. mkdir -p hermes-context-sync → output: directory hermes-context-sync/ exists.
+2. Write hermes-context-sync/sync-hermes-context.sh → output: bash script with: set -euo pipefail; defaults SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ overridable via HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST; flags --dry-run and --log FILE (default ${HERMES_CONTEXT_LOG:-}, empty = no log); detect rsync via command -v; DRY_RUN branch: if rsync present, run `rsync -a --delete --dry-run "$SRC"/ "$DST"/` printing the itemized plan to stdout only, else print planned actions (files to copy, entries to delete) computed read-only; return before any mkdir/log/write; REAL_RUN branch: mkdir -p "$DST"; if rsync: `rsync -a --delete "$SRC"/ "$DST"/`; else `mkdir -p "$DST"` + `cp -a "$SRC"/. "$DST"/` + reconciliation pass: iterate `find "$SRC" -mindepth 1 -maxdepth 1 -printf '%f\n'`, delete any entry in DST not present in SRC (use find on DST top level, rm -rf -- path); write log line (timestamp, mode, path) only in real-run, appending to log file only if log path non-empty; exit 0. → output: executable script (chmod +x), `bash -n` passes.
+3. Write hermes-context-sync/hermes-context.service → output: [Unit] Description=Hermes context mirror; [Service] Type=oneshot; ExecStart=%h/.local/bin/sync-hermes-context.sh (note in README to install script there or use absolute path); no User= directive (user unit).
+4. Write hermes-context-sync/hermes-context.timer → output: [Unit] Description=Run hermes context sync every 6h; [Timer] OnCalendar=*-*-* 00/6:00:00; Persistent=true; [Install] WantedBy=default.target.
+5. Write hermes-context-sync/README.md → output: documents purpose, SRC/DST env vars, --dry-run semantics (zero writes incl. log), fallback behavior, standalone usage, `systemctl --user daemon-reload; systemctl --user enable --now hermes-context.timer`, no root required.
+6. Self-check (verify before handoff): run `bash hermes-context-sync/sync-hermes-context.sh --dry-run` against a temp fixture dir (populate via HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST overrides) twice with a stale file in DST → output: stale file still present after both dry-runs; no log file created.
+7. Convergence check: in temp fixture, real-run with rsync, snapshot `find dst -printf '%P %y\n' | sort`; reset dst, real-run with PATH stripped of rsync → output: both snapshots identical (rsync path ≡ fallback path end state).
+
 accept:
-  - [ ] /workspace/hermes-context/sync-hermes-context.sh exists, executable (test -x), bash -n clean
-  - [ ] script --dry-run: exit 0, exactly one summary line on stdout, zero writes to DST (stat/checksum of DST tree identical pre/post)
-  - [ ] script real run: exit 0, one summary line, DST contents match SRC contents (diff -rq SRC DST empty), no /workspace/hermes-context/hermes-context/ nested dir (test ! -d)
-  - [ ] second real run: exit 0, transferred=0 (idempotent)
-  - [ ] script with HERMES_CONTEXT_SRC=/nonexistent: exit != 0, status=error line
-  - [ ] hermes-context.service: Type=oneshot, ExecStart points to script path
-  - [ ] hermes-context.timer: OnCalendar every 6h, Persistent=true, Unit=hermes-context.service
-  - [ ] no line in any file invokes sudo/root/systemctl without --user
-  - [ ] README.md documents dry-run, standalone run, and user-unit install steps
-constraints: ["no_root: ~/.config/systemd/user/ + systemctl --user only", "one_way: never write to HERMES_CONTEXT_SRC", "dry_run: zero mutations of DST", "contents_sync: SRC/ -> DST/, never DST/hermes-context/", "fallback: rsync ? rsync : cp -a | tar pipe; both fail => nonzero exit + error line", "logging: exactly one summary line per run", "cp fallback must not delete script/units/README living inside DST (no --delete in fallback)"]
-deliverable: ["/workspace/hermes-context/sync-hermes-context.sh", "/workspace/hermes-context/hermes-context.service", "/workspace/hermes-context/hermes-context.timer", "/workspace/hermes-context/README.md"]
+- hermes-context-sync/ contains exactly: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md.
+- `bash -n sync-hermes-context.sh` exits 0; script is executable.
+- grep confirms: `--delete` present in rsync invocation; `OnCalendar=` present with 6h cadence; `WantedBy=default.target` in timer; no `User=` root directive in either unit.
+- test: real-run with rsync vs real-run with rsync unavailable produce identical `find "$DST" -printf '%P %y\n' | sort` output.
+- test: `--dry-run` leaves DST byte-identical (`diff -r` before/after empty) and creates/modifies no log file, even when HERMES_CONTEXT_LOG points inside DST.
+- test: file present in DST but absent in SRC is deleted by both real-run paths.
+- test: DST listing never contains top-level entry named after SRC basename (no nesting).
+- script runs successfully when invoked directly with no systemd and no rsync on PATH.
+
+constraints:
+- one-way: no writes to /opt/data/workspace/hermes-context/ ever (only reads).
+- --dry-run => zero writes to any fs target including log; dry-run output to stdout only.
+- user units only; WantedBy=default.target; no root.
+- sync contents of SRC into DST (SRC/. → DST/), never nest SRC dir itself inside DST.
+- fallback must reconcile deletions to match rsync --delete; no accumulate-only mode.
+- single artifact dir; no resurrection of stray files elsewhere.
+- logging only on real runs.
+
+deliverable: [hermes-context-sync/sync-hermes-context.sh, hermes-context-sync/hermes-context.service, hermes-context-sync/hermes-context.timer, hermes-context-sync/README.md]
