@@ -66,6 +66,11 @@ rm -rf "$SRC" "$DST" /tmp/hdcs-gate-dst-real; mkdir -p "$SRC"; printf 'r\n' > "$
 A22OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1)
 [ $? -eq 0 ] && fail "DST symlink resolving outside SRC was ACCEPTED (A22: refuse with A-number — sync never replaces a user-placed symlink)"
 [ -L "$DST" ] || fail "A22: the DST symlink was destroyed (refusal must leave the path untouched)"
+# A18 degenerate + empty-override fixture (run 037 S4 finding): '/', '', '.' must refuse; explicitly empty value must NOT fall back to defaults
+for BAD in "/" "" "."; do
+  DD=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$BAD" bash sync-hermes-context.sh 2>&1); [ $? -eq 0 ] && fail "degenerate HERMES_CONTEXT_DST='$BAD' was accepted (A18: refuse, cite A-number)"
+  DS=$(HERMES_CONTEXT_SRC="$BAD" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1); [ $? -eq 0 ] && fail "degenerate HERMES_CONTEXT_SRC='$BAD' was accepted (A18: refuse, cite A-number)"
+done
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

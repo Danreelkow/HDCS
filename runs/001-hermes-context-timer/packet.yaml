@@ -1,56 +1,36 @@
-reg: {domain: cs-programming, canon: shell/systemd/rsync sync tooling — exact identifiers (rsync --delete, systemctl --user, mktemp -d, realpath), unit-file fields, POSIX path semantics}
+reg: {domain: cs-programming/ops-automation, canon: rsync mirror semantics, systemd user units/timers, idempotent sync, realpath path-safety guards}
 intent: >
-  deliver standing one-way mirror sync SRC=/opt/data/workspace/hermes-context/ -> DST=/workspace/hermes-context/
-  artifact dir {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md};
-  script: rsync --delete primary, cp/tar fallback with identical recursive mirror convergence (A5/A7),
-  --dry-run zero writes (A6), staged verified-copy order (A13/A20), guards A11/A12/A14/A15/A18,
-  log outside DST (A8), self-verification nonzero-fail on A9-class mismatch;
-  units: systemctl --user, timer OnCalendar every 6h, no root (A3);
-  README: install, source change via env (A17), --dry-run test, sync-strategy states recursive convergence
+  build artifact dir {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md} :=
+    standing 6h user-level sync of SRC=/opt/data/workspace/hermes-context/ -> DST=/workspace/hermes-context/;
+    rsync primary (--delete, -a) w/ cp -a fallback (recursive reconcile, stale-subtree deletion);
+    exact mirror per MIRROR_CLASS; --dry-run zero-write incl. logs; idempotent; one-line real-run log OUTSIDE DST;
+    path-safety guards per A-law {A11..A22}; stage->content-verify->touch-DST order ∀ destructive paths;
+    user units only (systemctl --user), script standalone-capable.
 must_keep:
-  - source path is /opt/data/workspace/hermes-context/
-  - dry-run mode that performs no writes
-  - systemd user units, no root required
+  - "source path is /opt/data/workspace/hermes-context/"
+  - "dry-run mode that performs no writes"
+  - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical SRC/DST -> A: A1 (paths fixed as deployed defaults)"
-  - "Q2: sync direction -> A: A2 one-way host->workspace"
-  - "Q3: no systemd? -> A: A3 script standalone-capable"
-  - "Q4: no rsync? -> A: A4 cp/tar fallback, contents-sync"
-  - "Q5: stale files? -> A: A5 exact mirror, delete"
-  - "Q6: dry-run writes logs? -> A: A6 no, zero writes"
-  - "Q7: fallback deletion depth -> A: A7 recursive"
-  - "Q8: log/entrypoint placement -> A: A8 outside DST/tree"
-  - "Q9: mirror class scope -> A: A9 contents+structure+symlinks only"
-  - "Q10: severity bar -> A: A10 FAIL vs KNOWN_LIMITATIONS"
-  - "Q11: rm -rf ordering -> A: A11 verified copy first"
-  - "Q12: identity guard -> A: A12 realpath"
-  - "Q13: verified definition -> A: A13 content-compare, stage->verify->touch, incl. rsync path"
-  - "Q14: protected paths -> A: A14 concrete owned paths"
-  - "Q15: guard breadth -> A: A15 gates not walls"
-  - "Q16: DST pre-existence -> A: A16 real-run mkdir -p; dry-run none"
-  - "Q17: env override scope -> A: A17 mandated, defaults are deployed config"
-  - "Q18: degenerate paths -> A: A18 refuse /, empty, .; component tests"
-  - "Q19: ownership checks -> A: A19 none; law list closed"
-  - "Q20: staging order + reserved names -> A: A20 pure-compute then create; mktemp prunelist"
-  - "Q21: exotic filenames -> A: A21 KNOWN_LIMITATIONS"
+  - "Q1: canonical SRC/DST? -> A: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (A1)"
+  - "Q2: sync direction? -> A: one-way host->workspace (A2)"
+  - "Q3: systemd scope? -> A: user units + standalone script fallback (A3)"
+  - "Q4: rsync absent? -> A: cp -a fallback, identical mirror semantics (A4)"
+  - "Q5: stale files? -> A: deleted, recursive, both paths (A5,A7)"
+  - "Q6: dry-run writes logs? -> A: never, zero-write incl. DST absent post-dry-run (A6,A16)"
+  - "Q7: mirror equivalence class? -> A: contents+structure+symlinks only (A9)"
+  - "Q8: destructive-misconfig? -> A: guarded per A11/A12/A14/A15/A18; closed list per A19"
+  - "Q9: DST symlink? -> A: refuse, never replace (A22)"
+  - "Q10: deployed paths restrict env override? -> A: no; env override is the gate contract (A17)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
-handoff:
-  state: S_0 + Delta -> S_1
-  report: [+done, -resolved, +open, +validation]
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
 constraints:
-  - MIRROR = A9 class; both sync paths converge identically (A5, recursive A7)
-  - dry-run: zero writes of any kind incl. logs; DST absent stays absent (A6, A16)
-  - order: compute-stage-path (pure) -> validate guards -> create stage -> content-verify -> touch DST (A11/A13/A20); applies to rsync path too (A21 note)
-  - guards before any destructive op: A12 realpath identity, A14/A15 concrete owned paths (log dir, stage, entrypoint), A18 degenerate; refusals cite A-number, zero writes (A19, C4)
-  - no invented scope: no ownership checks; law list closed (A19)
-  - reserved namespace: never overwrite mirror files with script bookkeeping (A20)
-  - log always outside DST; install entrypoints outside mirrored tree (A8)
-  - env HERMES_CONTEXT_SRC/DST override is contract-mandated; deployed defaults are production values (A17)
-  - no_resurrect: verdict-supersession per A17 (env-scope verdict wrong); A15 (run017 wall), A16 (run019 wall), A20 (run025)
+  - "no_resurrect: A5 exact-mirror recursion, A6 dry-run purity, A13 stage->verify->touch order, A15 concrete-path gate calibration, A19 closed path-law list, A20 pure-string stage validation, A22 refuse-not-replace"
+  - "refusals cite an A-number or are defects (A19)"
+  - "verification enforces A9 class, nonzero exit on mismatch"
+  - "entrypoints + logs live outside DST tree (A8)"
 paths:
-  - SRC: /opt/data/workspace/hermes-context/
-  - DST: /workspace/hermes-context/
-  - artifact_dir: [sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md]
-  - log: ~/.cache/hermes-context/sync.log (default, outside DST)
-  - entrypoints: ~/.local/bin or /workspace/hdcs/bin
+  - "/workspace/hermes-context/ (artifact dir)"
+  - "~/.cache/hermes-context/ (log, default, outside DST)"
+  - "~/.local/bin/ or /workspace/hdcs/bin/ (entrypoints)"
+  - "~/.config/systemd/user/ (unit install target)"
 budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
