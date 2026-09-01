@@ -19,3 +19,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 
 ## A7 (2026-09-01, operator ruling on S4 verdict #2): recursive convergence
 - Confirmed: A5 means RECURSIVE convergence. Reconciliation in the cp fallback must delete stale SUBTREES at every depth (mirroring rsync --delete), not just top-level entries. DST must end byte-identical to SRC in both paths, nested paths included. README's sync-strategy section must state this correctly.
+
+## A8 (2026-09-01, operator-delegated ruling on S4 verdict #5): placement law
+- Confirmed both findings. The log lives OUTSIDE the destination ALWAYS (the ~/.cache default; never inside DST, no carve-outs, no post-mirror rewrite exceptions — A5 exact mirror means exact).
+- Install paths live OUTSIDE the mirrored tree: ~/.local/bin (or /workspace/hdcs/bin), never artifact/ inside DST. A sync must never delete or move the installed service's own entrypoints.

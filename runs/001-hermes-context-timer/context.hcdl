@@ -1,10 +1,18 @@
-A1: SRC := /opt/data/workspace/hermes-context/; DST := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
-A2: ∀ run -> ¬writes(SRC); one-way host->workspace
-A3: units user-scoped (systemctl --user, no root); script standalone-capable
-A4: rsync absent -> FB (cp -a / tar-pipe); contents src/ -> dst, ¬nesting
-A5_mirror: ∀ path ∈ {RS,FB} -> DST end state == SRC end state, recursive; stale deleted (rsync --delete; FB reconcile ∀ depth)
-A6: DR -> zero writes ∀ target incl. logs; gate = DST byte-identical pre/post (hash)
-A7: cadence := 6h, user-level timer
-INV: script idempotent; one-line summary log per real run
-open: none — ∀ binary resolved via A1-A7; no-ambiguity certified
-VALID: verify asserts (a) DR byte-identity, (b) RS==FB end-state incl. nested stale subtree deletion, (c) ¬nesting SRC∈DST, (d) systemctl --user installable sans root
+defs:
+  SRC := /opt/data/workspace/hermes-context/
+  DST := /workspace/hermes-context/
+  LOG := ~/.cache/hermes-context/sync.log
+  UNITS := hermes-context.service + hermes-context.timer (systemd --user)
+invariants:
+  A1: SRC fixed host mount; DST pre-existing tree w/ INDEX.md, agents/, config/
+  A2: one-way SRC -> DST; ∀ writer ≠ syncer on DST -> violation
+  A3: systemctl --user class; script standalone-capable if systemd absent
+  A4: rsync detected; absent -> cp -a/tar-pipe fallback; sync SRC/ -> DST contents, never nest
+  A5_mirror: ∀ path -> DST end state == SRC end state, recursive; stale files deleted; rsync and cp-fallback converge byte-identical
+  A6: --dry-run -> zero writes incl. logs; DST byte-identical post dry-run
+  A7: ∀ depth convergence; README states mirror semantics exactly
+  A8: LOG ∉ DST ∧ entrypoints ∉ DST ∀ runs
+  I7: idempotent re-runs -> no spurious Δ
+  I9: one summary line per real run
+  I8: MUST_KEEP verbatim binding of SRC default
+open: []
