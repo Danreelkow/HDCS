@@ -29,6 +29,21 @@ DRYOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-co
 RUNOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "real run exited nonzero: $RUNOUT"
 cmp -s "$SRC/probe.txt" "$DST/probe.txt" || fail "synced content mismatch"
 RUN2OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "second run (idempotency) exited nonzero: $RUN2OUT"
+# type-change convergence fixture (run 015 S4 finding): file<->dir swaps must reconcile to A5/A7 end state
+rm -rf "$SRC" "$DST"; mkdir -p "$SRC/sub"; printf 'file-x\n' > "$SRC/x"; printf 'dir-y\n' > "$SRC/sub/y"
+mkdir -p "$DST/x"; printf 'old\n' > "$DST/x/inner"; printf 'stale\n' > "$DST/z"
+TCOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "type-change run exited nonzero: $TCOUT"
+[ -f "$DST/x" ] || fail "type-change: DST/x dir->file not reconciled"
+cmp -s "$SRC/x" "$DST/x" || fail "type-change: DST/x content mismatch"
+[ -f "$DST/sub/y" ] || fail "type-change: sub/y missing"
+[ ! -e "$DST/z" ] || fail "type-change: stale DST/z survived"
+rm -rf "$SRC" "$DST"; mkdir -p "$SRC/x"; printf 'inner\n' > "$SRC/x/y"; mkdir -p "$DST"; printf 'was-file\n' > "$DST/x"
+TC2OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "type-change inverse exited nonzero: $TC2OUT"
+[ -d "$DST/x" ] && cmp -s "$SRC/x/y" "$DST/x/y" || fail "type-change inverse: DST file x not converted to dir with matching content"
+# docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
+ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
+[ -n "$ESP" ] || fail "no ExecStart in service unit"
+grep -qF "$ESP" README.md || fail "README does not document the service ExecStart location: $ESP (docs must match the unit)"
 # A8 fixture (promoted from runs 007-014: env-override log guard kept slipping past repairs)
 if grep -q "HERMES_CTX_LOG" sync-hermes-context.sh; then
   LOGFAIL=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" HERMES_CTX_LOG="$DST/evil.log" bash sync-hermes-context.sh 2>&1)
