@@ -1,1 +1,1 @@
-GATE FAIL: source not parameterized
+GATE PASS

@@ -1,11 +1,9 @@
 [Unit]
-Description=Run hermes-context sync every 6 hours
+Description=Run hermes context sync every 15 minutes
 
 [Timer]
-OnCalendar=*-*-* 00/6:00:00
+OnCalendar=*:0/15
 Persistent=true
-Unit=hermes-context.service
 
 [Install]
-WantedBy=timers.target
-
+WantedBy=default.target

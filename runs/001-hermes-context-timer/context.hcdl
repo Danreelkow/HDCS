@@ -1,18 +1,16 @@
-defs:
-  SRC := /opt/data/workspace/hermes-context/
-  DST := /workspace/hermes-context/
-  LOG := ~/.cache/hermes-context/sync.log
-  UNITS := hermes-context.service + hermes-context.timer (systemd --user)
+reg_canon: cs-programming; vocabulary := exact identifiers (rsync, --delete, --dry-run, systemctl --user, HERMES_CONTEXT_SRC/DST/LOG, cp -a, systemd unit directives).
+A1_src: HERMES_CONTEXT_SRC default := /opt/data/workspace/hermes-context/ (canonical host-side mount, kb digests)
+A1_dst: HERMES_CONTEXT_DST default := /workspace/hermes-context/ (exists; holds INDEX.md, agents/, config/)
+A2_direction: ∀ run -> sync host->workspace, one-way; ¬∃ writeback to SRC
+A3_standalone: script must execute without systemd; units are systemctl --user, no root
+A4_fallback: ¬∃ rsync -> cp -a semantics (or tar pipe); semantics: contents of SRC/ -> DST (trailing-slash mirror), never DST/SRC-nest
+A5_mirror: ∀ run -> DST end state == SRC end state exactly; rsync path uses --delete; cp fallback reconciles (no accumulate-only); both paths converge to identical end state
+A6_dryrun_purity: --dry-run -> ZERO writes ∀ targets, incl. log files; DST byte-identical post-dry-run (mechanical gate: full-tree byte compare, not probe-file)
+A7_recursive: A5 is recursive; cp fallback deletes stale subtrees ∀ depth (mirrors rsync --delete); README sync-strategy section states this
+A8_placement: log path := ~/.cache/hermes-context/ default, ALWAYS outside DST (∀ modes, no carve-outs, no post-mirror rewrite); install paths := ~/.local/bin (or /workspace/hdcs/bin), never artifact/ inside DST; sync never deletes/moves its own entrypoints
 invariants:
-  A1: SRC fixed host mount; DST pre-existing tree w/ INDEX.md, agents/, config/
-  A2: one-way SRC -> DST; ∀ writer ≠ syncer on DST -> violation
-  A3: systemctl --user class; script standalone-capable if systemd absent
-  A4: rsync detected; absent -> cp -a/tar-pipe fallback; sync SRC/ -> DST contents, never nest
-  A5_mirror: ∀ path -> DST end state == SRC end state, recursive; stale files deleted; rsync and cp-fallback converge byte-identical
-  A6: --dry-run -> zero writes incl. logs; DST byte-identical post dry-run
-  A7: ∀ depth convergence; README states mirror semantics exactly
-  A8: LOG ∉ DST ∧ entrypoints ∉ DST ∀ runs
-  I7: idempotent re-runs -> no spurious Δ
-  I9: one summary line per real run
-  I8: MUST_KEEP verbatim binding of SRC default
-open: []
+  I1: ∀ mode m ∈ {real, dry} -> DST_post(dry) == DST_pre
+  I2: ∀ real run -> DST_post == SRC (recursive, byte-faithful)
+  I3: ∀ artifact (log, script, unit, README) -> artifact ∉ mirrored tree
+  I4: idempotent: run^2 == run^1
+open: none — all ambiguities resolved by A1..A8

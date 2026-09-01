@@ -1,42 +1,46 @@
-reg: {domain: cs-programming, canon: "bash/systemd/r identifiers: rsync --delete, OnCalendar=, systemctl --user, set -euo pipefail, trap, env defaults :="}
+reg: {domain: cs-programming, canon: "exact identifiers: rsync flags (--delete, --dry-run, -a), HERMES_CONTEXT_SRC/DST/LOG, cp -a, systemctl --user, systemd unit directives (OnCalendar, WantedBy=default.target)"}
 intent: >
-  standing-sync := rsync-first mirror SRC -> DST, user-level timer every 6h;
-  deliverable := artifact dir containing sync-hermes-context.sh, hermes-context.service,
-  hermes-context.timer, README.md;
-  forall path (rsync or cp-fallback) -> DST == SRC recursively (I2/I3);
-  --dry-run -> zero writes (I4); no root for any install (I5/UNITS)
+  build artifact dir with sync-hermes-context.sh + hermes-context.service +
+  hermes-context.timer + README.md s.t. ∀ real run -> /workspace/hermes-context/
+  becomes exact recursive mirror of /opt/data/workspace/hermes-context/ (host->dst,
+  one-way, A2), idempotent (run^n == run^1), with rsync primary path and cp -a
+  fallback path converging to identical end state (A5/A7), --dry-run producing zero
+  writes of any kind incl. logs (A6), all persistent artifacts placed outside the
+  mirrored tree (A8).
 must_keep:
   - "source path is /opt/data/workspace/hermes-context/"
   - "dry-run mode that performs no writes"
   - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical SRC/DST? -> A: SRC=/opt/data/workspace/hermes-context/ (host mount), DST=/workspace/hermes-context/ exists w/ INDEX.md, agents/, config/ (A1)"
-  - "Q2: direction? -> A: one-way host -> workspace, nothing writes back (A2)"
-  - "Q3: systemd class? -> A: user-level systemctl --user; script standalone if no systemd (A3)"
-  - "Q4: rsync availability? -> A: detect absence, fall back to cp -a/tar-pipe; sync CONTENTS (SRC/ -> DST), never nest (A4)"
-  - "Q5: stale-file policy? -> A: exact mirror, stale DELETED, both paths converge identically (A5)"
-  - "Q6: dry-run logging? -> A: zero writes of any kind incl. logs; DST byte-identical post dry-run (A6)"
-  - "Q7: mirror depth? -> A: recursive convergence, stale subtrees deleted for all depth, README states correctly (A7)"
-  - "Q8: log/install placement? -> A: LOG never in DST (~/.cache default); entrypoints in ~/.local/bin or /workspace/hdcs/bin, never inside mirrored tree (A8)"
-  - "Q9: remaining ambiguities? -> A: none; A1-A8 resolve all open questions; no OPEN items"
+  - "Q1: canonical source path? -> A: /opt/data/workspace/hermes-context/ per A1 (kb digests, host-side Hermes context mount)"
+  - "Q2: sync direction & writeback? -> A: host->workspace one-way; nothing writes back to host mount (A2)"
+  - "Q3: systemd scope? -> A: user-level systemctl --user, no root; script must also work standalone if systemd absent (A3)"
+  - "Q4: rsync missing? -> A: detect and fall back to cp -a (or tar pipe); sync CONTENTS of src into dst, no nesting (A4)"
+  - "Q5: stale file handling? -> A: exact mirror, stale files DELETED; rsync --delete; cp fallback reconciles identically (A5)"
+  - "Q6: dry-run log writes? -> A: --dry-run performs ZERO writes incl. log files even if HERMES_CONTEXT_LOG points inside DST; dry-run leaves DST byte-identical (A6)"
+  - "Q7: fallback deletion depth? -> A: recursive convergence, stale subtrees deleted at every depth; README states this correctly (A7)"
+  - "Q8: log & install placement? -> A: log ALWAYS outside DST (~/.cache default, no carve-outs); install paths outside mirrored tree (~/.local/bin or /workspace/hdcs/bin); sync never deletes its own entrypoints (A8)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
 handoff:
   state: S_0 + Delta -> S_1
   report: [+done, -resolved, +open, +validation]
 constraints:
-  - "MUST_KEEP verbatim: /opt/data/workspace/hermes-context/ as SRC default (I8)"
-  - "no_resurrect: I4 dry-run purity; I6 placement law (no LOG/entrypoint inside DST, no post-mirror rewrite exceptions)"
-  - "I2/I3: rsync --delete semantics; cp fallback reconciles recursively, byte-identical convergence"
-  - "I5: rsync-absence detection + fallback; script standalone-capable"
-  - "no root anywhere: user units, user-writable install paths only"
-  - "I7 idempotency; I9 one summary line per real run"
+  - "∀ real run -> DST end state == SRC end state, recursive, byte-faithful (A5/A7; no_resurrect: accumulate-only fallback, top-level-only deletion)"
+  - "dry-run -> zero writes ∀ targets; mechanical gate = full-tree byte-identity of DST pre/post (A6; no_resurrect: probe-file-only dry-run check)"
+  - "log path ∉ DST ∀ modes, no carve-outs, no post-mirror rewrite (A8; no_resurrect: log-inside-DST)"
+  - "install paths ∉ mirrored tree; sync never deletes own entrypoints (A8; no_resurrect: artifact/ inside DST)"
+  - "one-way host->workspace; no writeback to SRC (A2)"
+  - "user units only, no root (MUST_KEEP)"
+  - "idempotent: run^n == run^(n-1)"
 paths:
-  - "[artifact_dir]/sync-hermes-context.sh"
-  - "[artifact_dir]/hermes-context.service"
-  - "[artifact_dir]/hermes-context.timer"
-  - "[artifact_dir]/README.md"
-  - "~/.local/bin/sync-hermes-context.sh (install target)"
-  - "~/.config/systemd/user/hermes-context.service (install target)"
-  - "~/.config/systemd/user/hermes-context.timer (install target)"
-  - "~/.cache/hermes-context/sync.log (LOG, outside DST)"
+  - /workspace/hermes-context/
+  - /opt/data/workspace/hermes-context/
+  - "<artifact_dir>/sync-hermes-context.sh"
+  - "<artifact_dir>/hermes-context.service"
+  - "<artifact_dir>/hermes-context.timer"
+  - "<artifact_dir>/README.md"
+  - "~/.config/systemd/user/hermes-context.service"
+  - "~/.config/systemd/user/hermes-context.timer"
+  - "~/.local/bin/sync-hermes-context.sh"
+  - "~/.cache/hermes-context/sync.log"
 budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
