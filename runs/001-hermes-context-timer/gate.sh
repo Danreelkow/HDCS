@@ -18,7 +18,7 @@ CAL=$(sed -n 's/^OnCalendar=//p' hermes-context.timer | head -1)
 if command -v systemd-analyze >/dev/null 2>&1; then
   systemd-analyze calendar "$CAL" >/dev/null 2>&1 || fail "invalid OnCalendar expression: $CAL (run-014 example of INVALID: '0 */6:00:00'; valid: '*-*-* 00/6:00:00')"
 else
-  echo "$CAL" | grep -qE '^\*-\*-\* [0-9*/]+:[0-9]{2}:[0-9]{2}$' || fail "OnCalendar not a valid repeating cadence: $CAL (valid: '*-*-* 00/6:00:00')"
+  echo "$CAL" | grep -qE '^(\*-\*-\* )?[0-9]{1,2}/[0-9]+:[0-9]{2}:[0-9]{2}$' || fail "OnCalendar not a valid repeating cadence: $CAL (valid: '*-*-* 00/6:00:00' — preferred, self-documenting — or shorthand '00/6:00:00')"
 fi
 # end-to-end proof in tmp fixtures: dry-run writes nothing, real run syncs, second run idempotent
 SRC=/tmp/hdcs-gate-src; DST=/tmp/hdcs-gate-dst

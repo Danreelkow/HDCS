@@ -125,7 +125,7 @@ if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && f
 if (!s3cached && !state.gate_pass) { if (build) log('s3: no recorded gate pass for these artifacts (cold state) — full rebuild'); build = null; }
 if (!s3cached) {
 checkBudget('s3');
-const s3attempts = build ? ['s3-repair'] : ['s3', 's3-repair'];
+const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-repair'];
 for (const attempt of s3attempts) {
   const input = attempt === 's3'
     ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
@@ -176,7 +176,7 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
     fs.writeFileSync('gate-out.txt', g);
     log('gate: ' + g.trim().split('\n').pop());
-    if (!(ok && /GATE PASS/.test(g))) { outcomes.s3 = 'FAIL'; log('feedback repair broke the mechanical gate'); break; }
+    if (!(ok && /GATE PASS/.test(g))) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log('feedback repair broke the mechanical gate'); break; }
   }
   if (outcomes.s4 === 'PASS' && !s4valid) { state.s4_pass = true; state.s4_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8')); }
   else if (outcomes.s4 !== 'PASS') state.s4_pass = false;

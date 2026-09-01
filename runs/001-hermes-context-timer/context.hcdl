@@ -1,8 +1,35 @@
-A9_mirror: ∀ run -> DST end state == SRC end state, recursive (contents+structure+symlinks, stale deleted)
-A2_oneway: sync host->workspace only
-A5_fallback: cp/tar path converges to same end state as rsync --delete
-A6_dryrun: ∀ mode=dry-run -> zero writes ∧ DST unmodified; A16: dry-run never creates DST
-A3_units: systemd user units (Type=oneshot, OnUnitActiveSec=6h) ∧ standalone exec, no root
-A19: refusal authority = closed list (A12, A14/A15, A18); refusals cite A-numbers; zero writes on refusal path
-A17: SRC/DST env-parameterized; deployed values are production defaults
-open: ∅ — all ambiguities resolved via A1..A20
+def reg := cs-programming (shell/systemd/rsync sync tooling)
+def SRC := /opt/data/workspace/hermes-context/ (canon host mount; env HERMES_CONTEXT_SRC overrides, deployed default)
+def DST := /workspace/hermes-context/ (env HERMES_CONTEXT_DST overrides, deployed default)
+def MIRROR := A9-class: contents + recursive dir structure + symlinks; NOT metadata/timestamps/hardlinks
+def VERIFIED_COPY := staging copy content-compared to SRC over MIRROR class, matches
+
+invariants:
+A1_paths: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
+A2_dir: sync host->workspace one-way; no writeback to host mount
+A3_standalone: systemctl --user preferred; script must run standalone (cron) sans systemd
+A4_fallback: no rsync -> cp -a/tar-pipe fallback; sync CONTENTS of SRC into DST (src/ -> dst), never nesting
+A5_mirror: ∀ path -> DST end state == SRC end state (recursive), stale DELETED; both sync paths converge identically; no accumulate-only mode
+A6_dryrun: --dry-run -> ZERO writes incl. logs; DST byte-identical after
+A7_recursive: fallback reconciliation deletes stale subtrees at ∀ depth; README states this correctly
+A8_placement: log ALWAYS outside DST (~/.cache default); install paths outside mirrored tree (~/.local/bin or /workspace/hdcs/bin); sync never deletes own entrypoints
+A9_class: self-verification enforces MIRROR class exactly, FAIL nonzero on mismatch, never warn-exit-0; metadata complaints out-of-scope
+A10_severity: FAIL only on normal-operation defects (default config, documented usage, plausible misconfig losing/corrupting data); exotic -> +open KNOWN_LIMITATIONS; judge cites all, bar classifies
+A11_guard: refuse SRC==DST; never rm -rf DST before VERIFIED_COPY of SRC exists elsewhere; source survival > freshness
+A12_identity: realpath compare (symlinks resolved); refuse when realpath(SRC)==realpath(DST) or ancestor/descendant either way or DST symlink-resolves into SRC; both paths, before ANY destructive op
+A13_order: stage -> content-verify (A9 class) -> only then touch DST; applies to rsync path too (primary), not just fallback; script self-verification exits nonzero on staging verification failure; README never calls unverified copy "verified"
+A14_guard: compute internal paths (log dir, staging, entrypoint); refuse if realpath(DST) ==/contains/inside owned; staging != /-inside DST or SRC (incl. TMPDIR — force script-owned stage); closes env-var-pointed-at-Y class; further env combos = KNOWN_LIMITATIONS
+A15_precision: owned = CONCRETE instantiated path (mktemp -d result, log FILE's resolved parent, entrypoint dir), never generic ancestors (TMPDIR, /tmp); boundary-aware comparison (component split), never string-prefix; gates not walls
+A16_lifecycle: real run MAY mkdir -p DST; dry-run MUST NOT create it (DST absent stays absent — gate probe checks nonexistence)
+A17_param: env override SRC/DST is mandated contract mechanism; deployed defaults are production values, not scope limits; contract+A-law outrank verdicts
+A18_degenerate: refuse (clean nonzero, no writes) DST/SRC == "/" | empty | "." — component tests, not slash-suffix strings; DST symlink resolving outside SRC -> refuse (A12); if DST was symlink passing guards, replace with real tree
+A19_law_closure: NO ownership requirements; path-law closed: A12, A14/A15 (concrete), A18; refusals must cite A-number; uncited refusal = defect; OS is ownership gate
+A20_order: stage path resolved by PURE string computation (no mktemp/mkdir/write) -> validate vs SRC/DST/owned -> then create; reserved script namespace ('.prunelist','staging','.hc-stage*') — script renames own working files (mktemp for prunelist), never overwrites mirror files
+A21_exotic: newline/control-char filenames -> KNOWN_LIMITATIONS +open (rsync copies fine); A9 losslessness scoped to normal filenames
+
+open:
+KNOWN_LIMITATIONS: exotic filenames (A21), adversarial env combos beyond A14 guard (A14)
++validation_gates: dry-run -> DST byte-identical AND nonexistent-if-absent; mirror verify -> contents+structure+symlinks recursive, nonzero on mismatch; guard refusals cite A12/A14/A15/A18
+
+open:
+Q1: none — all ambiguities resolved by A1–A21 -> A: RESOLVED
