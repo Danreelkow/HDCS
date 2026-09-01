@@ -1,62 +1,49 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way mirror of the hermes context into the workspace.
-# Standalone-runnable (no systemd, no rsync required). Never writes to SRC.
-# BusyBox-compatible: uses no find -printf, only POSIX-safe constructs.
-set -euo pipefail
+# sync-hermes-context.sh — mirror HERMES_CONTEXT_SRC -> HERMES_CONTEXT_DST
+# Primary: rsync -a --delete. Fallback: tar-pipe copy + find-based recursive
+# deletion of stale entries at every depth. Never writes inside SRC.
+# Dry-run performs zero writes, including logs.
+
+set -u
 
 SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
 DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-LOG="${HERMES_CONTEXT_LOG:-}"
-DRY_RUN=0
+LOG="${HERMES_CONTEXT_LOG:-${HOME}/.cache/hermes-context-sync.log}"
 
-while [ "$#" -gt 0 ]; do
-  case "$1" in
+DRY_RUN=0
+for arg in "$@"; do
+  case "$arg" in
     --dry-run) DRY_RUN=1 ;;
-    --log)
-      shift
-      [ "$#" -gt 0 ] || { echo "error: --log requires a FILE argument" >&2; exit 2; }
-      LOG="$1"
-      ;;
-    *)
-      echo "error: unknown argument: $1" >&2
-      exit 2
-      ;;
+    *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
-  shift
 done
 
-if [ ! -d "$SRC" ]; then
-  echo "error: SRC directory does not exist: $SRC" >&2
-  exit 1
-fi
-
-# List top-level entry names of a directory, one per line, sorted (read-only).
-list_entries() {
-  # $1 = directory
-  for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
-    [ -e "$entry" ] || continue
-    printf '%s\n' "${entry##*/}"
-  done | sort
-}
+# Normalize trailing slashes
+SRC="${SRC%/}/"
+DST="${DST%/}/"
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  # Dry run: zero writes to any fs target (DST, log), stdout only.
+  # Dry-run: compute-and-compare only, no writes anywhere (no logs, no DST changes)
   if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --dry-run "$SRC"/ "$DST"/
+    rsync -a --delete --dry-run --itemize-changes "${SRC}" "${DST}"
+    status=$?
   else
-    echo "planned copy:"
-    list_entries "$SRC" | while IFS= read -r entry; do
-      if [ -e "$DST/$entry" ]; then
-        echo "  update: $entry"
-      else
-        echo "  copy:   $entry"
-      fi
-    done
-    echo "planned deletions:"
-    if [ -d "$DST" ]; then
-      list_entries "$DST" | while IFS= read -r entry; do
-        if [ ! -e "$SRC/$entry" ]; then
-          echo "  delete: $entry"
+    # Fallback dry-run: compute-and-compare only (report what would change)
+    status=0
+    if [ ! -d "$DST" ]; then
+      echo "dry-run: would create DST $DST"
+    else
+      # files that differ or are missing in DST
+      (cd "$SRC" && find . -type f) | while IFS= read -r f; do
+        if [ ! -f "${DST}${f#./}" ] || ! cmp -s "${SRC}${f#./}" "${DST}${f#./}"; then
+          echo "dry-run: would copy ${f#./}"
+        fi
+      done
+      # stale entries in DST absent from SRC (every depth)
+      (cd "$DST" && find . -mindepth 1) | sort -r | while IFS= read -r p; do
+        rel="${p#./}"
+        if [ ! -e "${SRC}${rel}" ]; then
+          echo "dry-run: would delete ${rel}"
         fi
       done
     fi
@@ -64,27 +51,35 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# Real run
-mkdir -p "$DST"
+# ---- real run ----
+status=0
+mode="rsync"
 
 if command -v rsync >/dev/null 2>&1; then
-  rsync -a --delete "$SRC"/ "$DST"/
-else
   mkdir -p "$DST"
-  cp -a "$SRC"/. "$DST"/
-  # Reconciliation pass: delete entries in DST not present in SRC (mirror --delete)
-  list_entries "$DST" | while IFS= read -r entry; do
-    if [ ! -e "$SRC/$entry" ]; then
-      rm -rf -- "$DST/$entry"
+  rsync -a --delete "${SRC}/" "${DST}/" || status=$?
+else
+  mode="fallback"
+  mkdir -p "$DST"
+  # Copy src contents into dst (no nesting)
+  if command -v tar >/dev/null 2>&1; then
+    tar -C "$SRC" -cf - . | tar -C "$DST" -xf - || status=$?
+  else
+    cp -a "${SRC}." "$DST"/ || status=$?
+  fi
+  # Remove stale entries in DST absent from SRC, at every depth.
+  # Process deepest-first so directories are removed after their contents.
+  (cd "$DST" && find . -mindepth 1 -depth) | while IFS= read -r p; do
+    rel="${p#./}"
+    if [ ! -e "${SRC}${rel}" ]; then
+      rm -rf -- "${DST}${rel}"
     fi
   done
 fi
 
-if [ -n "$LOG" ]; then
-  printf '%s mode=%s src=%s dst=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
-    "$(command -v rsync >/dev/null 2>&1 && echo rsync || echo cp-fallback)" \
-    "$SRC" "$DST" >> "$LOG"
-fi
+# One summary line per real run only
+mkdir -p "$(dirname "$LOG")"
+printf '%s mode=%s status=%s src=%s dst=%s\n' \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$mode" "$status" "$SRC" "$DST" >> "$LOG"
 
-exit 0
-
+exit "$status"

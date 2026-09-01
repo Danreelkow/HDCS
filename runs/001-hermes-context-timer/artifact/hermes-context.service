@@ -1,7 +1,6 @@
 [Unit]
-Description=Hermes context mirror
+Description=Hermes context mirror sync
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-

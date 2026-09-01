@@ -101,15 +101,31 @@ for (const attempt of ['s3', 's3-repair']) {
 // Operator policy: skip S4 when nothing was produced (that needs clarification, not a verdict).
 // Ungated artifacts (NO GATE) still count as produced -> S4 judges them.
 if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
-  checkBudget('s4');
-  const artifacts = fs.existsSync('artifact') ? fs.readdirSync('artifact').join(', ') : '';
-  const gateOut = fs.existsSync('gate-out.txt') ? fs.readFileSync('gate-out.txt', 'utf8') : '(no mechanical gate ran)';
-  const s4 = seat('s4', seats.s4, 's4-system.txt', `hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 4096);
-  fs.writeFileSync('s4-verdict.txt', s4);
-  outcomes.s4 = /VERDICT:\s*PASS/i.test(s4) ? 'PASS' : (/VERDICT:\s*FAIL/i.test(s4) ? 'FAIL' : 'UNPARSED');
-  log(`S4: ${outcomes.s4}`);
+  let s4verdict = '';
+  for (let s4round = 0; s4round < 2; s4round++) {
+    checkBudget(s4round ? 's4-reverify' : 's4');
+    const artifacts = fs.existsSync('artifact') ? fs.readdirSync('artifact').join(', ') : '';
+    const gateOut = fs.existsSync('gate-out.txt') ? fs.readFileSync('gate-out.txt', 'utf8') : '(no mechanical gate ran)';
+    s4verdict = seat(s4round ? 's4-reverify' : 's4', seats.s4, 's4-system.txt', `hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 4096);
+    fs.writeFileSync('s4-verdict.txt', s4verdict);
+    outcomes.s4 = /VERDICT:\s*PASS/i.test(s4verdict) ? 'PASS' : (/VERDICT:\s*FAIL/i.test(s4verdict) ? 'FAIL' : 'UNPARSED');
+    log(`S4: ${outcomes.s4}`);
+    if (outcomes.s4 !== 'FAIL' || s4round === 1) break;
+    // doctrine option (operator-approved 2026-09-01): ONE S4->S3 feedback repair before human routing
+    log('S4 FAIL -> feedback repair round (judge evidence fed to builder)');
+    const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `GATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 8192);
+    fs.writeFileSync('artifact-build.txt', fb);
+    for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
+    for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+    let g = '', ok = true;
+    try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+    catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
+    fs.writeFileSync('gate-out.txt', g);
+    log('gate: ' + g.trim().split('\n').pop());
+    if (!(ok && /GATE PASS/.test(g))) { outcomes.s3 = 'FAIL'; log('feedback repair broke the mechanical gate'); break; }
+  }
   if (outcomes.s4 === 'PASS') outcomes.route = 'DELIVERED';
-  else if (outcomes.s4 === 'FAIL') { outcomes.route = 'NEEDS-CLARIFICATION'; fs.writeFileSync('clarification.md', `# Clarification needed — ${runName}\n\nS4 FAIL verdict:\n\n${s4}\n\n## Packet\n\`\`\`yaml\n${packet}\n\`\`\`\n`); }
+  else if (outcomes.s4 === 'FAIL') { outcomes.route = 'NEEDS-CLARIFICATION'; fs.writeFileSync('clarification.md', `# Clarification needed — ${runName}\n\nS4 FAIL verdict (after feedback repair):\n\n${s4verdict}\n\n## Packet\n\`\`\`yaml\n${packet}\n\`\`\`\n`); }
 } else if (outcomes.s3 === 'FAIL') {
   log('S3 gate failed after repair; routing to clarification (no S4/S5 spend)');
   const opens = [...packet.matchAll(/Q\d+[^\n]*/g)].map(m => m[0]).filter(l => /OPEN/i.test(l));

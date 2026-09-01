@@ -16,3 +16,6 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A6 (2026-09-01, operator ruling on S4 verdict): dry-run purity
 - --dry-run performs ZERO writes of ANY kind — including log files. If HERMES_CONTEXT_LOG points inside the destination, dry-run must not touch it. Logging happens only in real-run mode.
 - Mechanical gate addition: dry-run must leave the destination byte-identical (not merely "no probe.txt").
+
+## A7 (2026-09-01, operator ruling on S4 verdict #2): recursive convergence
+- Confirmed: A5 means RECURSIVE convergence. Reconciliation in the cp fallback must delete stale SUBTREES at every depth (mirroring rsync --delete), not just top-level entries. DST must end byte-identical to SRC in both paths, nested paths included. README's sync-strategy section must state this correctly.

@@ -1,72 +1,27 @@
-# hermes-context-sync
+# hermes-context sync
 
-One-way mirror of the hermes context directory into the workspace:
+Mirrors the hermes context source tree into the destination directory.
 
-- **SRC** (read-only, never written to): `/opt/data/workspace/hermes-context/`
-- **DST** (written, mirrored exactly): `/workspace/hermes-context/`
+## Paths
 
-The end state of DST always matches SRC, including deletions (mirror semantics).
+- Script: `sync-hermes-context.sh` (install to `~/.local/bin/sync-hermes-context.sh`)
+- Source (read-only, never written): `/opt/data/workspace/hermes-context/`
+- Destination: `/workspace/hermes-context/`
+- Log: `${HERMES_CONTEXT_DST}/.sync-hermes-context.log` if set, else `~/.cache/hermes-context-sync.log`
 
-## Configuration
-
-Override via environment variables:
+## Environment variables
 
 - `HERMES_CONTEXT_SRC` — source directory (default `/opt/data/workspace/hermes-context/`)
 - `HERMES_CONTEXT_DST` — destination directory (default `/workspace/hermes-context/`)
-- `HERMES_CONTEXT_LOG` — optional log file path (default empty = no logging)
+- `HERMES_CONTEXT_LOG` — log file path (overridable; default `~/.cache/hermes-context-sync.log`)
 
-## Usage
+## Behavior
 
-Standalone (no systemd, no rsync required):
+- **Primary mode**: `rsync -a --delete "${SRC}/" "${DST}/"` — src contents map directly into dst with no nesting.
+- **Fallback mode** (rsync absent): tar-pipe (or `cp -a`) copy, then find-based recursive deletion of dst entries absent from src, at every depth. Converges byte-identically.
+- **Dry-run purity**: `sync-hermes-context.sh --dry-run` performs zero writes — no DST changes, no log lines. It only computes and compares (rsync `--dry-run`, or compute-and-compare in fallback).
+- **Logging**: exactly one summary line (timestamp, mode, status) per real run. Dry-runs append nothing.
+- **Standalone**: exits 0 on success without systemd.
 
-    ./sync-hermes-context.sh
+## Install (user units, no root)
 
-### Flags
-
-- `--dry-run` — print the planned sync (itemized plan or rsync dry-run output) to
-  stdout **only**. Zero writes to DST and zero writes to the log, even if
-  `HERMES_CONTEXT_LOG` points inside DST. Never creates DST or the log file.
-- `--log FILE` — override the log path for this invocation (real runs only).
-
-## Sync strategy
-
-1. **Primary**: `rsync -a --delete SRC/ DST/` (used when `rsync` is on PATH).
-2. **Fallback**: if `rsync` is unavailable:
-   - `mkdir -p DST`
-   - `cp -a SRC/. DST/`
-   - reconciliation pass: delete any top-level entry in DST absent from SRC.
-
-Both paths produce an identical end state (verified: same
-`find "$DST" -printf '%P %y\n' | sort` output when GNU find is available; the
-script itself avoids GNU extensions and works with BusyBox find/coreutils).
-
-## Logging
-
-A single line (timestamp, mode, src, dst) is appended to the log file on real
-runs only, and only if a log path is configured. Dry runs never touch the log.
-
-## systemd user units
-
-Install the script (then make executable):
-
-    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-
-(Or edit `hermes-context.service` to use an absolute path to the script.)
-
-Copy `hermes-context.service` and `hermes-context.timer` to
-`~/.config/systemd/user/`, then:
-
-    systemctl --user daemon-reload
-    systemctl --user enable --now hermes-context.timer
-
-The timer runs every 6 hours (`OnCalendar=*-*-* 00/6:00:00`) with
-`Persistent=true` to catch missed runs. Units are user units — no root
-required, no `User=` directive.
-
-## Safety
-
-- SRC is only ever read; nothing is ever written to `/opt/data/workspace/hermes-context/`.
-- SRC is never nested inside DST (contents are synced, `SRC/.` → `DST/`).
-- Stale files in DST are removed by both sync paths (mirror, not accumulate).
-- The script uses no GNU-only constructs (`find -printf`, `date -I`), so it runs
-  under BusyBox as well as GNU userland.
