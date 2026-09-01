@@ -1,46 +1,95 @@
-=== hdcs/1 PACKET (reverse-translate this) ===
-reg: {domain: cs-programming, canon: shell/systemd vocabulary — rsync flags (--delete, --dry-run), cp -a, realpath, mktemp -d, systemctl --user, OnCalendar, ExecStart, identifiers HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST/HERMES_CONTEXT_LOG}
-intent: >
-  build standing one-way sync SRC->DST keeping /workspace/hermes-context an exact A9-class
-  mirror (contents+structure+symlinks, recursive, stale-deleted) via rsync --delete with
-  cp -a fallback converging to identical end state; systemd USER timer @ 6h; standalone
-  runnable; --dry-run pure zero-write incl. log + DST creation; guard set = closed list
-  {A11,A12,A14/A15,A18}; order law stage->verify->mutate; deliver artifact dir:
-  sync-hermes-context.sh + hermes-context.service + hermes-context.timer + README.md.
-must_keep:
-  - "source path is /opt/data/workspace/hermes-context/"
-  - "dry-run mode that performs no writes"
-  - "systemd user units, no root required"
-resolved:
-  - "Q1: canonical SRC/DST? -> A: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (A1)"
-  - "Q2: sync direction? -> A: one-way host->workspace, no write-back (A2)"
-  - "Q3: scheduler class? -> A: user-level systemctl --user; script standalone-capable if no systemd (A3)"
-  - "Q4: rsync availability? -> A: may be absent; cp -a fallback, contents-of-source sync (src/->dst), no nesting (A4)"
-  - "Q5: mirror semantics? -> A: exact mirror, stale deleted, both paths converge recursively (A5,A7)"
-  - "Q6: dry-run purity? -> A: zero writes incl. logs; DST byte-identical/nonexistent (A6,A16)"
-  - "Q7: equivalence class of mirror? -> A: levels 1-3 only — contents+structure+symlinks; verify FAILs nonzero on mismatch (A9)"
-  - "Q8: severity bar? -> A: FAIL = normal-operation defects only; exotic env -> KNOWN_LIMITATIONS (A10)"
-  - "Q9: destructive-misconfig? -> A: guard SRC==DST; no rm -rf DST before verified copy (A11)"
-  - "Q10: path-identity guard? -> A: realpath-based identity/ancestry/symlink-into-SRC refusal (A12)"
-  - "Q11: verified copy? -> A: content-compared staging per A9 class; stage->verify->touch DST (A13)"
-  - "Q12: env-var interaction class? -> A: generalized owned-concrete-path guard; beyond-guard env combos = limitations (A14,A15)"
-  - "Q13: DST lifecycle? -> A: real run mkdir -p DST; dry-run must not create it (A16)"
-  - "Q14: env parameterization scope? -> A: mandated mechanism; deployed defaults are production values, not scope limits (A17)"
-  - "Q15: degenerate paths? -> A: refuse '', '.', '/' via component tests; DST symlink outside SRC refused; symlink DST replaced by real tree (A18)"
-  - "Q16: ownership requirements? -> A: none beyond OS write permission; path-law list closed; refusals must cite A-numbers (A19)"
-  - "Q17: remaining ambiguities? -> A: OPEN"
-workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
-handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
-constraints:
-  - "A9-class exact mirror: contents+structure+symlinks recursive, both sync paths, FAIL nonzero on mismatch"
-  - "stage -> content-verify -> mutate DST ; no rm -rf DST before verified copy (A11,A13)"
-  - "guard set closed = A12 identity, A14/A15 owned-concrete-paths, A18 degenerate; refusals cite A-number (A19)"
-  - "dry-run: zero writes, no log, no DST creation (A6,A16)"
-  - "log ∉ DST always; entrypoints ∉ mirrored tree (A8)"
-  - "no_resurrect: banned prior defects — accumulate-only fallback (A5), probe-only dry-run gate (A6,A16), metadata-in-scope verify (A9), over-broad parent-wall refusals (A15), 'DST must pre-exist' (A16), invented scope incl. ownership (A19)"
-paths:
-  - "/workspace/hermes-context/  # DST default"
-  - "/opt/data/workspace/hermes-context/  # SRC default (MUST_KEEP)"
-  - "~/.local/bin or /workspace/hdcs/bin  # entrypoint install, outside DST (A8)"
-  - "~/.cache/...  # log file parent, outside DST (A8)"
-budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+Task: hermes-context freshness timer
+
+Keep /workspace/hermes-context/ fresh from its canonical host-mount source. The workspace
+needs a standing sync so local analysis always reads current Hermes context.
+
+Deliverable (all files in one artifact dir):
+- sync-hermes-context.sh — rsync-based sync; source path from HERMES_CONTEXT_SRC env var
+  with a sensible default at the top of the script; destination likewise via
+  HERMES_CONTEXT_DST (default /workspace/hermes-context); must support --dry-run (no
+  writes); must be idempotent; must log a one-line summary per run
+- hermes-context.service + hermes-context.timer — systemd USER units (no root), timer
+  runs every 6 hours
+- README.md — how to install, how to change the source, how to test with --dry-run
+
+MUST_KEEP: source path is /opt/data/workspace/hermes-context/
+MUST_KEEP: dry-run mode that performs no writes
+MUST_KEEP: systemd user units, no root required
+
+
+=== OPERATOR ANSWERS ===
+A1: The canonical source is /opt/data/workspace/hermes-context/ (recorded in kb digests as
+    the host-side Hermes context mount). Destination is /workspace/hermes-context/ (exists,
+    currently holds INDEX.md, agents/, config/).
+A2: Sync direction is host -> workspace, one-way; nothing writes back to the host mount.
+A3: Prefer a user-level systemd timer (systemctl --user); if the environment lacks systemd,
+    the script itself must still work standalone (cron/installer can call it).
+A4: The runtime may lack rsync entirely — the script must detect that and fall back to
+    `cp -a` semantics (or tar pipe) so the timer works on minimal hosts. Also sync the
+    CONTENTS of the source directory into the destination (src/ -> dst), never nesting
+    the source dir inside the destination.
+
+## A5 (2026-09-01, operator ruling on S4 verdict): mirror semantics
+- Destination must be an EXACT mirror of source: stale files DELETED. The rsync path (--delete) is correct; the cp fallback path must reconcile identically — no accumulate-only mode. Both paths converge to identical end state.
+- Rationale: fallback is a fallback, not a different feature. Divergent semantics between paths = defect (S4 catch, confirmed).
+
+## A6 (2026-09-01, operator ruling on S4 verdict): dry-run purity
+- --dry-run performs ZERO writes of ANY kind — including log files. If HERMES_CONTEXT_LOG points inside the destination, dry-run must not touch it. Logging happens only in real-run mode.
+- Mechanical gate addition: dry-run must leave the destination byte-identical (not merely "no probe.txt").
+
+## A7 (2026-09-01, operator ruling on S4 verdict #2): recursive convergence
+- Confirmed: A5 means RECURSIVE convergence. Reconciliation in the cp fallback must delete stale SUBTREES at every depth (mirroring rsync --delete), not just top-level entries. DST must end byte-identical to SRC in both paths, nested paths included. README's sync-strategy section must state this correctly.
+
+## A8 (2026-09-01, operator-delegated ruling on S4 verdict #5): placement law
+- Confirmed both findings. The log lives OUTSIDE the destination ALWAYS (the ~/.cache default; never inside DST, no carve-outs, no post-mirror rewrite exceptions — A5 exact mirror means exact).
+- Install paths live OUTSIDE the mirrored tree: ~/.local/bin (or /workspace/hdcs/bin), never artifact/ inside DST. A sync must never delete or move the installed service's own entrypoints.
+
+## A9 (2026-09-01, operator ruling): equivalence class of "exact mirror"
+- Mirror = levels 1-3 ONLY: file contents + directory structure (recursive, both sync paths) + symlinks. NOT included: file/root metadata, timestamps, hardlink topology.
+- The self-verification must enforce exactly this class: verify contents+structure+symlinks recursively, and FAIL (nonzero exit) on any mismatch — never warn-and-exit-0.
+- Judge scope: complaints about metadata/root-metadata/hardlinks are out-of-scope per this ruling.
+
+## A10 (2026-09-01, operator ruling): S4 severity bar / stopping criteria
+- FAIL only on defects reachable in NORMAL operation: default config, documented usage, plausible misconfiguration that loses or corrupts user data.
+- Exotic/adversarial triggers (newline-in-filename corpora, hostile env combinations like pointing DST at the log dir) go to the packet's +open section as KNOWN_LIMITATIONS with repro notes — they do not block delivery.
+- The judge still cites everything it finds; the bar classifies, it does not suppress.
+
+## A11 (2026-09-01, operator-delegated): destructive-misconfig guard
+- Confirmed A10-class FAIL. The script MUST guard SRC == DST (reject or clean no-op) and MUST NOT rm -rf the destination before establishing a verified copy of the source elsewhere. Source survival outranks mirror freshness.
+
+## A12 (2026-09-01, operator-delegated): path-identity guard (A11 in spirit)
+- Guard the IDENTITY of the trees, not string equality: compare realpath (symlinks resolved) of SRC and DST; refuse (clean nonzero exit, no writes) when realpath(SRC) == realpath(DST), or when either realpath is an ancestor/descendant of the other, or when DST is (or resolves through) a symlink into SRC. Applies to both sync paths before ANY destructive operation.
+
+## A13 (2026-09-01, operator-delegated): "verified copy" definition (A11/A12 completion)
+- "Verified" means CONTENT-COMPARED: the staging copy counts as verified only after its contents+structure+symlinks (A9 class) are compared against SRC and match — a non-emptiness check is not verification.
+- NO destructive operation on DST (deletion, reconciliation, rename-over) until a verified copy of SRC exists. Order is law: stage -> verify -> only then touch DST.
+- Self-verification inside the script must enforce this (exit nonzero if staging verification fails) and the README must not call an unverified copy "verified".
+
+## A14 (2026-09-01, operator-delegated): protected-path class closes the env-interaction theme
+- GENERALIZED guard (replaces per-var whack-a-mole): the script computes its own internal paths (log dir, staging dir, entrypoint dir) and REFUSES (clean nonzero, no writes) if HERMES_CONTEXT_DST realpath equals or contains any of them, or if the resolved staging location equals/is-inside DST or SRC (TMPDIR included — force a script-owned stage dir if TMPDIR fails the check).
+- This closes the entire "env var X pointed at Y" class. FURTHERMORE: adversarial env combinations beyond this guard are KNOWN_LIMITATIONS (+open), NOT FAIL — the judge must cite A14 and stop re-deriving this class through new doors. Judgment returns to intent-vs-law, not env algebra.
+
+## A15 (2026-09-01, operator-delegated): A14 precision — concrete paths, not parents (gate-not-wall calibration)
+- "Owned path" = the CONCRETE instantiated path: the actual stage dir the script creates (e.g. its mktemp -d result), the resolved log FILE's parent dir, the resolved entrypoint dir. Never a generic ancestor like TMPDIR or /tmp itself.
+- Comparison rule: refuse only when realpath(DST) == owned, or owned is inside DST, or DST is inside owned — using path-boundary-aware comparison (split on components or trailing-slash boundary), never bare string-prefix matching.
+- Run 017's refusal of /tmp/hdcs-gate-dst was a WALL (over-broad A14 implementation), not a gate — this ruling is the calibration.
+
+## A16 (2026-09-01, operator-delegated): DST lifecycle (run 019 wall calibration)
+- DST may not exist before a run. The script MUST create it (mkdir -p) on real runs; dry-run MUST NOT create it. "DST must pre-exist" is not law — the fixture lifecycle deliberately runs dry-run against an absent DST.
+- Gate probe strengthened: dry-run must leave DST nonexistent (not merely probe-free).
+
+## A17 (2026-09-01, operator-delegated): parameterization vs deployed defaults (judge calibration)
+- The packet's fixed paths (e.g. /opt/data/workspace/hermes-context/) are the DEPLOYED configuration — the values the unit/timer passes at install time. They are NOT a prohibition on env parameterization: HERMES_CONTEXT_SRC/DST env override is the mandated mechanism (gate contract), and the deployed paths are simply its production values.
+- Judges: never read a deployed default as a scope restriction. The S4 verdict that called env override "inventing scope" was WRONG and caused a contract regression in the repair. Contract (gate.sh) and A-law outrank verdicts.
+
+## A18 (2026-09-01, operator-delegated): degenerate-path refusals (root safety)
+- Refuse (clean nonzero, no writes) when HERMES_CONTEXT_DST or SRC is "/" , empty, or "." — always, before any destructive op. The component-boundary guards must handle these as special cases first (the "$RD/"-pattern form misses DST=/ : test components, not slash-suffixed strings).
+- DST symlink resolving outside SRC: refuse (A12) — after A12+placement guards pass, DST must END as a real directory tree identical to SRC (A5/A9); if the old DST was a symlink, it is replaced by the real tree (symlink removed, not retained).
+
+## A19 (2026-09-01, operator-delegated): no invented scope — ownership edition
+- There is NO ownership requirement on DST, SRC, or their ancestors. The operator may sync anywhere they hold write permission (including /tmp leaves under a root-owned parent — sticky-bit dirs exist for exactly this). The OS is the ownership gate; the script adds none.
+- The complete path-law list is closed: A12 identity, A14/A15 protected internal paths (concrete), A18 degenerate paths. Anything beyond these = invented scope = wall behavior. Refusals must cite one of these A-numbers; a refusal citing nothing is itself a defect.
+
+## A20 (2026-09-01, operator-delegated): staging order + script-namespace reservation (closes run 025 findings)
+- STAGE BEFORE CHECK is legal in ONE form only: resolve the stage path with a PURE string computation (no mktemp, no mkdir, no write); validate the computed path against SRC/DST/owned; only then create it. mktemp-then-refuse violates C4 (refusal paths perform zero writes).
+- Reserved script namespace: '.prunelist', 'staging', '.hc-stage*' and similar working names are RESERVED when used by the script. If SRC itself contains a file/dir with a reserved name, the script RENAMES ITS WORKING FILE (e.g. '.hc-prunelist' -> use mktemp file instead of fixed name) rather than touching the mirror file. Mirror files are never overwritten by script bookkeeping.

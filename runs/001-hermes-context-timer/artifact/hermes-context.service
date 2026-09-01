@@ -1,7 +1,9 @@
 [Unit]
-Description=Hermes context one-way sync (SRC to DST, user-level, no root)
+Description=Hermes context mirror sync (host mount -> workspace)
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
+Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
+Environment=HERMES_CONTEXT_DST=/workspace/hermes-context/
 

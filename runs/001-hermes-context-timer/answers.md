@@ -69,3 +69,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A19 (2026-09-01, operator-delegated): no invented scope — ownership edition
 - There is NO ownership requirement on DST, SRC, or their ancestors. The operator may sync anywhere they hold write permission (including /tmp leaves under a root-owned parent — sticky-bit dirs exist for exactly this). The OS is the ownership gate; the script adds none.
 - The complete path-law list is closed: A12 identity, A14/A15 protected internal paths (concrete), A18 degenerate paths. Anything beyond these = invented scope = wall behavior. Refusals must cite one of these A-numbers; a refusal citing nothing is itself a defect.
+
+## A20 (2026-09-01, operator-delegated): staging order + script-namespace reservation (closes run 025 findings)
+- STAGE BEFORE CHECK is legal in ONE form only: resolve the stage path with a PURE string computation (no mktemp, no mkdir, no write); validate the computed path against SRC/DST/owned; only then create it. mktemp-then-refuse violates C4 (refusal paths perform zero writes).
+- Reserved script namespace: '.prunelist', 'staging', '.hc-stage*' and similar working names are RESERVED when used by the script. If SRC itself contains a file/dir with a reserved name, the script RENAMES ITS WORKING FILE (e.g. '.hc-prunelist' -> use mktemp file instead of fixed name) rather than touching the mirror file. Mirror files are never overwritten by script bookkeeping.

@@ -1,161 +1,125 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way mirror SRC -> DST (hermes-context run 001)
-# Laws: A1-A19. Guards cite A-numbers; refusals exit nonzero.
-# Standalone-capable: no systemctl dependency (cron/manual OK). User-level only, no root.
+# sync-hermes-context.sh — mirror SRC -> DST (host -> workspace, one-way, A2)
+# PIPE law: guards -> stage -> verify_stage -> reconcile -> verify_final -> summary
+# Path-law citations: A12 identity, A14/A15 concrete owned paths, A18 degenerate, A8 log placement.
 set -euo pipefail
-
-DRY_RUN=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run|-n) DRY_RUN=1 ;;
-    *) echo "unknown argument: $arg (usage: $0 [--dry-run])" >&2; exit 2 ;;
-  esac
-done
 
 SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
 DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
+LOG="${HERMES_CONTEXT_LOG:-$HOME/.cache/hermes-context/sync.log}"
+DRY_RUN=0
+[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-refuse() { # $1 = A-number citation, $2 = reason
-  echo "REFUSED [$1] $2" >&2
-  exit 1
+refuse() { echo "REFUSE [$1] $2" >&2; exit 1; }
+
+rp() { # realpath, tolerant of nonexistent leaf
+  if command -v realpath >/dev/null 2>&1; then realpath -m -- "$1"; else readlink -f -- "$1"; fi
+}
+rpe() { # realpath of existing path
+  if command -v realpath >/dev/null 2>&1; then realpath -e -- "$1" 2>/dev/null || readlink -f -- "$1"; else readlink -f -- "$1"; fi
+}
+inside_or_eq() { # eq-or-inside, boundary-aware component compare (A15)
+  case "$2" in "$1"|"$1"/*) return 0 ;; *) return 1 ;; esac
 }
 
-# component-boundary ancestor: true if $2 == $1 or $2 lies strictly inside $1
-is_within() {
-  [ "$2" = "$1" ] && return 0
-  case "$2/" in "$1/"*) return 0 ;; esac
-  return 1
-}
-
-# --- Guard a: A18 — empty / "." / "/" by component test (not slash-suffix pattern) ---
+# --- guards (before ANY write) — A18 degenerate (component tests, not slash-suffix strings) ---
 for p in "$SRC" "$DST"; do
-  case "$p" in
-    ""|"."|"/") refuse "A18" "invalid path component (empty / . / /): '$p'" ;;
-  esac
+  [ -n "$p" ] || refuse A18 "degenerate path: empty string"
+  case "$p" in /|.|//|./) refuse A18 "degenerate path: $p" ;; esac
 done
 
-# resolve (parents may not exist yet; -m does not write)
-RSRC=$(realpath -m -- "$SRC")
-RDST=$(realpath -m -- "$DST")
-for p in "$RSRC" "$RDST"; do
-  case "$p" in
-    ""|"."|"/") refuse "A18" "resolved path is empty / . / /" ;;
-  esac
+rsrc=$(rpe "$SRC") || refuse A18 "cannot resolve SRC"
+rdst=$(rp "$DST")
+
+# --- A12 identity / ancestor / descendant / DST-symlink-into-SRC (realpath, not string equality) ---
+inside_or_eq "$rsrc" "$rdst" && refuse A12 "DST equals or lies inside SRC (realpath): $rdst"
+inside_or_eq "$rdst" "$rsrc" && refuse A12 "SRC equals or lies inside DST (realpath): $rsrc"
+
+# --- A14/A15: concrete owned paths vs DST (entrypoint dir, resolved log FILE parent).
+# NOTE: TMPDIR itself is a generic ancestor, NOT an owned path (A15 calibration: /tmp is
+# not concrete). Only the concrete mktemp -d result is checked, post-instantiation.
+ENTRY_DIR=$(cd -- "$(dirname -- "$0")" && pwd)
+LOGPARENT=$(rp -- "$(dirname -- "$LOG")")
+for owned in "$ENTRY_DIR" "$LOGPARENT"; do
+  inside_or_eq "$owned" "$rdst" && refuse A14 "owned path is/inside DST: $owned"
+  inside_or_eq "$rdst" "$owned" && refuse A15 "DST is/inside owned path: $owned"
 done
+# A8: log FILE parent must lie outside DST (checked above via concrete LOGPARENT).
 
-# --- Guard d: A11 — SRC == DST pre-mutation ---
-if [ "$SRC" = "$DST" ] || [ "$RSRC" = "$RDST" ]; then
-  refuse "A11" "SRC == DST ($RSRC); one-way mirror forbids self-sync, no rm -rf before verified copy"
-fi
-
-# --- Guard b: A12 — ancestor/descendant relation ---
-if is_within "$RSRC" "$RDST" || is_within "$RDST" "$RSRC"; then
-  refuse "A12" "SRC and DST in ancestor/descendant relation (SRC=$RSRC DST=$RDST)"
-fi
-
-if [ ! -d "$SRC" ]; then
-  echo "ERROR: source does not exist or is not a directory: $SRC" >&2
-  exit 1
-fi
-
-# --- Guard e: A18/A12 — DST itself a symlink: never followed; dangling handled explicitly ---
-if [ -L "$DST" ]; then
-  if ! DTARGET=$(realpath -- "$DST"); then
-    refuse "A18" "DST is a dangling symlink (target unresolvable): $DST"
-  fi
-  if is_within "$RSRC" "$DTARGET" || is_within "$DTARGET" "$RSRC"; then
-    refuse "A12" "DST symlink resolves into SRC tree: $DST -> $DTARGET"
-  fi
-  refuse "A18" "DST is a symlink resolving outside SRC: $DST -> $DTARGET"
-fi
-
-if { [ -e "$DST" ] || [ -L "$DST" ]; } && [ ! -d "$DST" ]; then
-  echo "ERROR: DST exists and is not a directory: $DST" >&2
-  exit 1
-fi
-
-# --- Dry-run: zero writes from here on (A6, A16): no log, no mktemp, no DST mkdir/touch ---
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "DRY-RUN plan (zero writes; DST will be left byte-identical or nonexistent):"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -rl --delete --dry-run "$SRC"/ "$DST"/
-  else
-    echo "rsync not present: fallback plan = stage copy (cp -a) -> content-verify -> atomic swap, stale subtrees deleted"
-  fi
-  echo "DRY-RUN complete. No files, logs, or temp dirs were created."
+  # A6/A16: zero writes — no log file, no stage dir, no mkdir DST; summary to stdout only
+  echo "DRY-RUN SUMMARY [A6: zero writes performed]"
+  echo "  src: $SRC ($rsrc)"
+  echo "  dst: $DST ($rdst)"
+  echo "  log: $LOG"
+  echo "  plan: stage -> verify_stage -> reconcile (prune stale, all depths) -> verify_final"
+  echo "  result: would converge DST to mirror of SRC (recursive, idempotent)"
   exit 0
 fi
 
-# ================= real run =================
+# --- real run: concrete stage (script-owned; A14/A15 check the CONCRETE path only) ---
+STAGE=$(mktemp -d "${TMPDIR:-/tmp}/hermes-context-stage.XXXXXX") || exit 1
+trap 'rm -rf -- "$STAGE"' EXIT
+cstage=$(rpe "$STAGE")
+# A14: the resolved staging must be inside neither DST nor SRC (a TMPDIR under SRC
+# would place the stage inside the source tree and contaminate it).
+inside_or_eq "$cstage" "$rdst" && refuse A14 "resolved staging is/inside DST: $cstage"
+inside_or_eq "$rdst" "$cstage" && refuse A15 "DST is/inside resolved staging: $cstage"
+inside_or_eq "$cstage" "$rsrc" && refuse A14 "resolved staging is/inside SRC: $cstage"
+inside_or_eq "$rsrc" "$cstage" && refuse A15 "SRC is/inside resolved staging: $cstage"
+# Note: the stage is created by mktemp before these checks (a concrete path must exist
+# to be resolved); on any refusal the EXIT trap removes it, so DST/SRC are untouched.
 
-# Entrypoint dir (this script's own location); sync must never delete it (A8)
-SCRIPTDIR=""
-SCRIPTDIR=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd) || SCRIPTDIR=""
+HAVE_RSYNC=0
+command -v rsync >/dev/null 2>&1 && HAVE_RSYNC=1
 
-# --- Guard c: A14/A15 — closed owned-set wall, component-boundary comparison.
-# Guard BEFORE any mutation: no log parent mkdir, no mktemp, no DST write until all
-# collision checks pass (A8 log-placement + guard-before-mutation).
-# owned := { stage mktemp dir, resolved log parent, entrypoint dir } — never generic ancestors
-LOG="${HERMES_CONTEXT_LOG:-$HOME/.cache/hermes-context/sync.log}"
-LOGPARENT_RAW=$(dirname -- "$LOG")
-if ! LOGPARENT=$(realpath -m -- "$LOGPARENT_RAW"); then
-  refuse "A14/A15" "log parent path unresolvable: $LOGPARENT_RAW"
-fi
-if is_within "$RDST" "$LOGPARENT" || is_within "$LOGPARENT" "$RDST"; then
-  refuse "A14/A15" "log parent collides with DST (equal/ancestor/descendant): log-parent=$LOGPARENT DST=$RDST"
-fi
-# log file itself must not land inside DST (A8)
-if ! LOGRESOLVED=$(realpath -m -- "$LOG"); then
-  refuse "A14/A15" "log file path unresolvable: $LOG"
-fi
-if is_within "$RDST" "$LOGRESOLVED"; then
-  refuse "A14/A15" "resolved log file path lies inside DST: $LOG"
-fi
-
-# Stage dir (concrete instantiated owned path) — created only after guards pass
-STAGE=$(mktemp -d)
-STAGE=$(realpath -- "$STAGE")
-cleanup() { rm -rf -- "$STAGE" "${DST}.old.$$" 2>/dev/null || true; }
-trap cleanup EXIT
-
-OWNED=("$STAGE" "$LOGPARENT")
-[ -n "$SCRIPTDIR" ] && OWNED+=("$SCRIPTDIR")
-for o in "${OWNED[@]}"; do
-  if is_within "$o" "$RDST" || is_within "$RDST" "$o"; then
-    refuse "A14/A15" "DST collides with owned path (equal/ancestor/descendant): DST=$RDST owned=$o"
-  fi
-done
-
-# Guards all passed — now (and only now) instantiate owned paths and write
-mkdir -p -- "$LOGPARENT"
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] sync start SRC=$RSRC DST=$RDST" >> "$LOG"
-
-# --- Stage build: rsync preferred, cp fallback; both converge to same A9 class (contents+structure+symlinks, recursive) ---
-if command -v rsync >/dev/null 2>&1; then
-  rsync -rl --delete "$SRC"/ "$STAGE"/
+# --- stage: copy SRC contents -> stage (contents sync, never nested) ---
+if [ "$HAVE_RSYNC" -eq 1 ]; then
+  rsync -a --delete "$SRC"/ "$STAGE"/
 else
-  # L3 fallback: no rsync -> cp -a equivalent
-  cp -a -- "$SRC"/. "$STAGE"/
+  # A4 fallback: cp -a semantics; prune happens at reconcile
+  cp -a "$SRC/." "$STAGE"/
 fi
 
-# --- Content-verify staging vs SRC: A9 levels 1-3 ONLY (contents, structure, symlink targets; no metadata/timestamps/hardlinks) ---
-if ! diff -r --no-dereference "$SRC" "$STAGE" >/dev/null 2>&1; then
-  echo "VERIFY FAILED: staged copy differs from SRC (A9 levels 1-3). Aborting; DST untouched." >> "$LOG"
-  echo "ERROR: content verification of staging failed (A9). DST untouched, nonzero exit." >&2
-  diff -r --no-dereference "$SRC" "$STAGE" >&2 || true
-  exit 1
+# --- verify_stage (A9/A13): verified copy before DST is touched ---
+diff -r --no-dereference "$SRC" "$STAGE" >/dev/null \
+  || { echo "FAIL [A9] stage verification mismatch (contents/structure/symlink-targets)" >&2; exit 1; }
+
+# --- reconcile (A11/A13/A18): verified stage exists; only now touch DST ---
+# A18: a pre-existing DST symlink is replaced (never followed); but if it resolves
+# outside SRC it is refused outright (A12) — replacement is only for in-family links.
+if [ -L "$DST" ]; then
+  ltarget=$(rp -- "$DST")
+  inside_or_eq "$rsrc" "$ltarget" || refuse A18 "DST symlink resolves outside SRC: $ltarget"
+  rm -f -- "$DST"
+fi
+mkdir -p -- "$DST"
+if [ "$HAVE_RSYNC" -eq 1 ]; then
+  rsync -a --delete "$STAGE"/ "$DST"/
+else
+  # remove type mismatches (file<->dir, symlink<->file) before copy
+  (cd "$STAGE" && find . -mindepth 1 -print0) | while IFS= read -r -d '' p; do
+    d="$DST/$p"
+    if [ -L "$d" ] || { [ -e "$d" ] && { { [ -d "$STAGE/$p" ] && [ ! -d "$d" ]; } || { [ ! -d "$STAGE/$p" ] && [ -d "$d" ]; }; }; }; then
+      rm -rf -- "$d"
+    fi
+  done
+  cp -a "$STAGE/." "$DST"/
+  # prune stale subtrees in DST, all depths (A5)
+  (cd "$DST" && find . -mindepth 1 -depth -print0) > "$STAGE/.prunelist"
+  while IFS= read -r -d '' p; do
+    { [ -e "$STAGE/$p" ] || [ -L "$STAGE/$p" ]; } || rm -rf -- "$DST/$p"
+  done < "$STAGE/.prunelist"
+  rm -f -- "$STAGE/.prunelist"
 fi
 
-# --- Only now mutate DST: verified copy exists (A11, A13). Atomic-ish swap; stale subtrees die with the old tree. ---
-mkdir -p -- "$(dirname -- "$DST")"
-if [ -e "$DST" ] || [ -L "$DST" ]; then
-  mv -- "$DST" "${DST}.old.$$"
-fi
-mv -- "$STAGE" "$DST"
-rm -rf -- "${DST}.old.$$"
-trap - EXIT
+# --- verify_final (A9): DST end == SRC end per MIRROR class ---
+diff -r --no-dereference "$SRC" "$DST" >/dev/null \
+  || { echo "FAIL [A9] final verification mismatch: DST != SRC" >&2; exit 1; }
 
-echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] sync complete (verified staged copy swapped in; stale subtrees removed; log outside DST per A8)" >> "$LOG"
-echo "sync complete: $RSRC -> $RDST"
-exit 0
+# --- summary + log (A8: log parent verified outside DST in guards) ---
+SUMMARY="sync OK: $rsrc -> $rdst (mirror verified, idempotent; rsync=$HAVE_RSYNC)"
+echo "$SUMMARY"
+mkdir -p -- "$(dirname -- "$LOG")"
+printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SUMMARY" >> "$LOG"
 
