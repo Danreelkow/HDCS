@@ -127,10 +127,11 @@ if (!s3cached) {
 checkBudget('s3');
 const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-alt', 's3-repair'];
 const gateFails = [];
+const s4evidence = (!gateFails.length && fs.existsSync('s4-verdict.txt')) ? `\n\nS4 JUDGE VERDICT from the previous lap (fix its findings — the gate baseline is green, KEEP it green):\n${fs.readFileSync('s4-verdict.txt', 'utf8')}` : '';
 for (const attempt of s3attempts) {
   const input = attempt === 's3-repair'
     ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
-    : `${shared}GATE OUTPUTS (both ensemble attempts):\n${(gateFails.length ? gateFails : [fs.readFileSync('gate-out.txt', 'utf8')]).join('\n---\n')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed — minimal diff, fix BOTH failures):\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
+    : `${shared}GATE OUTPUTS (ensemble attempts):\n${(gateFails.length ? gateFails.join('\n---\n') : 'GATE PASS (baseline is green)')}${s4evidence}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed — minimal diff, fix BOTH failures if listed):\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
   if (!build.trim()) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log(`${attempt}: empty response — previous artifacts left untouched on disk`); break; }
   fs.writeFileSync('artifact-build.txt', build);
