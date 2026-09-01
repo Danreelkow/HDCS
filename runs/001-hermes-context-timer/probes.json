@@ -1,0 +1,9 @@
+{
+  "source-path": ["/opt/data/workspace/hermes-context"],
+  "destination-path": ["/workspace/hermes-context"],
+  "dry-run": ["dry-run", "dry run"],
+  "no-writes-in-dry-run": ["no writes", "without writing", "no changes"],
+  "user-level-timer": ["systemctl --user", "user units", "user-level"],
+  "rsync-based": ["rsync"],
+  "idempotent": ["idempotent", "safe to run repeatedly"]
+}

@@ -1,0 +1,39 @@
+# Build a Hermes Context Sync Tool
+
+## What we're making
+A folder with four files: a shell script called `sync-hermes-context.sh`, two systemd service files (`hermes-context.service` and `hermes-context.timer`), and a README explaining how it all works.
+
+## What the script does
+It copies files one way only — from the host machine into the workspace. The source is `/opt/data/workspace/hermes-context/` and the destination is `/workspace/hermes-context/`. It copies the *contents* of the source folder into the destination, so you never end up with the source folder nested inside the destination. Nothing ever gets written back to the host.
+
+The main tool for copying is `rsync` with archive mode and delete enabled, so the destination ends up exactly matching the source. If `rsync` isn't installed, the script detects that and falls back to `cp -a` or a tar pipe instead.
+
+## Key behaviors
+- **Dry-run mode:** a `--dry-run` flag shows what would happen without writing anything. This must hold in every code path, including the fallback copy method.
+- **Idempotent:** running it once or a hundred times gives the same result — the destination always converges to match the source.
+- **Simple logging:** each real run prints a one-line summary.
+- **Standalone:** the script works on its own, so it can also be called from cron or an installer on systems without systemd.
+
+## Scheduling
+A systemd *user* timer runs the sync every six hours. These are user-level units installed under `~/.config/systemd/user/` and managed with `systemctl --user` — no root access needed, and no `User=` line in the unit files.
+
+## Answers settled during planning
+- Source path confirmed as `/opt/data/workspace/hermes-context/` (the host-side Hermes context mount).
+- Destination `/workspace/hermes-context/` already exists and contains `INDEX.md`, an `agents/` folder, and a `config/` folder.
+- Sync direction is one-way, host to workspace; no write-back.
+- Privilege model is user-level systemd, no root.
+- If systemd isn't available, the script runs standalone.
+- If rsync is missing, fall back to `cp -a` or a tar pipe.
+- Copy granularity: contents of source into destination, never nested.
+- No remaining questions — all requirements are covered.
+
+## How the work proceeds
+The build runs in four phases: plan, build, verify, deliver. A separate verifier checks the result, and up to two fix cycles are allowed if something fails. The final gate is either READY or NOT READY.
+
+## Deliverables (exact locations)
+- `/workspace/hermes-context-artifact/sync-hermes-context.sh`
+- `/workspace/hermes-context-artifact/hermes-context.service`
+- `/workspace/hermes-context-artifact/hermes-context.timer`
+- `/workspace/hermes-context-artifact/README.md`
+
+The output should stay around 60 lines, with at most two fix cycles and at most two clarifying questions.

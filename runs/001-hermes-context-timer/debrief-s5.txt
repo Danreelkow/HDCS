@@ -1,0 +1,37 @@
+### Hermes Context Sync Setup
+
+**Objective:**
+Create an artifact directory that includes a script, service, timer, and README to synchronize the contents of a source directory to a workspace directory.
+
+**Details:**
+- The source directory is `/opt/data/workspace/hermes-context/`.
+- The destination directory is `/workspace/hermes-context/`.
+- The synchronization is one-way from the host to the workspace, with no write-back to the source directory.
+- Use `rsync` with the `-a --delete` flags for the primary sync method. If `rsync` is not available, use `cp -a` or a tar pipe as a fallback.
+- Perform a dry-run mode that does not make any changes.
+- The systemd units will be user-level, meaning no root privileges are required.
+- The script must run independently if systemd is not available.
+- Ensure that the contents of the source directory are copied to the destination directory without nesting the source directory inside the destination.
+
+**Resolved Points:**
+- The source path is `/opt/data/workspace/hermes-context/`.
+- The destination path is `/workspace/hermes-context/`.
+- The sync direction is one-way from the host to the workspace.
+- The privilege model uses user-level systemd units.
+- If systemd is not available, the script must run independently.
+- If `rsync` is not available, use `cp -a` or a tar pipe.
+- The source contents will be copied directly to the destination without nesting.
+
+**Workflow:**
+The workflow consists of planning, building, verifying, and delivering the artifact. The builders are dynamic, and the verifier is decorrelated. The artifact is ready after two fix cycles.
+
+**Paths:**
+- `/workspace/hermes-context-artifact/sync-hermes-context.sh`
+- `/workspace/hermes-context-artifact/hermes-context.service`
+- `/workspace/hermes-context-artifact/hermes-context.timer`
+- `/workspace/hermes-context-artifact/README.md`
+
+**Budgets:**
+- Estimated tokens: 60
+- Maximum fix cycles: 2
+- Questions: 2

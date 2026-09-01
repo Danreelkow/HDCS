@@ -1,0 +1,7 @@
+[Unit]
+Description=Hermes context one-way sync
+
+[Service]
+Type=oneshot
+ExecStart=%h/workspace/hermes-context-artifact/sync-hermes-context.sh
+

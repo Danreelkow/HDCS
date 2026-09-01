@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+// loop.mjs — HDCS MVP loop v0.1: cost-first roster, mechanical gates at every seam.
+// usage: node loop.mjs <task-dir> [--budget 0.25]
+// stages: S1 translate (validate, repair <=2, escalate 1) -> S2 brief -> S3 worker
+//         (+ artifact extraction + task gate.sh) -> S5 egress (reverse-gate, fallback 1)
+// S4 judgment gate: skipped in v0.1 when the mechanical gate covers the deliverable.
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+
+const HERE = path.dirname(new URL(import.meta.url).pathname);
+const seats = JSON.parse(fs.readFileSync(path.join(HERE, 'seats.json'), 'utf8'));
+const taskDir = path.resolve(process.argv[2] ?? '.');
+const bi = process.argv.indexOf('--budget');
+const budget = Number(bi > -1 ? process.argv[bi + 1] : 0.25);
+const runName = path.basename(taskDir);
+fs.mkdirSync(path.join(taskDir, 'results'), { recursive: true });
+process.chdir(taskDir);
+
+const task = fs.readFileSync('task.md', 'utf8');
+const answers = fs.existsSync('answers.md') ? fs.readFileSync('answers.md', 'utf8') : '';
+const mustKeeps = [...task.matchAll(/MUST_KEEP:\s*(.+)/g)].map(m => m[1].trim());
+const costs = [];
+const log = m => console.log(`[loop] ${m}`);
+const outcomes = {};
+
+function seat(name, model, sysFile, userText, maxTok = 4096, reasonCap = 2000) {
+  const sys = path.join(HERE, 'prompts', sysFile);
+  fs.writeFileSync('in.txt', userText);
+  execFileSync('node', [path.join(HERE, 'gates', 'seat.mjs'), name, model, sys, 'in.txt', String(maxTok), '0.2', String(reasonCap)], { stdio: 'inherit' });
+  const r = JSON.parse(fs.readFileSync(`results/${name}.json`, 'utf8'));
+  costs.push({ seat: name, model, cost: r.usage?.cost ?? 0 });
+  return r.text ?? '';
+}
+const fence = t => (t.match(/```yaml\n([\s\S]*?)\n```/) || t.match(/```\n([\s\S]*?)\n```/) || [])[1] ?? null;
+const total = () => costs.reduce((s, c) => s + c.cost, 0);
+const checkBudget = stage => { if (total() > budget) { log(`BUDGET EXCEEDED at ${stage} ($${total().toFixed(4)} > $${budget})`); report(); process.exit(3); } };
+function report() {
+  console.log('\n=== COST REPORT ===');
+  for (const c of costs) console.log(`${c.seat.padEnd(14)} ${c.model.padEnd(32)} $${c.cost.toFixed(5)}`);
+  console.log(`TOTAL: $${total().toFixed(4)} / budget $${budget}`);
+  console.log('OUTCOMES:', JSON.stringify(outcomes));
+}
+
+// --- S1 ---
+const s1User = task + (answers ? '\n\n=== OPERATOR ANSWERS ===\n' + answers : '');
+let packetFile = null;
+let model = seats.s1;
+for (const attempt of ['s1', 's1-repair', 's1-repair2', 's1-escalate']) {
+  checkBudget('s1');
+  const prev = packetFile ? fs.readFileSync(packetFile, 'utf8') : null;
+  const text = seat(attempt, model, 's1-system.txt', prev
+    ? `VALIDATOR OUTPUT:\n${fs.readFileSync('v.txt', 'utf8')}\n\nYOUR PREVIOUS PACKET:\n${prev}\n\nResend ONE corrected yaml fence fixing every violation. Constants stay literal (gate: READY|NOT_READY, state: S_0 + Delta -> S_1). No top-level +open key. No prose outside the fence.`
+    : s1User, 8192);
+  const f = fence(text);
+  if (!f) { log(`${attempt}: NO FENCE`); fs.writeFileSync('v.txt', 'no yaml fence in response'); continue; }
+  fs.writeFileSync('packet.yaml', f); packetFile = 'packet.yaml';
+  const args = [path.join(HERE, 'gates', 'hcdl-validate.mjs'), 'packet.yaml', ...mustKeeps.flatMap(k => ['--must-keep', k])];
+  let out;
+  try { out = execFileSync('node', args, { encoding: 'utf8' }); }
+  catch (e) { out = [e.stdout, e.stderr].filter(Boolean).join(''); }
+  fs.writeFileSync('v.txt', out);
+  log(`${attempt}: ${/hcdl: PASS/.test(out) ? 'PASS' : 'FAIL'}`);
+  if (/hcdl: PASS/.test(out)) { outcomes.s1 = 'PASS'; break; }
+  if (attempt === 's1-repair2') { model = seats.s1_escalate; log(`escalating S1 to ${model}`); }
+}
+if (outcomes.s1 !== 'PASS') { log('S1 never passed; aborting'); outcomes.s1 = 'FAIL'; report(); process.exit(1); }
+const packet = fs.readFileSync('packet.yaml', 'utf8');
+
+// --- S2 ---
+checkBudget('s2');
+const brief = seat('s2', seats.s2, 's2-system.txt', `=== hdcs/1 PACKET ===\n${packet}`, 4096);
+fs.writeFileSync('brief.md', brief);
+outcomes.s2 = 'BRIEF ' + brief.length + ' chars';
+
+// --- S3 (worker + repair round on gate fail) ---
+checkBudget('s3');
+let build = null;
+for (const attempt of ['s3', 's3-repair']) {
+  const input = attempt === 's3'
+    ? `BUILD BRIEF:\n${brief}`
+    : `GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure. Honor the operator answers in the brief.`;
+  build = seat(attempt, seats.s3, 's3-system.txt', input, 8192);
+  fs.writeFileSync('artifact-build.txt', build);
+  for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
+  const sections = [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)];
+  for (const [, name, body] of sections) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+  log(`artifacts: ${sections.map(s => s[1]).join(', ') || 'NONE'}`);
+  if (!fs.existsSync('gate.sh')) { outcomes.s3 = 'NO GATE (artifacts extracted)'; break; }
+  let g = '', ok = true;
+  try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+  catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
+  fs.writeFileSync('gate-out.txt', g);
+  log('gate: ' + g.trim().split('\n').pop());
+  if (ok && /GATE PASS/.test(g)) { outcomes.s3 = 'PASS'; break; }
+  if (attempt === 's3-repair') outcomes.s3 = 'FAIL';
+  else log('S3 gate failed; running repair round');
+}
+
+// --- S5 (only if S1 passed; skip on gate fail to save cost) ---
+if (outcomes.s3 === 'FAIL') { log('S3 gate failed; skipping S5 egress'); }
+else {
+  checkBudget('s5');
+  let s5model = seats.s5;
+  for (const [attempt, m] of [['s5', s5model], ['s5-fallback', seats.s5_fallback]]) {
+    seat(attempt, m, 's5-system.txt', `=== hdcs/1 PACKET (reverse-translate this) ===\n${packet}`, 4096);
+    const args = [path.join(HERE, 'gates', 'reverse-gate.mjs'), `results/${attempt}.json`, `debrief-${attempt}.txt`, path.join(taskDir, 'probes.json')];
+    let out;
+    try { out = execFileSync('node', args, { encoding: 'utf8' }); }
+    catch (e) { out = [e.stdout, e.stderr].filter(Boolean).join(''); }
+    log(out.trim());
+    if (/PASS/.test(out)) { outcomes.s5 = 'PASS (' + attempt + ')'; break; }
+    outcomes.s5 = 'FAIL';
+  }
+}
+
+report();
+process.exit(Object.values(outcomes).some(v => v.startsWith('FAIL')) ? 1 : 0);

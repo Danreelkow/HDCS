@@ -1,0 +1,41 @@
+reg: {domain: cs-programming, canon: shell/systemd/rsync vocabulary — exact identifiers (rsync flags, systemctl --user, OnCalendar, ExecStart), POSIX shell semantics, idempotency/dry-run formal terms}
+intent: >
+  goal := build artifact dir containing sync-hermes-context.sh, hermes-context.service,
+  hermes-context.timer, README.md;
+  sync := one-way host -> workspace, contents of HERMES_CONTEXT_SRC (default
+  /opt/data/workspace/hermes-context/) -> HERMES_CONTEXT_DST (default /workspace/hermes-context/),
+  src/ -> dst (no nesting);
+  primary path := rsync -a --delete; fallback := cp -a or tar pipe when rsync ∉ PATH;
+  --dry-run => zero writes; run => idempotent ∧ one-line summary log;
+  schedule := systemd user timer every 6h; standalone-executable script.
+must_keep:
+  - "source path is /opt/data/workspace/hermes-context/"
+  - "dry-run mode that performs no writes"
+  - "systemd user units, no root required"
+resolved:
+  - "Q1: canonical source path? -> A: /opt/data/workspace/hermes-context/ (host-side Hermes context mount, per kb digests)"
+  - "Q2: destination? -> A: /workspace/hermes-context/ (exists; holds INDEX.md, agents/, config/)"
+  - "Q3: sync direction? -> A: one-way host -> workspace; ¬∃ write-back to host mount"
+  - "Q4: privilege model? -> A: user-level systemd (systemctl --user); no root"
+  - "Q5: no-systemd environment? -> A: script must run standalone (cron/installer callable)"
+  - "Q6: rsync absent? -> A: detect via command -v rsync; fallback cp -a semantics (or tar pipe)"
+  - "Q7: copy granularity? -> A: sync CONTENTS of src into dst (src/ -> dst), never nest source dir inside destination"
+  - "Q8: remaining ambiguity? -> A: none; ∀ requirements covered by A1..A4 + task spec; no-ambiguity certified"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff:
+  state: S_0 + Delta -> S_1
+  report: ["+done", "-resolved", "+open", "+validation"]
+constraints:
+  - "one-way sync host -> workspace; ¬∃ write-back to /opt/data/workspace/hermes-context/"
+  - "--dry-run => zero writes ∀ code paths (rsync --dry-run ∧ fallback no-op simulation)"
+  - "idempotent: ∀ n runs, state(dst) converges to state(src)"
+  - "systemd units are user units (User= absent, install under ~/.config/systemd/user/); no root required"
+  - "rsync fallback: command -v rsync || use cp -a / tar pipe"
+  - "sync src/ contents -> dst; never dst/<basename(src)>/"
+  - "no_resurrect: none cited (no prior ids supplied)"
+paths:
+  - "/workspace/hermes-context-artifact/sync-hermes-context.sh"
+  - "/workspace/hermes-context-artifact/hermes-context.service"
+  - "/workspace/hermes-context-artifact/hermes-context.timer"
+  - "/workspace/hermes-context-artifact/README.md"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}

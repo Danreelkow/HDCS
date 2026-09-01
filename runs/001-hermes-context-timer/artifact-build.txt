@@ -1,0 +1,105 @@
+=== sync-hermes-context.sh ===
+#!/bin/sh
+set -eu
+
+SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
+DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
+DRY=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run) DRY=1 ;;
+    *) echo "unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
+
+if [ "$DRY" = 0 ]; then
+  mkdir -p "$DST"
+fi
+
+if command -v rsync >/dev/null 2>&1; then
+  TOOL=rsync
+  rsync -a --delete ${DRY:+--dry-run} "$SRC"/ "$DST"/
+  COUNT=$(find "$SRC" -mindepth 1 -maxdepth 1 | wc -l)
+else
+  TOOL=cp-fallback
+  if [ "$DRY" = 1 ]; then
+    echo "[dry-run] would copy $SRC/ -> $DST/ (cp -a fallback)"
+    COUNT=$(find "$SRC" -mindepth 1 -maxdepth 1 | wc -l)
+  else
+    COUNT=0
+    find "$SRC" -mindepth 1 -maxdepth 1 | while read -r f; do
+      rm -rf "$DST/$(basename "$f")"
+      cp -a "$f" "$DST"/
+    done
+    COUNT=$(find "$SRC" -mindepth 1 -maxdepth 1 | wc -l)
+  fi
+fi
+
+echo "sync-hermes-context: src=$SRC dst=$DST mode=$([ "$DRY" = 1 ] && echo dry-run || echo run) tool=$TOOL files=$COUNT"
+
+=== hermes-context.service ===
+[Unit]
+Description=Hermes context one-way sync
+
+[Service]
+Type=oneshot
+ExecStart=%h/workspace/hermes-context-artifact/sync-hermes-context.sh
+
+=== hermes-context.timer ===
+[Unit]
+Description=Run hermes-context sync every 6h
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
+=== README.md ===
+# hermes-context sync
+
+One-way sync of `/opt/data/workspace/hermes-context/` → `/workspace/hermes-context/`.
+
+## Files
+
+- `sync-hermes-context.sh` — POSIX sh sync script (rsync primary, `cp -a` fallback)
+- `hermes-context.service` — user systemd oneshot unit
+- `hermes-context.timer` — user systemd timer, every 6 hours
+
+## Install (user-level systemd)
+
+```sh
+mkdir -p ~/.config/systemd/user/
+cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-context.timer
+```
+
+Check status:
+
+```sh
+systemctl --user list-timers hermes-context.timer
+journalctl --user -u hermes-context.service
+```
+
+## Standalone usage
+
+```sh
+./sync-hermes-context.sh            # run sync
+./sync-hermes-context.sh --dry-run  # preview; zero writes
+```
+
+## Environment variables
+
+- `HERMES_CONTEXT_SRC` — source dir (default `/opt/data/workspace/hermes-context/`)
+- `HERMES_CONTEXT_DST` — destination dir (default `/workspace/hermes-context/`)
+
+## Notes
+
+- Uses `rsync -a --delete` when available; otherwise falls back to delete-then-copy with `cp -a` (approximates `--delete`).
+- Syncs the *contents* of src into dst — no `dst/hermes-context/` nesting.
+- Idempotent: repeated runs converge to the same state.
+- `--dry-run` performs zero writes in both rsync and fallback paths.
+- One-way host→workspace only; never modifies the source.

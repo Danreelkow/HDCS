@@ -1,0 +1,18 @@
+{
+  "s1": "z-ai/glm-5.3-flash",
+  "s1_escalate": "openai/gpt-5.6-luna",
+  "s2": "z-ai/glm-5.3-flash",
+  "s3": "z-ai/glm-5.3-flash",
+  "s3_tool": "amazon/nova-micro-v1",
+  "s4": "openai/gpt-5.6-luna",
+  "s5": "amazon/nova-micro-v1",
+  "s5_fallback": "z-ai/glm-5.3-flash",
+  "doctrine": "cheapest seat default -> mechanical gate -> on gate fail escalate one tier -> ladder exhausted = human",
+  "excluded": {
+    "qwen/qwen3-coder-next": "user-excluded; run-to-run variance (0/5 vs 4/6 on identical brief)",
+    "qwen/qwen3.8-max": "user-excluded",
+    "x-ai/grok-4.6": "user-excluded; 79-85% think-share = slow + pricey",
+    "deepseek/deepseek-v4-flash-0731": "demoted; provider ignores reasoning cap, starvation uncontrollable",
+    "z-ai/glm-5": "starved in both sweeps (12k tokens, 0 visible)"
+  }
+}
