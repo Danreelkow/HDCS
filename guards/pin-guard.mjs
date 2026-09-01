@@ -41,6 +41,11 @@ for (const m of yml.matchAll(/^\s+(?:model|summarizationModel):\s*(\S+)\s*$/gm))
   if (seats.excluded[m[1]]) violations.push(`excluded model pinned: ${m[1]} (${seats.excluded[m[1]].split(';')[0]})`);
 }
 
+// The override switch must stay wired: persona must carry the BYPASS MODE clause.
+if (!yml.includes('BYPASS MODE (operator override switch)')) {
+  violations.push('persona lost the BYPASS MODE clause — picker no longer acts as the override switch');
+}
+
 console.log('HDCS seat-pin guard — ' + PRESET);
 for (const [row, got, want] of rows) console.log(`  ${row.padEnd(38)} pinned=${got.padEnd(24)} roster=${want}`);
 if (violations.length) {
