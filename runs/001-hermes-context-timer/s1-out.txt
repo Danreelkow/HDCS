@@ -1,93 +1,59 @@
 === context.hcdl ===
 defs:
-  MIRROR class [A9] := {file contents, recursive dir-structure, symlink-targets}; ¬{file/root metadata, timestamps, hardlink topology}
-  owned path [A15] := CONCRETE instantiated path (actual mktemp -d result, resolved log FILE parent, resolved entrypoint dir); ¬ generic ancestor (TMPDIR, /tmp itself)
-  verified copy [A13] := content-compared vs SRC per MIRROR class; non-emptiness check ≠ verification
-  pipe law := guards -> stage -> verify_stage(content-compare vs SRC, exit≠0) -> reconcile -> verify_final(DST vs SRC, exit≠0) -> summary
-
-invariants (operator rulings, register of record):
-  A1_paths: SRC=/opt/data/workspace/hermes-context/ (host-side Hermes context mount); DST=/workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
-  A2_direction: ∀ write host->workspace one-way; ¬∃ write back to host mount
-  A3_sched: user-level timer (systemctl --user); script standalone-capable when systemd absent (cron/installer callable)
-  A4_fallback: rsync absence -> cp -a semantics (or tar pipe); sync CONTENTS src/ -> dst/, never nest source dir inside destination
-  A5_mirror: ∀ path p ∈ {rsync, cp_fallback}: DST end == SRC end (MIRROR class, recursive, idempotent ∀ repeat runs); stale subtrees pruned ∀ depth; ∴ --delete preserved in stage+reconcile
-  A6_dryrun: --dry-run -> zero writes ∀ kind incl. log file, stage dir, mkdir DST; post-condition DST byte-identical / absent-stays-absent; summary -> stdout
-  A7_depth: recursive; DST ends byte-identical incl. nested paths; README sync-strategy section states this correctly
-  A8_placement: log FILE parent ∉ DST ∀ runs (HERMES_CONTEXT_LOG honored, ~/.cache default); entrypoint dir ∉ DST; sync never deletes/moves own entrypoints
-  A9_class: FAIL = any MIRROR-class mismatch via self-verification, exit≠0, never warn-and-exit-0
-  A10_severity: FAIL ⇔ defect reachable in normal operation (default config, documented usage, plausible misconfig losing/corrupting user data); exotic/adversarial -> KNOWN_LIMITATIONS + repro; judge cites everything, bar classifies ¬ suppresses
-  A11_survival: guard SRC==DST (reject or clean no-op); never rm -rf DST before verified copy of SRC established elsewhere; source survival outranks mirror freshness
-  A12_identity: realpath comparison (¬ string equality): refuse iff realpath(SRC)==realpath(DST) ∨ ancestor/descendant relation ∨ DST is/resolves-through symlink into SRC; ∀ sync paths, before ANY destructive op
-  A13_order: stage -> verify -> only then touch DST; uniform staging ∀ paths; direct SRC->DST --delete without verified stage violates
-  A14_envguard: script computes own internal paths (log, stage, entrypoint dirs); refuse iff DST realpath equals/contains them ∨ resolved staging equals/is-inside DST ∨ SRC (TMPDIR incl. -> force script-owned stage dir); adversarial env beyond guard = KNOWN_LIMITATIONS ¬ FAIL
-  A15_precision: refuse only when realpath(DST)==owned ∨ owned inside DST ∨ DST inside owned, boundary-aware component comparison, ¬ bare string-prefix; run 017 refusal of /tmp/hdcs-gate-dst = calibration WALL
-  A16_dstlife: DST may not pre-exist; real run MUST mkdir -p; dry-run MUST ¬ create (probe: leaves DST nonexistent, ¬ merely untouched)
-  A17_config: HERMES_CONTEXT_SRC/DST/LOG env override = mandated gate contract; script-top defaults = deployed production values passed via unit Environment=; reading a default as prohibition = wrong (prior S4 verdict overturned)
-  A18_degenerate: refuse DST/SRC ∈ {'/', empty, '.'} always, component tests ¬ slash-suffixed strings; DST symlink resolving outside SRC -> refuse; post-guard DST ends as real directory tree identical to SRC; pre-existing DST symlink replaced (removed ¬ retained)
-  A19_ownership: NONE required on DST/SRC/ancestors; path-law CLOSED = {A12 identity, A14/A15 concrete-protected, A18 degenerate}; beyond = invented scope = wall; ∀ refusal cites an A-number — uncited refusal = defect
-  A20_noambiguity: A1..A19 + task spec resolve ∀ requirement-level question (certificate); residuals (OnUnitActiveSec vs OnCalendar, verify mechanism, summary format, log filename, unit Environment= vs script defaults) = implementation latitude within law ¬ requirement ambiguity
-
-open:
-  KL1 [A10,A14, non-blocking]: adversarial env combos beyond A14 guard; repro: hostile vars at colliding targets beyond concrete owned-path set
-  KL2 [A10, non-blocking]: newline-in-filename corpora
-  judge protocol: cite A14, stop env-algebra re-derivation
+  SRC := realpath(HERMES_CONTEXT_SRC), default /opt/data/workspace/hermes-context/
+  DST := realpath(HERMES_CONTEXT_DST), default /workspace/hermes-context/
+  sync := host->workspace, one-way, contents-of-SRC -> DST (no nesting)
+invariants:
+  A5_mirror: ∀ path -> DST end state == SRC end state, recursive, both sync paths
+  A9_class: mirror = {file contents, dir structure, symlinks} recursive; NOT {metadata, timestamps, hardlinks}; verify FAILS nonzero on mismatch
+  A6_purity: --dry-run => zero writes ∀ kind incl. log; DST byte-identical after dry-run; A16: dry-run leaves nonexistent DST uncreated
+  A13_order: stage -> content-verify (A9 class) -> only then mutate DST; unverified copy != verified
+  A11_survival: no rm -rf DST before verified SRC copy exists; SRC==DST rejected
+  A12_identity: refuse when realpath(SRC)==realpath(DST) ∨ ancestor/descendant ∨ DST symlink into SRC
+  A14_A15_placement: refuse only on CONCRETE owned paths (mktemp stage result, resolved log file parent, entrypoint dir) vs realpath(DST), component-boundary compare, never string-prefix
+  A18_degenerate: refuse DST/SRC ∈ {"/", empty, "."} via component test; DST symlink resolving outside SRC refused, symlink replaced by real tree
+  A19_scope: path-law closed = {A12, A14/A15, A18}; refusal must cite an A-number
+  A20_namespace: stage path resolved by pure string calc, validated, then created; mirror files never used for script bookkeeping
+  A4_fallback: no rsync -> cp -a semantics reconciling identically to rsync --delete (A5)
+  A17_param: env override is gate contract; deployed paths are production values only
+  A10_bar: FAIL only on normal-operation defects; exotic env combos -> KNOWN_LIMITATIONS (+open)
+open: [] (A14 closes env-interaction class; A10 sends residual adversarial cases to limitations, non-blocking)
 
 ```yaml
-reg: {domain: devops-shell-systemd, canon: "POSIX shell + rsync + systemd user-unit vocabulary: set -euo pipefail, realpath, mktemp -d, trap, rsync -a --delete, diff -r --no-dereference, systemctl --user, OnUnitActiveSec, WantedBy=default.target, Environment= lines"}
-intent: >-
-  standing freshness mirror ∀ real run: DST := exact mirror of SRC per MIRROR class {contents +
-  recursive dir-structure + symlink-targets}, one-way host->workspace, stale subtrees pruned ∀
-  depth, idempotent, both SYNC_PATHS (rsync, cp_fallback) converge identical via
-  guards->stage->verify->reconcile->final-verify->summary; --dry-run -> zero writes ∀ kind;
-  systemd USER timer @6h (no root) + standalone; deliverable := {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
+reg: {domain: cs-programming, canon: shell/systemd/rsync identifiers (rsync --delete, cp -a, systemctl --user, OnUnitActiveSec, mktemp -d, realpath), hcdl A-law}
+intent: >
+  deliver artifact dir: sync-hermes-context.sh (rsync, env-parameterized SRC/DST,
+  --dry-run zero-write, idempotent, exact-mirror A5/A9, cp fallback converging identically,
+  guard set A11/A12/A14/A15/A18/A20, stage->verify->mutate order A13) +
+  hermes-context.service/.timer user units (OnCalendar every 6h, no root) + README
+  (install, source change, dry-run test, A7-correct sync-strategy section).
 must_keep:
   - "source path is /opt/data/workspace/hermes-context/"
   - "dry-run mode that performs no writes"
   - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical SRC/DST + DST state? -> A1: SRC=/opt/data/workspace/hermes-context/ (host-side Hermes context mount per kb digests); DST=/workspace/hermes-context/ exists (INDEX.md, agents/, config/)"
-  - "Q2: sync direction? -> A2: host -> workspace one-way; nothing writes back to host mount"
-  - "Q3: scheduling privilege? -> A3: user-level timer (systemctl --user); script must work standalone when systemd absent (cron/installer can call it)"
-  - "Q4: is rsync guaranteed? -> A4: NO; detect absence -> cp -a semantics (or tar pipe); sync CONTENTS of source into destination (src/ -> dst/), never nest source dir inside destination"
-  - "Q5: mirror semantics? -> A5: exact mirror, stale files DELETED; rsync --delete correct; cp fallback reconciles identically (no accumulate-only mode); both paths converge to identical end state"
-  - "Q6: dry-run purity? -> A6: zero writes of ANY kind incl. log files (HERMES_CONTEXT_LOG inside DST untouched); logging only in real-run mode; mechanical probe: dry-run leaves DST byte-identical"
-  - "Q7: reconciliation depth? -> A7: recursive; stale SUBTREES deleted at every depth (mirrors rsync --delete); DST ends byte-identical to SRC incl. nested paths; README sync-strategy section states this correctly"
-  - "Q8: log + entrypoint placement? -> A8: log outside DST ALWAYS (~/.cache default; no carve-outs, no post-mirror rewrite exceptions); install paths outside mirrored tree (~/.local/bin or /workspace/hdcs/bin); sync never deletes/moves installed entrypoints"
-  - "Q9: 'exact mirror' equivalence class? -> A9: levels 1-3 = file contents + directory structure (recursive, both paths) + symlinks; NOT file/root metadata, timestamps, hardlink topology; self-verification enforces exactly this class, FAIL = nonzero exit, never warn-and-exit-0"
-  - "Q10: severity bar? -> A10: FAIL only on defects reachable in NORMAL operation (default config, documented usage, plausible misconfig losing/corrupting user data); exotic/adversarial triggers -> +open KNOWN_LIMITATIONS with repro notes; judge cites everything, bar classifies not suppresses"
-  - "Q11: destructive-misconfig guard? -> A11: guard SRC==DST (reject or clean no-op); never rm -rf DST before verified copy of SRC established elsewhere; source survival outranks mirror freshness"
-  - "Q12: path-identity test? -> A12: compare realpath identity (symlinks resolved), not string equality: refuse when realpath(SRC)==realpath(DST), or either is ancestor/descendant of the other, or DST is/resolves-through symlink into SRC; both sync paths, before ANY destructive op"
-  - "Q13: 'verified copy' definition? -> A13: CONTENT-COMPARED (A9 class vs SRC); non-emptiness check is not verification; order is law: stage -> verify -> only then touch DST; self-verification exits nonzero on staging failure; README never calls an unverified copy 'verified'"
-  - "Q14: env-var-X-pointed-at-Y class? -> A14: generalized guard: script computes own internal paths (log dir, stage dir, entrypoint dir), refuses iff DST realpath equals/contains them, or resolved staging equals/is-inside DST or SRC (TMPDIR incl. -> force script-owned stage dir); adversarial env beyond guard = KNOWN_LIMITATIONS not FAIL; judge cites A14 and stops re-deriving the class"
-  - "Q15: owned-path precision? -> A15: owned = CONCRETE instantiated path (actual mktemp -d result, resolved log FILE parent dir, resolved entrypoint dir), never generic ancestor (TMPDIR, /tmp itself); refuse only when realpath(DST)==owned or owned inside DST or DST inside owned, boundary-aware component comparison, never bare string-prefix; run 017 refusal of /tmp/hdcs-gate-dst was a WALL, this is the calibration"
-  - "Q16: DST pre-existence? -> A16: DST may not exist before a run; script MUST mkdir -p on real runs; dry-run MUST NOT create; strengthened probe: dry-run leaves DST nonexistent (not merely probe-free)"
-  - "Q17: are packet fixed paths a scope limit? -> A17: NO; fixed paths = DEPLOYED configuration (values unit/timer passes at install time); HERMES_CONTEXT_SRC/DST env override is the mandated mechanism (gate contract); deployed defaults are its production values; reading a default as prohibition = wrong (prior S4 verdict overturned)"
-  - "Q18: degenerate paths? -> A18: refuse DST or SRC = '/', empty, or '.' always, before any destructive op (test components, not slash-suffixed strings — the '$RD/'-pattern form misses DST=/'); DST symlink resolving outside SRC -> refuse (A12); after A12+placement guards pass, DST must END as a real directory tree identical to SRC; if old DST was a symlink it is replaced by the real tree (symlink removed, not retained)"
-  - "Q19: ownership requirements? -> A19: NONE on DST/SRC/ancestors; operator syncs anywhere holding OS write permission (sticky-bit dirs exist for exactly this); path-law list CLOSED = {A12 identity, A14/A15 concrete-protected, A18 degenerate}; anything beyond = invented scope = wall; refusals must cite an A-number — an uncited refusal is itself a defect"
-  - "Q20: residual requirement ambiguities? -> A: NONE; A1..A19 + task spec resolve ∀ requirement-level question (no-ambiguity certificate); residual choices (OnUnitActiveSec vs OnCalendar, verify mechanism, summary format, log filename, unit Environment= vs script defaults) = implementation latitude within law, not requirement ambiguity"
+  - "Q1: canonical SRC/DST? -> A: /opt/data/workspace/hermes-context/ -> /workspace/hermes-context/ (A1, A17: deployed defaults, env override is contract)"
+  - "Q2: sync direction/semantics? -> A: host->workspace one-way, exact mirror recursive, stale subtrees deleted, both paths converge (A2, A5, A7, A9)"
+  - "Q3: systemd absent? -> A: script standalone-capable; user timer preferred (A3)"
+  - "Q4: rsync absent? -> A: cp -a fallback, reconcile identical to --delete (A4, A5)"
+  - "Q5: dry-run writes? -> A: zero writes incl. log; nonexistent DST not created (A6, A16)"
+  - "Q6: log/staging/install placement? -> A: log outside DST always; entrypoints outside mirrored tree; concrete-path boundary guards (A8, A14, A15)"
+  - "Q7: verification bar? -> A: A9 class contents+structure+symlinks, nonzero on mismatch, content-compared staging (A9, A13)"
+  - "Q8: severity/stopping? -> A: A10 normal-operation bar; residual adversarial env = KNOWN_LIMITATIONS non-blocking"
+  - "Q9: degenerate/identity paths? -> A: component-test refusals for /,empty,.; realpath identity guards; refusals cite A-numbers (A18, A19)"
+  - "Q10: staging order? -> A: pure string-resolve stage path, validate, then create; reserved namespace never collides with mirror files (A20)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
-handoff:
-  state: S_0 + Delta -> S_1
-  report: [+done, -resolved, +open, +validation]
-  # +done: reg locked devops-shell-systemd; A1..A19 folded (resolved + context.hcdl); PIPE law = unique simultaneous satisfaction of A5 x A11/A13 (uniform verified staging ∀ paths, --delete preserved); no-ambiguity certified (Q20)  # -resolved: Q1..Q19 closed with operator evidence; Q20 = certificate
-  # +open: KNOWN_LIMITATIONS only, non-blocking [A10] — KL1: env combos beyond A14 guard (hostile vars at colliding targets); KL2: newline-in-filename corpora  # +validation: READY; probes: dry-run byte-identical + absent-DST-stays-absent [A6,A16]; mirror verify exit≠0 [A9,A13]; guards trip clean≠0 zero-writes citing A-number [A11,A12,A14,A18]; mkdir asymmetry [A16]
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
 constraints:
-  - "C1 mirror law [A5,A7,A9]: ∀ path p ∈ {rsync, cp_fallback}: DST end == SRC end (contents+structure+symlinks, recursive, idempotent ∀ repeat runs); stale subtrees pruned ∀ depth; verify exit≠0 on mismatch"
-  - "C2 dry-run purity [A6,A16]: --dry-run -> zero writes ∀ kind (¬log file, ¬stage dir, ¬mkdir DST); post-conditions: DST byte-identical, absent DST stays absent; summary -> stdout"
-  - "C3 pipeline order [A11,A13]: GUARDS -> stage -> verify_stage(content-compare vs SRC, exit≠0 on fail) -> reconcile -> verify_final(DST vs SRC, exit≠0); ¬∃ destructive op on DST before verified stage; staging uniform ∀ paths (direct SRC->DST --delete without verified stage violates A13)"
-  - "C4 path-law closed set [A12,A14,A15,A18,A19]: realpath identity + concrete owned paths (component-boundary compare) + degenerate {'/',empty,'.'} refusals; ¬invented scope, ¬ownership tests; ∀ refusal: clean exit≠0, zero writes, cites A-number"
-  - "C5 placement [A8]: log FILE parent ∉ DST ∀ runs (HERMES_CONTEXT_LOG honored, ~/.cache default); entrypoint dir ∉ DST; sync never deletes/moves own entrypoints"
-  - "C6 config contract [A17]: env override HERMES_CONTEXT_SRC / HERMES_CONTEXT_DST / HERMES_CONTEXT_LOG = mandated gate contract; script-top defaults = deployed values (SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/); unit Environment= passes them at install"
-  - "C7 fallback equivalence [A4,A5]: rsync absent -> cp -a semantics (or tar pipe); both paths identical end state; CONTENTS sync src/ -> dst/, never nest"
-  - "C8 DST lifecycle [A16,A18]: real run mkdir -p DST; pre-existing DST symlink replaced by real tree post-verify (removed, ¬retained); dry-run preserves absence"
-  - "C9 severity routing [A10,A14]: FAIL ⇔ normal-operation reachable; exotic/adversarial -> KNOWN_LIMITATIONS (+open); judge cites A14, stops env-algebra re-derivation; metadata/hardlink complaints out-of-scope (A9)"
-  - "C10 README truth [A3,A7,A13]: states recursive convergence correctly; never labels an unverified copy 'verified'; documents user-unit install (systemctl --user), source change via env override, --dry-run test, standalone/cron fallback"
+  - "A5/A7/A9 exact-mirror convergence, recursive, both sync paths"
+  - "A6/A16 dry-run zero-write incl. log; leaves nonexistent DST uncreated"
+  - "A11/A13 stage -> content-verify -> mutate; never rm -rf DST before verified copy"
+  - "A12/A14/A15/A18/A19/A20 guard set; refusals clean nonzero, zero writes, cite A-number"
+  - "A3/A4 no-root user units; rsync-optional standalone script"
 paths:
-  - "artifact dir: sync-hermes-context.sh + hermes-context.service + hermes-context.timer + README.md (one deliverable dir)"
-  - "deployed SRC default: /opt/data/workspace/hermes-context/"
-  - "deployed DST default: /workspace/hermes-context/"
-  - "log default: ~/.cache/hermes-context/sync.log (parent ∉ DST [A8])"
-  - "entrypoints: ~/.local/bin/sync-hermes-context.sh + ~/.config/systemd/user/hermes-context.service + ~/.config/systemd/user/hermes-context.timer (∉ mirrored tree [A8])"
-  - "enable: systemctl --user daemon-reload && systemctl --user enable --now hermes-context.timer"
-budgets: {tokens: 16000, lines: 60, fix_cycles: 2, questions: 2}
+  - "/opt/data/workspace/hermes-context/"
+  - "/workspace/hermes-context/"
+  - "~/.local/bin (entrypoints, outside mirrored tree)"
+  - "~/.cache (log parent, outside DST)"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 0}
 ```

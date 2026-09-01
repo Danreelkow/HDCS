@@ -1,32 +1,19 @@
 defs:
-  MIRROR class [A9] := {file contents, recursive dir-structure, symlink-targets}; ¬{file/root metadata, timestamps, hardlink topology}
-  owned path [A15] := CONCRETE instantiated path (actual mktemp -d result, resolved log FILE parent, resolved entrypoint dir); ¬ generic ancestor (TMPDIR, /tmp itself)
-  verified copy [A13] := content-compared vs SRC per MIRROR class; non-emptiness check ≠ verification
-  pipe law := guards -> stage -> verify_stage(content-compare vs SRC, exit≠0) -> reconcile -> verify_final(DST vs SRC, exit≠0) -> summary
-
-invariants (operator rulings, register of record):
-  A1_paths: SRC=/opt/data/workspace/hermes-context/ (host-side Hermes context mount); DST=/workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
-  A2_direction: ∀ write host->workspace one-way; ¬∃ write back to host mount
-  A3_sched: user-level timer (systemctl --user); script standalone-capable when systemd absent (cron/installer callable)
-  A4_fallback: rsync absence -> cp -a semantics (or tar pipe); sync CONTENTS src/ -> dst/, never nest source dir inside destination
-  A5_mirror: ∀ path p ∈ {rsync, cp_fallback}: DST end == SRC end (MIRROR class, recursive, idempotent ∀ repeat runs); stale subtrees pruned ∀ depth; ∴ --delete preserved in stage+reconcile
-  A6_dryrun: --dry-run -> zero writes ∀ kind incl. log file, stage dir, mkdir DST; post-condition DST byte-identical / absent-stays-absent; summary -> stdout
-  A7_depth: recursive; DST ends byte-identical incl. nested paths; README sync-strategy section states this correctly
-  A8_placement: log FILE parent ∉ DST ∀ runs (HERMES_CONTEXT_LOG honored, ~/.cache default); entrypoint dir ∉ DST; sync never deletes/moves own entrypoints
-  A9_class: FAIL = any MIRROR-class mismatch via self-verification, exit≠0, never warn-and-exit-0
-  A10_severity: FAIL ⇔ defect reachable in normal operation (default config, documented usage, plausible misconfig losing/corrupting user data); exotic/adversarial -> KNOWN_LIMITATIONS + repro; judge cites everything, bar classifies ¬ suppresses
-  A11_survival: guard SRC==DST (reject or clean no-op); never rm -rf DST before verified copy of SRC established elsewhere; source survival outranks mirror freshness
-  A12_identity: realpath comparison (¬ string equality): refuse iff realpath(SRC)==realpath(DST) ∨ ancestor/descendant relation ∨ DST is/resolves-through symlink into SRC; ∀ sync paths, before ANY destructive op
-  A13_order: stage -> verify -> only then touch DST; uniform staging ∀ paths; direct SRC->DST --delete without verified stage violates
-  A14_envguard: script computes own internal paths (log, stage, entrypoint dirs); refuse iff DST realpath equals/contains them ∨ resolved staging equals/is-inside DST ∨ SRC (TMPDIR incl. -> force script-owned stage dir); adversarial env beyond guard = KNOWN_LIMITATIONS ¬ FAIL
-  A15_precision: refuse only when realpath(DST)==owned ∨ owned inside DST ∨ DST inside owned, boundary-aware component comparison, ¬ bare string-prefix; run 017 refusal of /tmp/hdcs-gate-dst = calibration WALL
-  A16_dstlife: DST may not pre-exist; real run MUST mkdir -p; dry-run MUST ¬ create (probe: leaves DST nonexistent, ¬ merely untouched)
-  A17_config: HERMES_CONTEXT_SRC/DST/LOG env override = mandated gate contract; script-top defaults = deployed production values passed via unit Environment=; reading a default as prohibition = wrong (prior S4 verdict overturned)
-  A18_degenerate: refuse DST/SRC ∈ {'/', empty, '.'} always, component tests ¬ slash-suffixed strings; DST symlink resolving outside SRC -> refuse; post-guard DST ends as real directory tree identical to SRC; pre-existing DST symlink replaced (removed ¬ retained)
-  A19_ownership: NONE required on DST/SRC/ancestors; path-law CLOSED = {A12 identity, A14/A15 concrete-protected, A18 degenerate}; beyond = invented scope = wall; ∀ refusal cites an A-number — uncited refusal = defect
-  A20_noambiguity: A1..A19 + task spec resolve ∀ requirement-level question (certificate); residuals (OnUnitActiveSec vs OnCalendar, verify mechanism, summary format, log filename, unit Environment= vs script defaults) = implementation latitude within law ¬ requirement ambiguity
-
-open:
-  KL1 [A10,A14, non-blocking]: adversarial env combos beyond A14 guard; repro: hostile vars at colliding targets beyond concrete owned-path set
-  KL2 [A10, non-blocking]: newline-in-filename corpora
-  judge protocol: cite A14, stop env-algebra re-derivation
+  SRC := realpath(HERMES_CONTEXT_SRC), default /opt/data/workspace/hermes-context/
+  DST := realpath(HERMES_CONTEXT_DST), default /workspace/hermes-context/
+  sync := host->workspace, one-way, contents-of-SRC -> DST (no nesting)
+invariants:
+  A5_mirror: ∀ path -> DST end state == SRC end state, recursive, both sync paths
+  A9_class: mirror = {file contents, dir structure, symlinks} recursive; NOT {metadata, timestamps, hardlinks}; verify FAILS nonzero on mismatch
+  A6_purity: --dry-run => zero writes ∀ kind incl. log; DST byte-identical after dry-run; A16: dry-run leaves nonexistent DST uncreated
+  A13_order: stage -> content-verify (A9 class) -> only then mutate DST; unverified copy != verified
+  A11_survival: no rm -rf DST before verified SRC copy exists; SRC==DST rejected
+  A12_identity: refuse when realpath(SRC)==realpath(DST) ∨ ancestor/descendant ∨ DST symlink into SRC
+  A14_A15_placement: refuse only on CONCRETE owned paths (mktemp stage result, resolved log file parent, entrypoint dir) vs realpath(DST), component-boundary compare, never string-prefix
+  A18_degenerate: refuse DST/SRC ∈ {"/", empty, "."} via component test; DST symlink resolving outside SRC refused, symlink replaced by real tree
+  A19_scope: path-law closed = {A12, A14/A15, A18}; refusal must cite an A-number
+  A20_namespace: stage path resolved by pure string calc, validated, then created; mirror files never used for script bookkeeping
+  A4_fallback: no rsync -> cp -a semantics reconciling identically to rsync --delete (A5)
+  A17_param: env override is gate contract; deployed paths are production values only
+  A10_bar: FAIL only on normal-operation defects; exotic env combos -> KNOWN_LIMITATIONS (+open)
+open: [] (A14 closes env-interaction class; A10 sends residual adversarial cases to limitations, non-blocking)

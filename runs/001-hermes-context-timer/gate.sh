@@ -48,6 +48,11 @@ SSOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-con
 [ -f "$DST/x" ] && [ ! -L "$DST/x" ] || fail "symlink-swap: DST/x still a symlink (must be replaced by the real file)"
 cmp -s "$SRC/x" "$DST/x" || fail "symlink-swap: DST/x content mismatch"
 grep -q outside-victim /tmp/hdcs-gate-outside || fail "symlink-swap: cp FOLLOWED the symlink and clobbered a file outside DST"
+# trailing-slash fixture (run 026 S4 finding): raw $DST mutations must go through canonical paths —
+# slashed env values must converge on initial sync (mv "$STAGE" "$DST/" fails when DST does not exist)
+rm -rf "$SRC" "$DST"; mkdir -p "$SRC/sub"; printf 't\n' > "$SRC/sub/f"
+TSOUT=$(HERMES_CONTEXT_SRC="$SRC/" HERMES_CONTEXT_DST="$DST/" bash sync-hermes-context.sh 2>&1) || fail "trailing-slash run exited nonzero: $TSOUT"
+cmp -s "$SRC/sub/f" "$DST/sub/f" || fail "trailing-slash DST: initial sync did not converge (canonicalize DST/SRC once, mutate only through canonical forms)"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"
