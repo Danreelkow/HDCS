@@ -1,1 +1,1 @@
-GATE PASS
+GATE FAIL: dry-run exited nonzero: sync-hermes-context: REFUSED: component boundary not owned by invoking user: /tmp (DST=/tmp/hdcs-gate-dst)

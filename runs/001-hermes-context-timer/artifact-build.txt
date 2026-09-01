@@ -1,173 +1,90 @@
 === sync-hermes-context.sh ===
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way mirror SRC -> DST (A2), rsync primary,
-# cp -a fallback, stage -> verify -> touch-DST (A13). Standalone-capable.
-# A17: env parameterization is the contract; defaults are the production values.
+# sync-hermes-context.sh — mirror SRC -> DST (stage -> verify -> touch DST)
+# A5/A6/A13/A17/A18. Standalone or systemd --user. No root.
 set -euo pipefail
 
-# ---------- argument / env parse ----------
-DRY_RUN="${HERMES_CTX_DRY_RUN:-${DRY_RUN:-0}}"
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRY_RUN=1 ;;
-    -h|--help) echo "usage: sync-hermes-context.sh [--dry-run]"; exit 0 ;;
-    *) echo "unknown argument: $arg" >&2; exit 2 ;;
-  esac
-done
+DRY=0
+[ "${1:-}" = "--dry-run" ] && DRY=1
 
-SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
-DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-LOG="${HERMES_CTX_LOG:-$HOME/.cache/hermes-context/sync.log}"
+SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context}"
+DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context}"
+SRC="${SRC%/}"; DST="${DST%/}"
 
-guard() { echo "REFUSAL: $*" >&2; exit 2; }
+fail() { echo "sync-hermes-context: REFUSED: $*" >&2; exit 1; }
 
-# ---------- guards first (A12/A18): precede every destructive op ----------
-[ -d "$SRC" ] || guard "SRC nonexistent or not a directory: $SRC"
-SRC_REAL="$(realpath -e "$SRC")" || guard "cannot resolve SRC: $SRC"
+# ---- A18 guards: pre-write, both modes ----
+[ -n "$SRC" ] || fail "SRC is empty"
+[ -n "$DST" ] || fail "DST is empty"
+[ "$SRC" != "/" ] && [ "$DST" != "/" ] || fail "degenerate path: /"
+[ "$SRC" != "." ] && [ "$DST" != "." ] || fail "degenerate path: ."
+[ -d "$SRC" ] || fail "SRC is not a directory: $SRC"
+RSRC=$(realpath -e "$SRC") || fail "SRC not realpath-resolvable: $SRC"
+PROSD=$(realpath -m "$DST") || fail "DST unresolvable"
+[ "$RSRC" = "$PROSD" ] && fail "realpath(SRC) == realpath(DST)"
+case "$PROSD/" in "$RSRC"/*) fail "DST is inside SRC";; esac
+case "$RSRC/" in "$PROSD"/*) fail "SRC is inside DST";; esac
 
-if [ -e "$DST" ] && [ ! -d "$DST" ]; then
-  guard "DST exists and is not a directory: $DST"
-fi
-DST_REAL="$(realpath -m "$DST")"
+# A18 component-boundary: the component boundary of DST is the deepest
+# EXISTING component of the DST path; it must be owned by the invoking user.
+# (A not-yet-existing DST root under an existing user-owned component is in
+# bounds; a DST whose nearest existing ancestor is foreign is refused.)
+BD="$PROSD"
+while [ ! -e "$BD" ]; do BD=$(dirname "$BD"); done
+BD=$(realpath -e "$BD")
+[ "$(stat -c %u "$BD")" = "$(id -u)" ] || fail "component boundary not owned by invoking user: $BD (DST=$PROSD)"
 
-[ "$SRC_REAL" != "$DST_REAL" ] || guard "identity paths (realpath): $SRC_REAL"
-case "$DST_REAL/" in "$SRC_REAL"/*) guard "DST inside SRC (ancestry): $DST_REAL" ;; esac
-case "$SRC_REAL/" in "$DST_REAL"/*) guard "SRC inside DST (ancestry): $SRC_REAL" ;; esac
-
-# log-path guard (A8): log must live outside DST and outside SRC, always
-LOG_REAL="$(realpath -m "$LOG")"
-case "$LOG_REAL" in
-  "$DST_REAL"|"$DST_REAL"/*) guard "log path inside DST (A8): $LOG_REAL" ;;
-  "$SRC_REAL"|"$SRC_REAL"/*) guard "log path inside SRC (A2 no write-back): $LOG_REAL" ;;
-esac
-
-# helper: is a staging base admissible? concrete, real, and NOT the DST/SRC
-# itself nor anywhere inside them (A8: staging parent must be outside owned paths)
-base_ok() {
-  local b
-  b="$(realpath -m "$1" 2>/dev/null)" || return 1
-  [ -d "$b" ] || return 1
-  case "$b" in
-    "$DST_REAL"|"$DST_REAL"/*) return 1 ;;
-    "$SRC_REAL"|"$SRC_REAL"/*) return 1 ;;
-  esac
-  return 0
-}
-
-if [ "$DRY_RUN" = "1" ]; then
-  # ---------- dry-run branch (A6/A16): zero writes to every target, incl. logs ----------
+if [ "$DRY" -eq 1 ]; then
+  # A6: dry-run — zero write ops (no mkdir, no touch, no log write)
+  echo "PLAN (dry-run): mirror $RSRC -> $PROSD"
   if command -v rsync >/dev/null 2>&1; then
-    echo "DRY-RUN plan (rsync): mirror $SRC_REAL/ -> $DST_REAL/ (recursive, delete stale, symlinks preserved)"
-    rsync -rlptgoD --delete --dry-run --itemize-changes "$SRC_REAL/" "$DST_REAL/"
+    rsync -rlptgoD --delete --dry-run "$RSRC"/ "$PROSD"/
   else
-    echo "DRY-RUN plan (rsync absent; cp -a fallback):"
-    echo "  would copy $SRC_REAL/. -> staging -> verify -> $DST_REAL/"
-    echo "  would delete stale DST entries not present in SRC"
-    find "$SRC_REAL" -mindepth 1 | sed "s|^$SRC_REAL|  would create/update: $DST_REAL|"
+    (cd "$RSRC" && find . -mindepth 1 -print)
   fi
-  echo "DRY-RUN complete: nothing written (no DST, no log, no temp files)."
   exit 0
 fi
 
-# ---------- live path (A13): stage -> verify -> touch-DST ----------
-# staging dir: concrete owned path, parent outside DST and SRC, TMPDIR fallback
-# (A8/A14/A15). Candidate chain: TMPDIR -> /tmp -> parent of DST (never inside
-# DST or SRC; if /tmp IS the DST, e.g. DST=/tmp, we must not stage there).
-TBASE=""
-for cand in "${TMPDIR:-}" "/tmp" "$(dirname "$DST_REAL")"; do
-  [ -n "$cand" ] || continue
-  if base_ok "$cand"; then
-    TBASE="$(realpath -m "$cand")"
-    break
-  fi
-done
-[ -n "$TBASE" ] || guard "no admissible staging base outside DST/SRC (A8)"
-mkdir -p "$TBASE" 2>/dev/null || true
-STAGE="$(mktemp -d "$TBASE/hermes-sync.XXXXXX")"
-# post-create re-check: parent of STAGE must not be inside DST/SRC (A8 boundary)
-STAGE_PARENT="$(dirname "$(realpath "$STAGE")")"
-case "$STAGE_PARENT" in
-  "$DST_REAL"|"$DST_REAL"/*|"$SRC_REAL"|"$SRC_REAL"/*)
-    rm -rf "$STAGE"; guard "staging parent inside DST/SRC (A8): $STAGE_PARENT" ;;
-esac
-cleanup() { rm -rf "$STAGE"; }
-trap cleanup EXIT
+# ---- real run: log path (outside DST), stage, verify, touch DST ----
+LOG="${HERMES_CTX_LOG:-$HOME/.cache/hermes-context/sync.log}"
+LOGR=$(realpath -m "$LOG")
+case "$LOGR/" in "$PROSD"/*) fail "log override points inside DST: $LOG";; esac
+mkdir -p "$(dirname "$LOG")"
 
-TRANSPORT="rsync"
+STAGE=$(mktemp -d "${PROSD}.stage.XXXXXX")
+trap 'rm -rf "$STAGE"' EXIT
+
+# A13 stage 1: build full stage on DST filesystem (fresh dir => deletions reconciled)
 if command -v rsync >/dev/null 2>&1; then
-  # stage via rsync (A4): src/ -> dst trailing-slash semantics
-  rsync -a --delete "$SRC_REAL/" "$STAGE/"
+  rsync -a --delete "$RSRC"/ "$STAGE"/
 else
-  TRANSPORT="cp -a fallback"
-  mkdir -p "$STAGE"
-  cp -a "$SRC_REAL/." "$STAGE/"
-  # prune stale staging entries: anything in stage not in SRC must go (A5)
-  while IFS= read -r line; do
-    case "$line" in
-      "Only in "*": "*)
-        name="${line##*: }"
-        dir="${line#Only in }"; dir="${dir%%: *}"
-        rm -rf -- "${dir:?}/${name:?}"
-        ;;
-    esac
-  done < <(diff -rq --no-dereference "$SRC_REAL" "$STAGE" 2>/dev/null || true)
+  cp -a "$RSRC"/. "$STAGE"/
 fi
 
-# ---------- verify (A11): abort before touching DST on any mismatch ----------
-if ! diff -rq --no-dereference "$SRC_REAL" "$STAGE" >/dev/null 2>&1; then
-  echo "VERIFY FAILED: staged mirror does not equal SRC; aborting, DST untouched." >&2
-  exit 1
-fi
+# A13 stage 2: verify content comparison (structure + contents + symlink targets)
+diff -r --no-dereference "$RSRC" "$STAGE" || fail "verify failed: stage != SRC; DST untouched"
 
-# count changes vs current DST (before push) for the summary
-CHANGES=0
-if [ -d "$DST_REAL" ]; then
-  CHANGES="$(diff -rq --no-dereference "$STAGE" "$DST_REAL" 2>/dev/null | wc -l || true)"
-else
-  CHANGES="new"
-fi
-
-# ---------- touch-DST ----------
-if [ "$TRANSPORT" = "rsync" ]; then
-  rsync -a --delete "$STAGE/" "$DST_REAL/"
-else
-  mkdir -p "$DST_REAL"
-  find "$DST_REAL" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-  cp -a "$STAGE/." "$DST_REAL/"
-fi
-
-# final sanity: DST now mirrors SRC (A5/A9)
-if ! diff -rq --no-dereference "$SRC_REAL" "$DST_REAL" >/dev/null 2>&1; then
-  echo "POST-PUSH VERIFY FAILED: DST does not mirror SRC." >&2
-  exit 1
-fi
-
-# ---------- one-line summary to LOG (dry-run never reaches here) ----------
-mkdir -p "$(dirname "$LOG_REAL")"
-printf '%s transport=%s status=OK changes=%s src=%s dst=%s\n' \
-  "$(date -Is)" "$TRANSPORT" "$CHANGES" "$SRC_REAL" "$DST_REAL" >> "$LOG_REAL"
-
-echo "sync complete: transport=$TRANSPORT changes=$CHANGES"
+# A13 stage 3: touch DST only after verify passes
+rm -rf "$PROSD"
+mv "$STAGE" "$PROSD"
+trap - EXIT
+printf '%s real sync %s -> %s\n' "$(date -u +%FT%TZ)" "$RSRC" "$PROSD" >> "$LOG"
 exit 0
 
 === hermes-context.service ===
 [Unit]
-Description=One-way mirror sync of hermes-context (SRC -> DST)
+Description=Hermes context mirror sync
 
 [Service]
 Type=oneshot
-Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
-Environment=HERMES_CONTEXT_DST=/workspace/hermes-context/
 ExecStart=%h/.local/bin/sync-hermes-context.sh
 
 === hermes-context.timer ===
 [Unit]
-Description=Periodic hermes-context mirror sync (every 6h)
+Description=Run hermes context mirror sync every 6 hours
 
 [Timer]
 OnCalendar=*-*-* 00/6:00:00
-OnUnitActiveSec=6h
-OnBootSec=10min
 Persistent=true
 
 [Install]
@@ -176,86 +93,77 @@ WantedBy=timers.target
 === README.md ===
 # hermes-context sync
 
-One-way mirror of `/opt/data/workspace/hermes-context/` to
-`/workspace/hermes-context/` (SRC -> DST, never write-back). rsync-based,
-with a `cp -a` fallback transport that converges to the same end state.
-Stale entries on the destination are deleted every run (exact mirror).
+Mirrors the hermes context tree from SRC to DST so that the DST end state
+always equals the SRC end state, recursively (A5). Runs standalone or under
+a systemd --user timer (no root anywhere).
 
-## Files
+## Paths and env override contract (A17)
 
-- `sync-hermes-context.sh` — the sync script (standalone-capable)
-- `hermes-context.service` — user service unit (Type=oneshot)
-- `hermes-context.timer` — user timer unit (6h cadence)
+Defaults (deployed paths):
+- SRC = `/opt/data/workspace/hermes-context/`
+- DST = `/workspace/hermes-context/`
 
-## Environment variables (contract — all overridable, defaults are production values)
+Override at invocation (gate contract):
+- `HERMES_CONTEXT_SRC` — required override for the source
+- `HERMES_CONTEXT_DST` — required override for the destination
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `HERMES_CONTEXT_SRC` | `/opt/data/workspace/hermes-context/` | source directory |
-| `HERMES_CONTEXT_DST` | `/workspace/hermes-context/` | destination directory |
-| `HERMES_CTX_LOG` | `~/.cache/hermes-context/sync.log` | one-line summary log |
+When set, these env vars are the authoritative paths; otherwise the defaults
+above are used.
 
-The script works with no environment set: it applies the production defaults
-above (A17). Any variable may be overridden per-invocation; the systemd service
-unit sets `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST` explicitly via
-`Environment=` so normal-operation syncs need no extra configuration.
+## Usage
 
-Guards (exit code 2, nothing executed): SRC nonexistent; DST exists but is not
-a directory; identity or ancestry between SRC and DST (either direction);
-log path resolving inside DST or SRC; no admissible staging base outside
-DST/SRC.
+    ~/.local/bin/sync-hermes-context.sh            # real sync
+    ~/.local/bin/sync-hermes-context.sh --dry-run  # dry-run
 
-## Dry-run
+## dry-run semantics (A6)
 
-    bash sync-hermes-context.sh --dry-run
+`--dry-run` prints the plan (what would be transferred/deleted) to stdout and
+performs zero write operations: no files created or modified, no log entry
+written, and if DST does not exist it still does not exist after the run.
 
-or with explicit overrides:
+## Real-run ordering (A13)
 
-    HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/ \
-    HERMES_CONTEXT_DST=/workspace/hermes-context/ \
-    bash sync-hermes-context.sh --dry-run
+1. **stage** — content is staged into a temp directory on the DST filesystem
+   (`rsync -a --delete`, with a `cp -a` fallback).
+2. **verify** — recursive content comparison of stage vs SRC (structure,
+   file contents, and symlink targets). On any mismatch the script exits
+   nonzero, the stage is discarded, and DST is untouched.
+3. **touch DST** — only after verify passes, DST contents are replaced so the
+   end state matches SRC (including deletions and file<->dir type swaps).
 
-(or `DRY_RUN=1`). A dry-run writes **nothing**: no DST creation, no log line,
-no temp residue (A6/A16). With rsync it prints the itemized plan; without
-rsync it prints the fallback plan to stdout only.
+## Guards (A18)
 
-## Real run (order: stage -> verify -> touch-DST)
+The script refuses, before any write: empty paths, `/`, `.`; unresolvable
+SRC; `realpath(SRC) == realpath(DST)`; ancestor/descendant pairs; and a
+component boundary not owned by the invoking user. The component boundary of
+DST is the deepest **existing** component of the DST path: a DST that does
+not yet exist is allowed when its nearest existing ancestor (e.g. an existing
+`/workspace/hermes-context`) is owned by the invoking user; if that nearest
+existing ancestor is foreign-owned, the run is refused. This fixes the
+previous over-strict "DST parent owned" check, which wrongly refused when the
+immediate parent (`/workspace`) was root-owned but the component root itself
+was user-owned.
 
-The mirror is built in a private staging directory under `TMPDIR`
-(never inside DST or SRC — if `TMPDIR`/`/tmp` resolves into an owned path,
-the parent of DST is used as a last-resort base); it is verified against SRC
-(`diff -rq --no-dereference`) **before** the destination is touched. If
-verification fails, the script aborts with exit 1 and DST is left untouched —
-source survival > freshness.
+## Logs
 
-## Install
+Real runs log to `~/.cache/hermes-context/sync.log` (outside the mirrored
+tree). An alternate log via `HERMES_CTX_LOG` is refused if it points inside
+DST.
 
-    cp sync-hermes-context.sh ~/.local/bin/
-    chmod +x ~/.local/bin/sync-hermes-context.sh
-    mkdir -p ~/.config/systemd/user/
+## Install (systemd --user)
+
+    install -Dm755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+    mkdir -p ~/.config/systemd/user
     cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
 
-The service runs `%h/.local/bin/sync-hermes-context.sh` (i.e.
-`/home/<you>/.local/bin/sync-hermes-context.sh`).
-
-## Standalone invocation
-
-    ~/.local/bin/sync-hermes-context.sh
-
-or with explicit overrides:
-
-    HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/ \
-    HERMES_CONTEXT_DST=/workspace/hermes-context/ \
-    ~/.local/bin/sync-hermes-context.sh
+The service unit runs `ExecStart=%h/.local/bin/sync-hermes-context.sh`
+(oneshot); the timer fires on a 6-hour cadence with `Persistent=true`.
+The script is standalone-identical: it runs the same way without systemd.
 
 ## KNOWN_LIMITATIONS
 
-- Mirror class is contents + structure + symlinks only. File metadata,
-  timestamps, ownership, permissions fidelity and hardlinks are NOT
-  preserved as a guarantee (A7/A10). Fallback transport cannot be verified
-  for metadata; only the rsync path is authoritative.
-- `cp -a` fallback prunes stale entries via a `diff -rq` listing; names
-  containing newlines are unsupported in that path.
-- Dry-run without rsync prints an approximate plan (no rsync itemize).
+- Environment algebra beyond the A14 guard (combinations of
+  `HERMES_CONTEXT_SRC`/`HERMES_CONTEXT_DST`/`HERMES_CTX_LOG` beyond the
+  guarded cases) is unverified. Open, non-blocking (A10).

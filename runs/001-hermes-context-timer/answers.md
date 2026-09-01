@@ -65,3 +65,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A18 (2026-09-01, operator-delegated): degenerate-path refusals (root safety)
 - Refuse (clean nonzero, no writes) when HERMES_CONTEXT_DST or SRC is "/" , empty, or "." — always, before any destructive op. The component-boundary guards must handle these as special cases first (the "$RD/"-pattern form misses DST=/ : test components, not slash-suffixed strings).
 - DST symlink resolving outside SRC: refuse (A12) — after A12+placement guards pass, DST must END as a real directory tree identical to SRC (A5/A9); if the old DST was a symlink, it is replaced by the real tree (symlink removed, not retained).
+
+## A19 (2026-09-01, operator-delegated): no invented scope — ownership edition
+- There is NO ownership requirement on DST, SRC, or their ancestors. The operator may sync anywhere they hold write permission (including /tmp leaves under a root-owned parent — sticky-bit dirs exist for exactly this). The OS is the ownership gate; the script adds none.
+- The complete path-law list is closed: A12 identity, A14/A15 protected internal paths (concrete), A18 degenerate paths. Anything beyond these = invented scope = wall behavior. Refusals must cite one of these A-numbers; a refusal citing nothing is itself a defect.

@@ -1,85 +1,76 @@
 # hermes-context sync
 
-One-way mirror of `/opt/data/workspace/hermes-context/` to
-`/workspace/hermes-context/` (SRC -> DST, never write-back). rsync-based,
-with a `cp -a` fallback transport that converges to the same end state.
-Stale entries on the destination are deleted every run (exact mirror).
+Mirrors the hermes context tree from SRC to DST so that the DST end state
+always equals the SRC end state, recursively (A5). Runs standalone or under
+a systemd --user timer (no root anywhere).
 
-## Files
+## Paths and env override contract (A17)
 
-- `sync-hermes-context.sh` — the sync script (standalone-capable)
-- `hermes-context.service` — user service unit (Type=oneshot)
-- `hermes-context.timer` — user timer unit (6h cadence)
+Defaults (deployed paths):
+- SRC = `/opt/data/workspace/hermes-context/`
+- DST = `/workspace/hermes-context/`
 
-## Environment variables (contract — all overridable, defaults are production values)
+Override at invocation (gate contract):
+- `HERMES_CONTEXT_SRC` — required override for the source
+- `HERMES_CONTEXT_DST` — required override for the destination
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `HERMES_CONTEXT_SRC` | `/opt/data/workspace/hermes-context/` | source directory |
-| `HERMES_CONTEXT_DST` | `/workspace/hermes-context/` | destination directory |
-| `HERMES_CTX_LOG` | `~/.cache/hermes-context/sync.log` | one-line summary log |
+When set, these env vars are the authoritative paths; otherwise the defaults
+above are used.
 
-The script works with no environment set: it applies the production defaults
-above (A17). Any variable may be overridden per-invocation; the systemd service
-unit sets `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST` explicitly via
-`Environment=` so normal-operation syncs need no extra configuration.
+## Usage
 
-Guards (exit code 2, nothing executed): SRC nonexistent; DST exists but is not
-a directory; identity or ancestry between SRC and DST (either direction);
-log path resolving inside DST or SRC; no admissible staging base outside
-DST/SRC.
+    ~/.local/bin/sync-hermes-context.sh            # real sync
+    ~/.local/bin/sync-hermes-context.sh --dry-run  # dry-run
 
-## Dry-run
+## dry-run semantics (A6)
 
-    bash sync-hermes-context.sh --dry-run
+`--dry-run` prints the plan (what would be transferred/deleted) to stdout and
+performs zero write operations: no files created or modified, no log entry
+written, and if DST does not exist it still does not exist after the run.
 
-or with explicit overrides:
+## Real-run ordering (A13)
 
-    HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/ \
-    HERMES_CONTEXT_DST=/workspace/hermes-context/ \
-    bash sync-hermes-context.sh --dry-run
+1. **stage** — content is staged into a temp directory on the DST filesystem
+   (`rsync -a --delete`, with a `cp -a` fallback).
+2. **verify** — recursive content comparison of stage vs SRC (structure,
+   file contents, and symlink targets). On any mismatch the script exits
+   nonzero, the stage is discarded, and DST is untouched.
+3. **touch DST** — only after verify passes, DST contents are replaced so the
+   end state matches SRC (including deletions and file<->dir type swaps).
 
-(or `DRY_RUN=1`). A dry-run writes **nothing**: no DST creation, no log line,
-no temp residue (A6/A16). With rsync it prints the itemized plan; without
-rsync it prints the fallback plan to stdout only.
+## Guards (A18)
 
-## Real run (order: stage -> verify -> touch-DST)
+The script refuses, before any write: empty paths, `/`, `.`; unresolvable
+SRC; `realpath(SRC) == realpath(DST)`; ancestor/descendant pairs; and a
+component boundary not owned by the invoking user. The component boundary of
+DST is the deepest **existing** component of the DST path: a DST that does
+not yet exist is allowed when its nearest existing ancestor (e.g. an existing
+`/workspace/hermes-context`) is owned by the invoking user; if that nearest
+existing ancestor is foreign-owned, the run is refused. This fixes the
+previous over-strict "DST parent owned" check, which wrongly refused when the
+immediate parent (`/workspace`) was root-owned but the component root itself
+was user-owned.
 
-The mirror is built in a private staging directory under `TMPDIR`
-(never inside DST or SRC — if `TMPDIR`/`/tmp` resolves into an owned path,
-the parent of DST is used as a last-resort base); it is verified against SRC
-(`diff -rq --no-dereference`) **before** the destination is touched. If
-verification fails, the script aborts with exit 1 and DST is left untouched —
-source survival > freshness.
+## Logs
 
-## Install
+Real runs log to `~/.cache/hermes-context/sync.log` (outside the mirrored
+tree). An alternate log via `HERMES_CTX_LOG` is refused if it points inside
+DST.
 
-    cp sync-hermes-context.sh ~/.local/bin/
-    chmod +x ~/.local/bin/sync-hermes-context.sh
-    mkdir -p ~/.config/systemd/user/
+## Install (systemd --user)
+
+    install -Dm755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+    mkdir -p ~/.config/systemd/user
     cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
 
-The service runs `%h/.local/bin/sync-hermes-context.sh` (i.e.
-`/home/<you>/.local/bin/sync-hermes-context.sh`).
-
-## Standalone invocation
-
-    ~/.local/bin/sync-hermes-context.sh
-
-or with explicit overrides:
-
-    HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/ \
-    HERMES_CONTEXT_DST=/workspace/hermes-context/ \
-    ~/.local/bin/sync-hermes-context.sh
+The service unit runs `ExecStart=%h/.local/bin/sync-hermes-context.sh`
+(oneshot); the timer fires on a 6-hour cadence with `Persistent=true`.
+The script is standalone-identical: it runs the same way without systemd.
 
 ## KNOWN_LIMITATIONS
 
-- Mirror class is contents + structure + symlinks only. File metadata,
-  timestamps, ownership, permissions fidelity and hardlinks are NOT
-  preserved as a guarantee (A7/A10). Fallback transport cannot be verified
-  for metadata; only the rsync path is authoritative.
-- `cp -a` fallback prunes stale entries via a `diff -rq` listing; names
-  containing newlines are unsupported in that path.
-- Dry-run without rsync prints an approximate plan (no rsync itemize).
+- Environment algebra beyond the A14 guard (combinations of
+  `HERMES_CONTEXT_SRC`/`HERMES_CONTEXT_DST`/`HERMES_CTX_LOG` beyond the
+  guarded cases) is unverified. Open, non-blocking (A10).

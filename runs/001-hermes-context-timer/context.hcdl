@@ -1,14 +1,7 @@
-A1: SRC := /opt/data/workspace/hermes-context/ ; DST := /workspace/hermes-context/
-A2: sync := one-way SRC->DST, ¬write-back
-A3: scheduler := systemctl --user timer (OnUnitActiveSec=6h); script standalone-capable
-A4: transport := rsync primary; fallback cp -a/tar-pipe; sync src/ -> dst (trailing-slash semantics)
-A5_mirror: ∀ run -> DST end state == mirror(SRC), recursive; stale entries deleted
-A6: dry-run -> zero writes ∀ target incl. logs; DST byte-identical or nonexistent after
-A7: mirror class := contents+structure+symlinks; ¬metadata/timestamps/hardlinks
-A8: owned paths concrete, parent ∉ DST; TMPDIR fallback
-A9: convergence ∀ depth, both transports
-A10: severity bar: normal-operation defect -> FAIL; exotic -> KNOWN_LIMITATIONS
-A11: source survival > freshness; A12: refuse degenerate/identity paths (realpath identity/ancestry)
-A13: order := stage -> verify -> touch-DST
-A14/A15: gate-not-wall; A16: dry-run purity; A17: env parameterization is contract, defaults = production values; A18: guards precede ∀ destructive op
-open: ∅
+A5_mirror: ∀ sync_path -> DST end state == SRC end state, recursive
+A6_purity: dry_run -> ∀ write_op ∉ executed ∧ DST nonexistent post-run
+A13_order: stage -> verify(content-compared) -> touch DST; ¬destruction before verification
+A17_env: HERMES_CONTEXT_SRC/DST override := gate contract; deployed paths := defaults
+A18_guards: realpath identity ∧ component-boundary ∧ degenerate-path refusal
+open: env-algebra beyond A14 guard -> KNOWN_LIMITATIONS (non-blocking, A10)
+no_resurrect: none cited
