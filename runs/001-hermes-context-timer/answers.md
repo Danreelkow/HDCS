@@ -53,3 +53,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 - "Owned path" = the CONCRETE instantiated path: the actual stage dir the script creates (e.g. its mktemp -d result), the resolved log FILE's parent dir, the resolved entrypoint dir. Never a generic ancestor like TMPDIR or /tmp itself.
 - Comparison rule: refuse only when realpath(DST) == owned, or owned is inside DST, or DST is inside owned — using path-boundary-aware comparison (split on components or trailing-slash boundary), never bare string-prefix matching.
 - Run 017's refusal of /tmp/hdcs-gate-dst was a WALL (over-broad A14 implementation), not a gate — this ruling is the calibration.
+
+## A16 (2026-09-01, operator-delegated): DST lifecycle (run 019 wall calibration)
+- DST may not exist before a run. The script MUST create it (mkdir -p) on real runs; dry-run MUST NOT create it. "DST must pre-exist" is not law — the fixture lifecycle deliberately runs dry-run against an absent DST.
+- Gate probe strengthened: dry-run must leave DST nonexistent (not merely probe-free).

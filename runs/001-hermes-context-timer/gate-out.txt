@@ -1,1 +1,1 @@
-GATE PASS
+GATE FAIL: real run exited nonzero: sync-hermes-context: DST is not a directory: /tmp/hdcs-gate-dst

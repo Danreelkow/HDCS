@@ -1,7 +1,10 @@
 [Unit]
-Description=Sync hermes-context workspace mirror (SRC -> DST)
+Description=One-way contents-sync of hermes-context (SRC -> DST, staged+verified)
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
+Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
+Environment=HERMES_CONTEXT_DST=/workspace/hermes-context/
+# Override either path here (or in an EnvironmentFile) to change the sync source/target
 

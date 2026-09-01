@@ -1,63 +1,51 @@
-# hermes-context sync
+# sync-hermes-context
 
-Mirrors the contents of `/opt/data/workspace/hermes-context/` (read-only host
-mount) into `/workspace/hermes-context/` (user workspace). Stale files and
-subtrees in the destination are deleted at every depth so DST always equals
-SRC (contents + recursive structure + symlinks, including dangling symlinks;
-metadata/timestamps are not compared).
+One-way contents-sync `SRC -> DST` (never writes back to SRC). Mirror class:
+contents, structure, symlinks. Deletions in SRC propagate to DST. Order is
+stage -> verify (content-compare) -> touch DST, so a failed verify never
+touches DST. Primary transport is rsync; if rsync is absent the script falls
+back to a tar pipe (same end state).
 
-## Standalone use
+## Files
+- `sync-hermes-context.sh` — the sync engine (standalone executable)
+- `hermes-context.service` — systemd --user oneshot unit
+- `hermes-context.timer` — systemd --user timer, fires every 6 hours
 
-    ~/.local/bin/sync-hermes-context.sh
+## Install (user units only, no root)
+1. `install -Dm755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh`
+2. `install -Dm644 hermes-context.service hermes-context.timer -t ~/.config/systemd/user/`
+3. Edit `Environment=` lines in `hermes-context.service` if needed, then:
+   - `systemctl --user daemon-reload`
+   - `systemctl --user enable --now hermes-context.timer`
+   - `systemctl --user list-timers hermes-context.timer` to confirm
 
-Override paths via environment or flags:
+Standalone exec (no systemd): the script has built-in defaults
+(`SRC=/opt/data/workspace/hermes-context/`, `DST=/workspace/hermes-context/`),
+so `~/.local/bin/sync-hermes-context.sh` works as-is; both paths are
+env-overridable (see below).
 
-    HERMES_CONTEXT_SRC=/path/src HERMES_CONTEXT_DST=/path/dst \
-      ~/.local/bin/sync-hermes-context.sh
-    ~/.local/bin/sync-hermes-context.sh --src=/path/src --dst=/path/dst
+## Change the source/destination
+Env vars `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST` override the s0
+defaults, both under systemd (edit the unit's `Environment=` lines) and
+standalone. Log path defaults to `~/.cache/sync-hermes-context.log` and may be
+moved via `HERMES_CTX_LOG` — it is refused if it points inside DST.
 
-## Dry-run
+## Dry-run test procedure
+`HERMES_CONTEXT_SRC=... HERMES_CONTEXT_DST=... sync-hermes-context.sh --dry-run`
+prints a one-line plan and performs zero writes — no DST changes, no log file
+created. A missing DST is a valid dry-run input: it reports a full-population
+plan and exits 0 without creating anything. Confirm with checksums or
+`diff -r --no-dereference SRC DST` before and after; they must be
+byte-identical.
 
-    ~/.local/bin/sync-hermes-context.sh --dry-run
-
-Prints planned actions only. Performs ZERO writes of any kind — no staging
-directory, no log entry, no change to the destination.
-
-## Install entrypoint
-
-    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-
-## Enable the timer (systemd user units)
-
-    mkdir -p ~/.config/systemd/user
-    cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
-    systemctl --user daemon-reload
-    systemctl --user enable --now hermes-context.timer
-
-The timer fires every 6 hours (`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`)
-and runs `%h/.local/bin/sync-hermes-context.sh` (Type=oneshot).
-
-## Log
-
-Sync activity is appended to `~/.cache/hermes-context/sync.log` (outside the
-mirrored tree). Logging is skipped entirely in dry-run mode.
-
-## Safety
-
-- Source and destination identity/ancestor/symlink-into-source conflicts are
-  refused before any destructive operation.
-- The destination is never touched until a staged copy has been verified
-  against the source (content compare); verification failure exits nonzero.
-- The script refuses to run if the destination boundary-contains its own
-  concrete owned paths (log parent, entrypoint dir) or if the staging base
-  (TMPDIR included) resolves inside SRC or DST — refused before any staging
-  directory is created, so the refusal performs zero writes.
+## Guards
+- SRC == DST (literal or by realpath) aborts before any destructive op.
+- DST at or under a protected path (`/`, `/etc`, `/usr`, `/bin`, `/sbin`,
+  `/var`, `/boot`, `/dev`, `/proc`, `/sys`; override via `HERMES_CTX_PROTECTED`)
+  aborts. Comparison is boundary-aware (path components, not string prefixes).
 
 ## KNOWN_LIMITATIONS
-
-- Filenames containing newline characters are outside the verified corpus;
-  behavior with such names is unspecified.
-- Exotic environment combinations beyond the concrete-path guard (e.g.
-  unusual TMPDIR layouts, symlinked cache/entrypoint parents resolving in
-  unexpected places) are not exhaustively guarded; such combos are recorded
-  here as known limitations and are non-blocking.
+- Exotic env combos only: e.g. very old diffutils lacking `--no-dereference`
+  falls back to plain `diff -r`; filesystems without symlink support cannot
+  honor the symlink part of the mirror class; DST on a read-only mount fails
+  at the touch phase (by design, nonzero exit).
