@@ -7,3 +7,6 @@ Output contract: each expected output must be stated explicitly (a worker seat m
 
 ## OUTPUT TERMINATION (hard requirement)
 Reason freely but MUST TERMINATE inside the token budget: spend at most ~1/3 reasoning; emit the build brief sections unconditionally. If budget runs tight, cut prose — never the brief.
+
+## REASONING FREEDOM (supersedes OUTPUT TERMINATION above)
+No thinking cap in prod. Think as long as needed, reason in the register's terms, follow house rules — the brief sections themselves are non-negotiable.

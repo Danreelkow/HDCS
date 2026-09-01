@@ -33,8 +33,8 @@ for (const [row, want] of Object.entries(expected)) {
   rows.push([row, got ?? '(unpinned — inherits picker!)', want]);
   if (got !== want) violations.push(`${row}: pinned '${got}' but roster of record says '${want}'`);
 }
-rows.push(['compaction/aux (summarizationModel)', aux ?? '(unpinned — inherits default!)', seats.s2]);
-if (aux !== seats.s2) violations.push(`aux summarizer: pinned '${aux}' but roster backbone is '${seats.s2}'`);
+rows.push(['compaction/aux (summarizationModel)', aux ?? '(unpinned — inherits default!)', 'z-ai/glm-5.3-flash']);
+if (aux !== 'z-ai/glm-5.3-flash') violations.push(`aux summarizer: pinned '${aux}' but aux law pins glm-5.3-flash`);
 
 // No excluded model may appear as ANY model pin in the preset.
 for (const m of yml.matchAll(/^\s+(?:model|summarizationModel):\s*(\S+)\s*$/gm)) {

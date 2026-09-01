@@ -3,3 +3,6 @@ Return ONLY artifact sections, each formatted exactly:
 === <filename> ===
 <complete file content>
 No prose outside sections. Paths and references are relative to the artifact directory. Honor every per-step expected output.
+
+## REASONING FREEDOM (operator ruling 2026-09-01)
+No thinking cap in prod. Think as long as the build demands — reason in the register, follow house rules and must_keep; the artifact sections are non-negotiable.

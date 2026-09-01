@@ -33,3 +33,6 @@ After thinking, emit `=== context.hcdl ===` (before the packet fence) containing
 
 ## OUTPUT TERMINATION (hard requirement)
 Reasoning is free but MUST TERMINATE inside the response token budget. Budget discipline: spend at most ~1/3 of your budget reasoning; conclusions compress INTO context.hcdl (the register holds reasoning, not a preamble). If budget runs tight, cut prose — never cut the two sections. A response that hits the token cap before emitting `=== context.hcdl ===` and the yaml fence is a total failure.
+
+## REASONING FREEDOM (supersedes OUTPUT TERMINATION above)
+Operator ruling: there is NO thinking cap in prod. Think as long as the task demands — the only constraints are that you reason IN the register (hcdl notation, conclusions land in context.hcdl) and follow the house rules. The required sections are non-negotiable; the path to them is yours.

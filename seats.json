@@ -1,13 +1,13 @@
 {
-  "s1": "z-ai/glm-5.3-flash",
+  "s1": "openai/gpt-5.6-luna",
   "s1_escalate": "openai/gpt-5.6-luna",
-  "s2": "z-ai/glm-5.3-flash",
-  "s3": "z-ai/glm-5.3-flash",
+  "s2": "openai/gpt-5.6-luna",
+  "s3": "openai/gpt-5.6-luna",
   "s3_tool": "amazon/nova-micro-v1",
-  "s4": "openai/gpt-5.6-luna",
+  "s4": "z-ai/glm-5.3-flash",
   "s5": "amazon/nova-micro-v1",
   "s5_fallback": "z-ai/glm-5.3-flash",
-  "doctrine": "cheapest seat default -> mechanical gate -> on gate fail escalate one tier -> ladder exhausted = human",
+  "doctrine": "operator 2026-09-01: FIRST CHAIR = gpt-5.6-luna (glm is an overthinker and slow — never first). No token caps in prod: think as long as needed, but reason IN the register and follow house rules. glm stays down-chain (judge, aux, fallback) where overthinking is a feature. Cross-family rule intact: builder gpt -> judge z-ai.",
   "aux": {
     "titler": "nvidia/nemotron-3.5-lightning:free",
     "session_context": "thinkingmachines/inkling-small:free",
