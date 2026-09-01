@@ -9,8 +9,8 @@ bash -n sync-hermes-context.sh || fail "sync script syntax error"
 [ -f hermes-context.timer ] || fail "timer unit missing"
 [ -f README.md ] || fail "README missing"
 grep -qi "dry-run" sync-hermes-context.sh || fail "no --dry-run mode"
-grep -q "HERMES_CONTEXT_SRC" sync-hermes-context.sh || fail "source not parameterized"
-grep -q "HERMES_CONTEXT_DST" sync-hermes-context.sh || fail "destination not parameterized"
+grep -q "HERMES_CONTEXT_SRC" sync-hermes-context.sh || fail "source not parameterized (contract: read env HERMES_CONTEXT_SRC, required — namespaced, never bare SRC/DST)"
+grep -q "HERMES_CONTEXT_DST" sync-hermes-context.sh || fail "destination not parameterized (contract: read env HERMES_CONTEXT_DST, required)"
 grep -qi "rsync" sync-hermes-context.sh || fail "not rsync-based"
 # end-to-end proof in tmp fixtures: dry-run writes nothing, real run syncs, second run idempotent
 SRC=/tmp/hdcs-gate-src; DST=/tmp/hdcs-gate-dst
