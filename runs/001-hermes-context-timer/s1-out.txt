@@ -1,3 +1,16 @@
+=== context.hcdl ===
+A1: SRC := /opt/data/workspace/hermes-context/; DST := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
+A2: ∀ run -> ¬writes(SRC); one-way host->workspace
+A3: units user-scoped (systemctl --user, no root); script standalone-capable
+A4: rsync absent -> FB (cp -a / tar-pipe); contents src/ -> dst, ¬nesting
+A5_mirror: ∀ path ∈ {RS,FB} -> DST end state == SRC end state, recursive; stale deleted (rsync --delete; FB reconcile ∀ depth)
+A6: DR -> zero writes ∀ target incl. logs; gate = DST byte-identical pre/post (hash)
+A7: cadence := 6h, user-level timer
+INV: script idempotent; one-line summary log per real run
+open: none — ∀ binary resolved via A1-A7; no-ambiguity certified
+VALID: verify asserts (a) DR byte-identity, (b) RS==FB end-state incl. nested stale subtree deletion, (c) ¬nesting SRC∈DST, (d) systemctl --user installable sans root
+
+```yaml
 reg: {domain: cs-devops-shell-systemd, canon: "exact identifiers rsync/tar/systemd.unit (OnCalendar, WantedBy=timers.target), env vars HERMES_CONTEXT_SRC|DST|LOG, mirror semantics (--delete, recursive reconcile)"}
 intent: "build artifact dir containing: sync-hermes-context.sh (rsync primary; tar/cp -a + recursive reconcile fallback; env-driven SRC/DST with defaults; --dry-run zero-write incl. logs; idempotent; one-line summary log per real run) + hermes-context.service/.timer (systemctl --user, 6h cadence, no root) + README.md (install, source change, dry-run test, mirror semantics). Goal: DST = exact recursive one-way mirror of SRC (host->workspace)."
 must_keep:
@@ -37,3 +50,4 @@ paths:
   - "<artifact_dir>/README.md"
   - "~/.config/systemd/user/ (unit install target)"
 budgets: {tokens: 12000, lines: 60, fix_cycles: 2, questions: 2}
+```

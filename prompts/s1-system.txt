@@ -24,3 +24,12 @@ constraints: [<hard constraints; cite no_resurrect ids>]
 paths: [<canonical paths — lists, never repeated mapping keys>]
 budgets: {tokens: <n|estimate>, lines: 60, fix_cycles: 2, questions: 2}
 Multi-value fields are lists — repeated mapping keys silently drop entries on parse (the defect class this very task guards against). Wrap the packet in a single ```yaml fence. No prose outside the fence.
+
+## REASONING BUDGET: NONE
+Think as long as the task demands. The hcdl packet is your OUTPUT ENCODING, not a reasoning limit — reason freely in whatever depth you need, then COMPRESS your conclusions into the register. Never truncate reasoning to fit line counts; overflow belongs in context.hcdl.
+
+## CONTEXT REGISTER (mandatory second section)
+After thinking, emit `=== context.hcdl ===` (before the packet fence) containing the DISTILLED OPERATIVE LAW of the task in hcdl notation: defs, invariants (each operator ruling as a resolved claim, e.g. `A5_mirror: ∀ path -> DST end state == SRC end state, recursive`), open items. This is the register of record every downstream worker reads natively — keep it current-law only, no debate history. The packet then summarizes state/route; detail lives here.
+
+## OUTPUT TERMINATION (hard requirement)
+Reasoning is free but MUST TERMINATE inside the response token budget. Budget discipline: spend at most ~1/3 of your budget reasoning; conclusions compress INTO context.hcdl (the register holds reasoning, not a preamble). If budget runs tight, cut prose — never cut the two sections. A response that hits the token cap before emitting `=== context.hcdl ===` and the yaml fence is a total failure.

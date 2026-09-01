@@ -1,10 +1,11 @@
 [Unit]
-Description=Periodic hermes context mirror sync
+Description=Run hermes-context mirror every 6 hours
 
 [Timer]
-OnCalendar=*-*-* */6:00:00
+OnCalendar=*-*-* 00/6:00:00
 Persistent=true
 Unit=hermes-context.service
 
 [Install]
 WantedBy=timers.target
+

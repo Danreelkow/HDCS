@@ -1,62 +1,316 @@
-VALIDATOR OUTPUT:
-VIOLATION: yaml-parse — YAMLException: bad indentation of a mapping entry (2:228)
-hcdl: FAIL (4 checks, 54 lines, 3 must_keep)
+=== SHARED CONTEXT (hcdl register of record) ===
+A1: SRC := /opt/data/workspace/hermes-context/; DST := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
+A2: ∀ run -> ¬writes(SRC); one-way host->workspace
+A3: units user-scoped (systemctl --user, no root); script standalone-capable
+A4: rsync absent -> FB (cp -a / tar-pipe); contents src/ -> dst, ¬nesting
+A5_mirror: ∀ path ∈ {RS,FB} -> DST end state == SRC end state, recursive; stale deleted (rsync --delete; FB reconcile ∀ depth)
+A6: DR -> zero writes ∀ target incl. logs; gate = DST byte-identical pre/post (hash)
+A7: cadence := 6h, user-level timer
+INV: script idempotent; one-line summary log per real run
+open: none — ∀ binary resolved via A1-A7; no-ambiguity certified
+VALID: verify asserts (a) DR byte-identity, (b) RS==FB end-state incl. nested stale subtree deletion, (c) ¬nesting SRC∈DST, (d) systemctl --user installable sans root
 
-
-YOUR PREVIOUS PACKET:
-reg: {domain: cs-ops-shell-systemd, canon: shell script identifiers (rsync flags --delete/--dry-run, cp -a), systemd user unit directives (OnCalendar, WantedBy=default.target), env vars HERMES_CONTEXT_SRC/DST/LOG, idempotency, byte-identical mirror reconciliation}
-intent: := deliver standing sync of /opt/data/workspace/hermes-context/ -> /workspace/hermes-context/ (host -> workspace, one-way; never write back to host mount; sync CONTENTS of src into dst, no nesting). Artifacts in one dir: sync-hermes-context.sh (rsync-based, --delete exact-mirror; fallback on missing rsync := cp -a + recursive stale-subtree reconciliation at every depth so both paths converge to byte-identical DST==SRC; --dry-run => ZERO writes incl. log files, DST byte-identical post-dry-run; idempotent; one-line summary per real run; src/dst/log from HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST/HERMES_CONTEXT_LOG with defaults at script top), hermes-context.service + hermes-context.timer (systemctl --user, OnCalendar every 6h, no root; script must also run standalone when systemd absent), README.md (install, change source, test with --dry-run; sync-strategy section must state recursive mirror semantics correctly).
+hdcs/1 PACKET:
+reg: {domain: cs-devops-shell-systemd, canon: "exact identifiers rsync/tar/systemd.unit (OnCalendar, WantedBy=timers.target), env vars HERMES_CONTEXT_SRC|DST|LOG, mirror semantics (--delete, recursive reconcile)"}
+intent: "build artifact dir containing: sync-hermes-context.sh (rsync primary; tar/cp -a + recursive reconcile fallback; env-driven SRC/DST with defaults; --dry-run zero-write incl. logs; idempotent; one-line summary log per real run) + hermes-context.service/.timer (systemctl --user, 6h cadence, no root) + README.md (install, source change, dry-run test, mirror semantics). Goal: DST = exact recursive one-way mirror of SRC (host->workspace)."
 must_keep:
-  - source path is /opt/data/workspace/hermes-context/
-  - dry-run mode that performs no writes
-  - systemd user units, no root required
+  - "source path is /opt/data/workspace/hermes-context/"
+  - "dry-run mode that performs no writes"
+  - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical src/dst? -> A: src := /opt/data/workspace/hermes-context/ (host mount, kb digests); dst := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/) [A1]"
-  - "Q2: sync direction? -> A: host -> workspace one-way; ¬∃ write-back to host mount [A2]"
-  - "Q3: scheduler level? -> A: systemctl --user timer; script must also work standalone (cron/installer) when systemd absent [A3]"
-  - "Q4: rsync missing? -> A: runtime may lack rsync; detect and fallback cp -a semantics (or tar pipe); sync src/ CONTENTS -> dst, never nest [A4]"
-  - "Q5: mirror semantics? -> A: DST := EXACT mirror of SRC; stale files DELETED; rsync --delete correct; cp fallback reconciles identically (no accumulate-only) [A5]"
-  - "Q6: dry-run purity? -> A: --dry-run => zero writes of ANY kind incl. log files; if HERMES_CONTEXT_LOG ∈ DST, dry-run ¬touches it; logging only real-run; gate: DST byte-identical post-dry-run [A6]"
-  - "Q7: recursion depth of fallback reconciliation? -> A: recursive convergence — delete stale subtrees at every depth, mirroring rsync --delete; DST byte-identical to SRC incl. nested paths; README sync-strategy section states this correctly [A7]"
+  - "Q1: canonical SRC/DST paths? -> A: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (exists: INDEX.md, agents/, config/) [A1]"
+  - "Q2: sync direction? -> A: one-way host->workspace; nothing writes back to host mount [A2]"
+  - "Q3: systemd scope? -> A: user units (systemctl --user); script must also run standalone without systemd [A3]"
+  - "Q4: rsync absent? -> A: detect and fall back to cp -a/tar-pipe; contents src/ -> dst, never nesting [A4]"
+  - "Q5: stale-file policy? -> A: exact mirror, stale deleted; rsync --delete; fallback reconciles identically, recursive forall depth [A5,A7]"
+  - "Q6: dry-run write surface? -> A: zero writes incl. log files even if HERMES_CONTEXT_LOG in DST; gate = DST byte-identical pre/post [A6]"
+  - "Q7: cadence? -> A: timer every 6h, user-level [A3+spec]"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
 handoff:
   state: S_0 + Delta -> S_1
   report:
-    +done:
-      - "domain locked cs-ops-shell-systemd"
-      - "goal locked w/ A1-A7 folded in"
-      - "3 MUST_KEEP captured verbatim"
-      - "validation gates derived from A5/A6/A7 (byte-identical mirror, dry-run purity incl. logs, recursive fallback convergence)"
-    -resolved:
-      - "all ambiguities closed by operator answers A1-A7 — no residual questions"
-      - "certified: ∄ unresolved ambiguity ∀ artifact dimensions: paths, direction, scheduler, fallback, mirror, dry-run, recursion"
-    +open:
-      - "none — resolved: entries Q1-Q7 all carry recorded operator answers; no Q->A: OPEN"
-    +validation:
-      - "rsync path run twice => idempotent, DST==SRC (diff -r / checksum)"
-      - "rsync path w/ stale nested file in DST => deleted"
-      - "cp fallback w/ stale subtree at depth ≥2 => deleted, end state == rsync path end state"
-      - "--dry-run => DST + log byte-identical pre/post (hash before/after)"
-      - "systemctl --user enable/verify timer fires OnCalendar=every 6h without root"
-      - "script standalone w/o systemd"
-      - "README sync-strategy matches A5/A7"
+    - "+done"
+    - "-resolved"
+    - "+open"
+    - "+validation"
 constraints:
-  - "one-way sync host -> workspace; ¬∃ write to /opt/data/workspace/hermes-context/"
-  - "sync CONTENTS src/ -> dst; source dir never nested inside destination"
-  - "rsync path must use --delete (exact mirror); cp fallback must reconcile recursively at every depth (A5/A7)"
-  - "--dry-run: zero writes of any kind incl. log files (A6)"
-  - "no root required: systemctl --user units only (MUST_KEEP)"
-  - "script standalone-capable when systemd absent (A3); rsync-optional with cp -a/tar-pipe fallback (A4)"
-  - "no_resurrect: kb digests id canonical host-mount src /opt/data/workspace/hermes-context/ (A1)"
+  - "forall run: no_writes(SRC) (one-way host->workspace) [A2]"
+  - "DR -> zero writes forall target (dst contents and logs); byte-identity gate [A6]"
+  - "forall path in {RS,FB}: DST end state == SRC end state, recursive [A5_mirror]"
+  - "no_root_required; units user-scoped [MUST_KEEP]"
+  - "SRC verbatim /opt/data/workspace/hermes-context/ [MUST_KEEP]"
+  - "rsync absence -> FB, semantics identical [A4]"
+  - "script idempotent; one-line summary log per real run"
 paths:
-  - /workspace/hermes-context/
-  - /opt/data/workspace/hermes-context/
+  - "/opt/data/workspace/hermes-context/ (SRC, canonical)"
+  - "/workspace/hermes-context/ (DST)"
   - "<artifact_dir>/sync-hermes-context.sh"
   - "<artifact_dir>/hermes-context.service"
   - "<artifact_dir>/hermes-context.timer"
   - "<artifact_dir>/README.md"
-  - "~/.config/systemd/user/hermes-context.service"
-  - "~/.config/systemd/user/hermes-context.timer"
-budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+  - "~/.config/systemd/user/ (unit install target)"
+budgets: {tokens: 12000, lines: 60, fix_cycles: 2, questions: 2}
 
-Resend ONE corrected yaml fence fixing every violation. Constants stay literal (gate: READY|NOT_READY, state: S_0 + Delta -> S_1). No top-level +open key. No prose outside the fence.
+MECHANICAL GATE OUTPUT:
+GATE PASS
+
+
+ARTIFACT FILES: README.md, hermes-context.service, hermes-context.timer, sync-hermes-context.sh
+
+ARTIFACT CONTENTS:
+=== sync-hermes-context.sh ===
+#!/usr/bin/env bash
+# sync-hermes-context.sh — one-way mirror host -> workspace (user-scoped, standalone-capable)
+# rsync path (RS) or tar-pipe + reconcile fallback (FB); --dry-run writes nothing anywhere.
+set -euo pipefail
+
+# Defaults (canonical paths, overridable via environment)
+SRC=${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}
+DST=${HERMES_CONTEXT_DST:-/workspace/hermes-context/}
+DEFAULT_LOG=${XDG_STATE_HOME:-$HOME/.local/state}/sync-hermes-context.log
+LOG=${HERMES_CONTEXT_LOG:-$DEFAULT_LOG}
+
+SRC=${SRC%/}
+DST=${DST%/}
+
+# Invariant [A2]: never write to SRC. If LOG resolves inside SRC, fall back to
+# the default log location (outside SRC and DST).
+case "$LOG" in
+  "$SRC"|"$SRC"/*) LOG=$DEFAULT_LOG ;;
+esac
+
+# Log path relative to DST if it lives inside DST (must be excluded from mirror)
+log_rel() {
+  case "$LOG" in
+    "$DST"|"$DST"/*) printf '%s' "${LOG#"$DST"/}" ;;
+    *) return 1 ;;
+  esac
+}
+
+# Lists of relative file paths (newline-delimited)
+src_files() { (cd "$SRC" && find . -type f | sed 's#^\./##'); }
+dst_files() { (cd "$DST" && find . -type f | sed 's#^\./##'); }
+
+dry_run() {
+  local adds=() updates=() deletes=() f
+  while IFS= read -r f; do
+    if [ ! -e "$DST/$f" ]; then
+      adds+=("$f")
+    elif ! cmp -s "$SRC/$f" "$DST/$f"; then
+      updates+=("$f")
+    fi
+  done < <(src_files)
+
+  local skip=""
+  skip=$(log_rel) || skip=""
+
+  while IFS= read -r f; do
+    [ -n "$skip" ] && [ "$f" = "$skip" ] && continue
+    if [ ! -e "$SRC/$f" ]; then
+      deletes+=("$f")
+    fi
+  done < <(dst_files)
+
+  echo "DRY-RUN mirror plan: SRC=$SRC -> DST=$DST"
+  echo "mode: $(command -v rsync >/dev/null 2>&1 && echo RS || echo FB)"
+  echo "adds: ${#adds[@]}"
+  for f in "${adds[@]}"; do echo "  + $f"; done
+  echo "updates: ${#updates[@]}"
+  for f in "${updates[@]}"; do echo "  ~ $f"; done
+  echo "deletes: ${#deletes[@]}"
+  for f in "${deletes[@]}"; do echo "  - $f"; done
+  echo "(dry-run performed zero writes; log untouched)"
+}
+
+# Pre-pass: remove DST paths whose type differs from SRC (file vs directory),
+# so the tar extract and reconcile can always converge to SRC's shape.
+fb_fix_type_mismatches() {
+  local skip="" p rel
+  skip=$(log_rel) || skip=""
+  while IFS= read -r p; do
+    rel=${p#"$DST"/}
+    [ -n "$skip" ] && [ "$rel" = "$skip" ] && continue
+    if [ -e "$SRC/$rel" ]; then
+      if { [ -d "$DST/$rel" ] && [ ! -d "$SRC/$rel" ]; } ||
+         { [ ! -d "$DST/$rel" ] && [ -d "$SRC/$rel" ]; }; then
+        rm -rf "$p"
+      fi
+    fi
+  done < <(find "$DST" -mindepth 1 -depth)
+}
+
+# Bottom-up: remove every DST path absent in SRC (files, then emptied dirs)
+fb_reconcile() {
+  local skip="" p rel
+  skip=$(log_rel) || skip=""
+  while IFS= read -r p; do
+    rel=${p#"$DST"/}
+    [ -n "$skip" ] && [ "$rel" = "$skip" ] && continue
+    if [ ! -e "$SRC/$rel" ]; then
+      rm -rf "$p"
+      DELETED=$((DELETED + 1))
+    fi
+  done < <(find "$DST" -mindepth 1 -depth)
+}
+
+do_real() {
+  mkdir -p "$DST"
+  COPIED=0
+  DELETED=0
+  if command -v rsync >/dev/null 2>&1; then
+    MODE=RS
+    local out
+    local -a args=(rsync -a --delete)
+    local skip
+    skip=$(log_rel) || skip=""
+    [ -n "$skip" ] && args+=(--exclude="$skip")
+    out=$("${args[@]}" --out-format='%i|%n' "$SRC/" "$DST/")
+    COPIED=$(printf '%s\n' "$out" | grep -c '^>f' || true)
+    DELETED=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
+  else
+    MODE=FB
+    fb_fix_type_mismatches
+    (cd "$SRC" && tar -cf - .) | tar -xf - -C "$DST"
+    fb_reconcile
+    COPIED=$(find "$SRC" -type f | wc -l)
+  fi
+}
+
+case "${1:-}" in
+  --dry-run)
+    dry_run
+    exit 0
+    ;;
+  "")
+    MODE=unknown
+    COPIED=0
+    DELETED=0
+    rc=0
+    do_real || rc=$?
+    status=OK
+    [ "$rc" -eq 0 ] || status=FAIL
+    line=$(printf '%s mode=%s copied=%s deleted=%s status=%s' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$MODE" "$COPIED" "$DELETED" "$status")
+    mkdir -p "$(dirname "$LOG")"
+    if log_rel >/dev/null 2>&1; then
+      # LOG lives inside DST: keep only the current run's line so no stale log
+      # content remains in DST (exact-mirror invariant [A5]).
+      printf '%s\n' "$line" > "$LOG"
+    else
+      printf '%s\n' "$line" >> "$LOG"
+    fi
+    exit "$rc"
+    ;;
+  *)
+    echo "usage: $0 [--dry-run]" >&2
+    exit 2
+    ;;
+esac
+
+=== hermes-context.service ===
+[Unit]
+Description=One-way mirror of hermes-context from host SRC to workspace DST
+
+[Service]
+Type=oneshot
+ExecStart=/workspace/hermes-context/artifact/sync-hermes-context.sh
+
+=== hermes-context.timer ===
+[Unit]
+Description=Run hermes-context mirror every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+Unit=hermes-context.service
+
+[Install]
+WantedBy=timers.target
+
+=== README.md ===
+# hermes-context sync
+
+One-way mirror of `/opt/data/workspace/hermes-context/` (read-only source) into
+`/workspace/hermes-context/` (destination), recursive, stale paths deleted.
+
+## Install (systemd user units, no root)
+
+```sh
+# 1. place the sync script at the path the unit executes
+mkdir -p /workspace/hermes-context/artifact
+cp sync-hermes-context.sh /workspace/hermes-context/artifact/
+chmod +x /workspace/hermes-context/artifact/sync-hermes-context.sh
+
+# 2. install the user units
+mkdir -p ~/.config/systemd/user
+cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-context.timer
+```
+
+Cadence: every 6 hours (`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`).
+No root is required; everything runs via `systemctl --user`.
+
+## Standalone run
+
+```sh
+./sync-hermes-context.sh
+```
+
+## Dry-run test (zero writes, log untouched)
+
+```sh
+./sync-hermes-context.sh --dry-run
+```
+
+Prints add/update/delete lists and counts to stdout only; no file, log, or
+directory is modified — verified by byte-identity hashing of DST and the log
+path before/after.
+
+## Environment variables
+
+- `HERMES_CONTEXT_SRC` (default `/opt/data/workspace/hermes-context/`)
+- `HERMES_CONTEXT_DST` (default `/workspace/hermes-context/`)
+- `HERMES_CONTEXT_LOG` (default `${XDG_STATE_HOME:-$HOME/.local/state}/sync-hermes-context.log`,
+  outside DST so the exact mirror is not perturbed; if set inside SRC it is
+  ignored and the default is used, since SRC is never written)
+
+## Mirror semantics
+
+- **rsync available (RS):** `rsync -a --delete` with trailing slashes (copies
+  contents, never nests a `src/` inside DST); stale files and subtrees are
+  deleted. If the log lives inside DST it is excluded from the mirror.
+- **rsync absent (FB):** tar-pipe `(cd SRC && tar -cf - .) | tar -xf - -C DST`
+  preceded by a type-mismatch pre-pass (a DST file where SRC has a directory,
+  or vice versa, is removed so the source shape is restored) and followed by a
+  bottom-up reconcile that removes every DST path (files, then emptied
+  directories) absent in SRC at any depth, skipping the log path. End state is
+  byte-identical to the RS path, including nested stale subtree deletion.
+
+Each real run appends exactly one summary line:
+`<utc-ts> mode=RS|FB copied=N deleted=N status=OK|FAIL`. If the log lives
+inside DST, it is rewritten to contain only the current run's line so no stale
+log content persists in DST. The script is idempotent: a second consecutive
+run makes no changes to DST.
+
+## After a source change (verification procedure)
+
+When files under SRC change, add, or are removed:
+
+```sh
+# 1. preview — must print the expected add/update/delete lists and write nothing
+./sync-hermes-context.sh --dry-run
+
+# 2. apply and verify convergence
+./sync-hermes-context.sh
+diff -r /workspace/hermes-context/ /opt/data/workspace/hermes-context/ \
+  --exclude=sync-hermes-context.log   # only needed if LOG is inside DST
+echo $?   # expect 0
+
+# 3. idempotency — second run changes nothing, log gains exactly one line
+./sync-hermes-context.sh
+```
+
+`diff -r` must report no differences (exit 0), confirming the exact-mirror
+invariant: DST end state == SRC end state, recursively, with stale paths
+deleted at every depth.

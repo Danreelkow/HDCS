@@ -27,7 +27,15 @@ const outcomes = {};
 function seat(name, model, sysFile, userText, maxTok = 4096, reasonCap = 2000) {
   const sys = path.join(HERE, 'prompts', sysFile);
   fs.writeFileSync('in.txt', userText);
-  execFileSync('node', [path.join(HERE, 'gates', 'seat.mjs'), name, model, sys, 'in.txt', String(maxTok), '0.2', String(reasonCap)], { stdio: 'inherit' });
+  for (let tryN = 0; tryN < 2; tryN++) {
+    try {
+      execFileSync('node', [path.join(HERE, 'gates', 'seat.mjs'), name, model, sys, 'in.txt', String(maxTok), '0.2', String(reasonCap)], { stdio: 'inherit' });
+      break;
+    } catch (e) {
+      if (tryN === 1) { log(`${name}: seat call failed twice (${String(e.message).split('\n')[0].slice(0, 60)}) — treating as empty response`); return ''; }
+      log(`${name}: seat call failed, retrying once`);
+    }
+  }
   const r = JSON.parse(fs.readFileSync(`results/${name}.json`, 'utf8'));
   costs.push({ seat: name, model, cost: r.usage?.cost ?? 0 });
   return r.text ?? '';
@@ -52,6 +60,7 @@ for (const attempt of ['s1', 's1-repair', 's1-repair2', 's1-escalate']) {
   const text = seat(attempt, model, 's1-system.txt', prev
     ? `VALIDATOR OUTPUT:\n${fs.readFileSync('v.txt', 'utf8')}\n\nYOUR PREVIOUS PACKET:\n${prev}\n\nResend ONE corrected yaml fence fixing every violation. Constants stay literal (gate: READY|NOT_READY, state: S_0 + Delta -> S_1). No top-level +open key. No prose outside the fence.`
     : s1User, 8192);
+  fs.writeFileSync('s1-out.txt', text);
   const f = fence(text);
   if (!f) { log(`${attempt}: NO FENCE`); fs.writeFileSync('v.txt', 'no yaml fence in response'); continue; }
   fs.writeFileSync('packet.yaml', f); packetFile = 'packet.yaml';
@@ -67,9 +76,15 @@ for (const attempt of ['s1', 's1-repair', 's1-repair2', 's1-escalate']) {
 if (outcomes.s1 !== 'PASS') { log('S1 never passed; aborting'); outcomes.s1 = 'FAIL'; report(); process.exit(1); }
 const packet = fs.readFileSync('packet.yaml', 'utf8');
 
+// --- context register (hcdl shared context, readable by every seat) ---
+const s1out = fs.readFileSync('s1-out.txt', 'utf8');
+const ctxM = s1out.match(/=== context\.hcdl ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/);
+if (ctxM) { fs.writeFileSync('context.hcdl', ctxM[1].trim() + '\n'); log('context.hcdl: ' + ctxM[1].trim().split('\n').length + ' lines'); }
+const shared = fs.existsSync('context.hcdl') ? '=== SHARED CONTEXT (hcdl register of record) ===\n' + fs.readFileSync('context.hcdl', 'utf8') + '\n' : '';
+
 // --- S2 ---
 checkBudget('s2');
-const brief = seat('s2', seats.s2, 's2-system.txt', `=== hdcs/1 PACKET ===\n${packet}`, 4096);
+const brief = seat('s2', seats.s2, 's2-system.txt', `${shared}=== hdcs/1 PACKET ===\n${packet}`, 8192);
 fs.writeFileSync('brief.md', brief);
 outcomes.s2 = 'BRIEF ' + brief.length + ' chars';
 
@@ -78,8 +93,8 @@ checkBudget('s3');
 let build = null;
 for (const attempt of ['s3', 's3-repair']) {
   const input = attempt === 's3'
-    ? `BUILD BRIEF:\n${brief}`
-    : `GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure.`;
+    ? `${shared}BUILD BRIEF:\n${brief}`
+    : `${shared}GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure.`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 8192);
   fs.writeFileSync('artifact-build.txt', build);
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
@@ -106,14 +121,14 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     checkBudget(s4round ? 's4-reverify' : 's4');
     const artifacts = fs.existsSync('artifact') ? fs.readdirSync('artifact').join(', ') : '';
     const gateOut = fs.existsSync('gate-out.txt') ? fs.readFileSync('gate-out.txt', 'utf8') : '(no mechanical gate ran)';
-    s4verdict = seat(s4round ? 's4-reverify' : 's4', seats.s4, 's4-system.txt', `hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 4096);
+    s4verdict = seat(s4round ? 's4-reverify' : 's4', seats.s4, 's4-system.txt', `${shared}hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 4096);
     fs.writeFileSync('s4-verdict.txt', s4verdict);
     outcomes.s4 = /VERDICT:\s*PASS/i.test(s4verdict) ? 'PASS' : (/VERDICT:\s*FAIL/i.test(s4verdict) ? 'FAIL' : 'UNPARSED');
     log(`S4: ${outcomes.s4}`);
     if (outcomes.s4 !== 'FAIL' || s4round === 1) break;
     // doctrine option (operator-approved 2026-09-01): ONE S4->S3 feedback repair before human routing
     log('S4 FAIL -> feedback repair round (judge evidence fed to builder)');
-    const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `GATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 8192);
+    const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `${shared}GATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 8192);
     fs.writeFileSync('artifact-build.txt', fb);
     for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
     for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
