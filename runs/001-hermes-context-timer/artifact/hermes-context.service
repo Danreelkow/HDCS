@@ -1,6 +1,5 @@
 [Unit]
-Description=Mirror hermes-context (host -> workspace, one-way)
-Documentation=file://%h/.local/bin/sync-hermes-context.sh
+Description=Hermes context one-way mirror (host -> workspace)
 
 [Service]
 Type=oneshot

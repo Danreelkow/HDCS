@@ -1,25 +1,17 @@
-defs:
-  SRC := $HERMES_CONTEXT_SRC, default /opt/data/workspace/hermes-context/
-  DST := $HERMES_CONTEXT_DST, default /workspace/hermes-context/
-  ART := artifact dir containing sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md
-  LOG := one-line run summary, path via HERMES_CONTEXT_LOG, default ~/.cache/, NEVER ∈ DST
-  rsync_path := rsync -a --delete (contents of SRC -> DST, trailing-slash src/)
-  cp_path := fallback when rsync absent; tar-pipe or cp -a + recursive reconcile
-invariants:
-  A1: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (exists, holds INDEX.md, agents/, config/)
-  A2: ∀ sync -> direction host->workspace one-way; ¬∃ writeback to SRC
-  A3: units are systemctl --user; ¬root; script standalone-capable (cron/caller invokes directly)
-  A4: script detects rsync absence -> cp_path fallback; sync CONTENTS (src/ -> dst), ¬nest SRC inside DST
-  A5_mirror: ∀ path ∈ {rsync_path, cp_path} -> DST end state == SRC end state exactly; stale files DELETED, ¬accumulate-only
-  A6_purity: --dry-run -> ZERO writes ∀ kind incl. logs; DST byte-identical post-dry-run
-  A7_recursive: reconcile deletes stale subtrees ∀ depth; recursive convergence both paths
-  A8_placement: LOG ∉ DST ∀ mode; install paths ∉ mirrored tree (~/.local/bin or /workspace/hdcs/bin); sync never deletes/moves own entrypoints
-  A9_class: mirror ≡ {file contents, dir structure (recursive), symlinks}; ∉ class: metadata, timestamps, hardlink topology; self-verify FAIL(nonzero) on mismatch, ¬warn-exit-0
-  A10_bar: FAIL only on defects reachable in normal operation; exotic triggers -> KNOWN_LIMITATIONS (+open), classify ¬suppress
-  A11_guard: guard SRC==DST; ∀ rm -rf DST -> precondition ∃ verified copy of SRC elsewhere; SRC survival > freshness
-  A12_identity: compare realpath(SRC) vs realpath(DST); refuse(clean nonzero, no writes) if equal ∨ ancestor/descendant ∨ DST resolves through symlink into SRC; enforced ∀ path pre-destructive
-  A13_verified: verified := contents+structure+symlinks (A9 class) compared vs SRC ∧ match; ¬non-emptiness; order: stage -> verify -> touch DST; README ¬call unverified copy "verified"
-open:
-  KNOWN_LIMITATIONS: newline-in-filename corpora; hostile env (DST := log dir); per A10 non-blocking
-validation:
-  dry-run byte-identity gate; recursive mirror equality both paths; realpath guards; staging verify gate
+reg canon: shell/systemd tooling — rsync(1) flags (--delete, --dry-run, -a), systemctl --user units (.service/.timer, OnCalendar), systemd.unit(5) specifiers, cp -a/tar-pipe fallback, realpath(1), diff -r/xattr-free comparison.
+inv: SRC := /opt/data/workspace/hermes-context/, DST := /workspace/hermes-context/ (override via HERMES_CONTEXT_SRC/DST).
+inv: CONTENTS sync: SRC/ -> DST, ∀ never SRC -> DST/SRC (no nesting).
+inv: A2_one_way: ∀ run -> writes only to DST, host mount read-only.
+inv: A5_mirror: ∀ path ∈ {rsync, cp-fallback} -> DST end state == SRC end state (exact mirror; rsync via --delete, fallback via full reconcile), recursive.
+inv: A6_dryrun_purity: --dry-run -> ∀ bytes written = 0, logs included, DST byte-identical post-run.
+inv: A7: mirror is recursive; fallback deletes stale subtrees ∀ depth.
+inv: A8: LOG path ∉ DST ∀ mode; install paths (∼/.local/bin) ∉ DST; sync never deletes own entrypoints.
+inv: A9_mirror_class: mirror ≡ {file contents, dir structure (recursive), symlinks}; metadata/timestamps/hardlinks ∉ class; verify fails nonzero on mismatch, never warn-and-exit-0.
+inv: A10_bar: FAIL ⇔ defect reachable in normal operation (default config, documented usage, plausible misconfig losing data); exotic triggers -> KNOWN_LIMITATIONS (+open), non-blocking.
+inv: A11: guard SRC==DST (reject/clean no-op); ∀ rm -rf DST ⇒ ∃ verified copy of SRC elsewhere; source survival > freshness.
+inv: A12_path_identity: guard via realpath(SRC)/realpath(DST) — reject (nonzero, no writes) iff equal | ancestor/descendant | DST resolves into SRC; applies ∀ sync path, pre-destructive.
+inv: A13_order: stage -> verify (content-compare, A9 class) -> then touch DST; unverified copy ≠ "verified" in README.
+inv: A3_standalone: script runs sans systemd; units are USER units (systemctl --user), no root.
+inv: timer cadence: 6h (OnCalendar), idempotent run, one-line summary log per real run.
+resolved: A1..A13 folded; no remaining questions.
+open: KNOWN_LIMITATIONS candidates (per A10): newline-in-filename corpora edge cases in fallback diff; DST resolved-through-symlink-to-log-dir hostile env combos — repro notes only.

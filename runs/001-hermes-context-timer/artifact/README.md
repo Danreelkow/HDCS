@@ -1,84 +1,77 @@
-# hermes-context sync
+# hermes-context freshness sync
 
-One-way mirror of the hermes-context tree from the host into the workspace:
+One-way exact mirror of the hermes context directory from the host mount into
+the workspace. The source path is /opt/data/workspace/hermes-context/ and the
+destination is /workspace/hermes-context/. Both are overridable via the
+environment variables `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST`.
 
-    SRC: /opt/data/workspace/hermes-context/   (override: HERMES_CONTEXT_SRC)
-    DST: /workspace/hermes-context/            (override: HERMES_CONTEXT_DST)
+## What it does
 
-Direction is always host -> workspace (A2). There is no writeback path.
-
-## Install
-
-Script must be installed **outside** the mirrored tree (A8) — either location works:
-
-    install -m 755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-    # or: install -m 755 sync-hermes-context.sh /workspace/hdcs/bin/
-
-Units (systemctl --user only; no root anywhere, A3):
-
-    mkdir -p ~/.config/systemd/user/
-    install -m 644 hermes-context.service ~/.config/systemd/user/
-    install -m 644 hermes-context.timer  ~/.config/systemd/user/
-    systemctl --user daemon-reload
-    systemctl --user enable --now hermes-context.timer
-
-The timer fires every 6 hours (`OnCalendar=*-*-* 0/6:00:00`, `Persistent=true`).
-
-## Standalone usage
-
-The script is standalone-capable (cron / any caller invokes it directly):
-
-    ~/.local/bin/sync-hermes-context.sh
-
-Environment overrides:
-
-    HERMES_CONTEXT_SRC   source dir   (default /opt/data/workspace/hermes-context/)
-    HERMES_CONTEXT_DST   dest dir     (default /workspace/hermes-context/)
-    HERMES_CONTEXT_LOG   summary log  (default ~/.cache/hermes-context-sync.log)
+- Exact mirror: file contents, directory structure (recursive), and symlinks
+  (by target) are replicated. Stale files and subtrees in DST are deleted at
+  any depth. Metadata, timestamps, and hardlink identity are NOT part of the
+  mirror class and are not guaranteed.
+- Order law: every real run first stages SRC into a temp directory outside
+  DST, verifies the stage, and only then reconciles DST. If verification
+  fails, DST is left byte-identical and the script exits nonzero.
+- Primary path: `rsync -a --delete SRC/ STAGE/` for staging (trailing slash —
+  contents of SRC land in the stage, never nested), then the verified stage
+  is copied into DST with stale entries deleted at all depths.
+- Fallback path (rsync absent): `cp -a SRC/. STAGE/` (or tar-pipe), verify
+  the stage against SRC, then full reconcile of DST (stale subtrees deleted
+  at all depths).
+- Verify step: recursive content-compare (`diff -r`) plus explicit symlink
+  target comparison. A copy is called "verified" only after this
+  content-comparison passes. A verify failure exits nonzero and leaves DST
+  untouched — never warn-and-exit-0.
+- Guards: before any write, SRC and DST are resolved with `realpath(1)`.
+  The run is rejected (exit 2, no writes) if they are equal, if either is an
+  ancestor of the other, or if DST resolves inside SRC. The script never
+  deletes its own entrypoints and never writes its log inside DST.
 
 ## Dry-run
 
+There is a dry-run mode that performs no writes: pass `--dry-run`. Planned
+actions are printed to stdout only; no log file is created or modified and
+DST stays byte-identical.
+
+## Usage
+
+    # preview (zero writes)
     ~/.local/bin/sync-hermes-context.sh --dry-run
 
-Reports what would be mirrored or deleted. Performs **zero** writes of any
-kind (A6): no destination changes, no directories created, no log file.
+    # real run
+    ~/.local/bin/sync-hermes-context.sh
 
-## Behavior notes
+    # overrides
+    HERMES_CONTEXT_SRC=/path/src HERMES_CONTEXT_DST=/path/dst \
+      ~/.local/bin/sync-hermes-context.sh
 
-Both sync paths follow the same order (A11/A13): copy SRC to a staging dir
-**outside DST**, verify the staged copy against SRC, and only then reconcile
-into DST and re-verify the end state. DST is never modified before a verified
-copy of SRC exists elsewhere, and SRC is never touched.
+## Install (systemd user units, no root required)
 
-- rsync path: SRC is staged with `rsync -a SRC/ stage/`, verified, then
-  applied with `rsync -a --delete stage/ DST/` (trailing slash — contents are
-  mirrored, not nested, A4).
-- cp_path (no rsync): SRC is staged with `cp -a SRC/. stage/`, verified, then
-  stale entries are deleted from DST (recursive subtree deletion, A7) and the
-  verified stage is copied in.
+    mkdir -p ~/.local/bin ~/.config/systemd/user
+    cp sync-hermes-context.sh ~/.local/bin/
+    cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
+    systemctl --user daemon-reload
+    systemctl --user enable --now hermes-context.timer
 
-End state is identical either way (A5/A7).
+The service unit runs `ExecStart=%h/.local/bin/sync-hermes-context.sh` as a
+oneshot; the timer fires every 6 hours (`OnCalendar=*-*-* 00/6:00:00`,
+`Persistent=true`). The script is standalone-capable and runs fine without
+systemd.
 
-- Verification covers the mirror class (A9): file contents, recursive
-  directory structure, and symlinks. A mismatch exits nonzero — never a
-  silent warn-and-exit-0.
-- Identity guards (A12): the run is refused with a clean nonzero exit and
-  zero writes if SRC and DST resolve to the same path, one is an ancestor of
-  the other, or DST is a symlink resolving into SRC.
-- The run summary log is never placed inside the DST tree (A8) nor inside the
-  SRC tree (A2 no-writeback).
+## Logging
+
+One line per real run (timestamp, mode, status) is appended to
+`~/.cache/hermes-context/sync.log`. Dry-run never logs. The log path is
+never under DST.
 
 ## KNOWN_LIMITATIONS
 
-Per A10 these are open, classified, non-blocking:
-
-- Newline-in-filename corpora: path handling is NUL-delimited internally, but
-  the diff output of a verify failure and some tooling does not round-trip
-  such names cleanly.
-- Hostile environment where DST is also the log directory: the script refuses
-  log paths inside DST (A8) — and inside SRC (A2) — so in such an environment
-  the run summary is dropped if the default log dir is unwritable; redirect
-  HERMES_CONTEXT_LOG outside both SRC and DST.
-- Entry types outside the mirror class (sockets, fifos, devices) fail
-  verification loudly rather than being mirrored.
-- Non-GNU userlands (find without -print0/-z sort) are unsupported.
+- Newline-in-filename corpora: the fallback verify/diff path can mis-report
+  on filenames containing newlines (diff -r listing edge). Repro notes only.
+- Hostile environment combos where DST resolves through a symlink into the
+  log directory (or similar symlink/log-dir interactions) are not fully
+  enumerated; repro notes only. The realpath guard covers direct
+  ancestor/descendant/identity cases.
+- Mirror class excludes metadata/timestamps/hardlinks by design.
