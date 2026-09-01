@@ -1,5 +1,5 @@
 [Unit]
-Description=Hermes context mirror sync (host mount to workspace, one-way)
+Description=Sync hermes-context from host mount to workspace (one-way mirror)
 
 [Service]
 Type=oneshot

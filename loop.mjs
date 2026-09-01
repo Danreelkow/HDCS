@@ -125,9 +125,9 @@ if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && f
 if (!s3cached && !state.gate_pass) { if (build) log('s3: no recorded gate pass for these artifacts (cold state) — full rebuild'); build = null; }
 if (!s3cached) {
 checkBudget('s3');
-const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-repair'];
+const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-alt', 's3-repair'];
 for (const attempt of s3attempts) {
-  const input = attempt === 's3'
+  const input = attempt === 's3-repair'
     ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
     : `${shared}GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
