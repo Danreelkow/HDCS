@@ -15,11 +15,12 @@ No thinking cap in prod. Think as long as the build demands — reason in the re
 5. type changes: SRC file x vs DST dir x AND the inverse — remove then copy, converge; stale extras removed
 6. DST-internal symlink swap: replaced by the real file; the outside link target UNTOUCHED
 7. trailing slashes on env values: canonicalize once, mutate only through canonical paths
-8. ANY log env var (HERMES_CTX_LOG, LOG_DIR, ...): value inside DST -> refuse nonzero, write nothing
+8. ANY log env var (HERMES_CTX_LOG, LOG_DIR, ...): value inside DST -> refuse; ALSO the log FILE's PARENT dir is an owned path — DST inside it -> refuse (A14 concrete)
+8b. explicitly EMPTY env value (SRC or DST set to "") -> REFUSE; never fall back to the default (write `${VAR-default}` + an explicit empty check, or test [ -z ] before defaults — `${VAR:-default}` silently swallows empty)
 9. path identity (realpath, component tests — never string prefixes): DST==SRC, ancestor, descendant, symlink-into-SRC -> refuse
 10. degenerate paths: DST or SRC is '/', '', or '.' -> refuse
 11. symlinked DST ANCESTOR resolving into SRC -> refuse; DST itself resolving to ANY symlink (outside SRC) -> REFUSE with A-number (A22: refuse, never replace — sync never destroys a user-placed symlink)
-12. --verify: FAILS when DST absent; OK only on exact mirror
+12. --verify: FAILS when DST absent; OK only on exact mirror; NEVER dereference symlinks in verification (no -L/-aL in the verify rsync — a regular file with the target's bytes must NOT pass for a SRC symlink; A9 class is lstat-based)
 13. docs: README must contain the service ExecStart path VERBATIM (e.g. install to ~/.local/bin/ — '%h' expands to home)
 14. staging: create the stage with mktemp -d under an already-validated parent, then re-validate the INSTANTIATED path (A15 — closes the validate-string-then-mkdir TOCTOU); working files never collide with mirror names
 Refusals cite A-numbers. Adversarial env combinations beyond this ledger = KNOWN_LIMITATIONS (+open), not FAIL.

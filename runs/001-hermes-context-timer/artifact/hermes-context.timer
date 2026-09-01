@@ -1,5 +1,5 @@
 [Unit]
-Description=Run hermes-context sync every 6 hours
+Description=Run hermes-context freshness sync every 6 hours
 
 [Timer]
 OnCalendar=*-*-* 00/6:00:00

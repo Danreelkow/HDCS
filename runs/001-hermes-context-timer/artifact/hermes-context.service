@@ -1,5 +1,6 @@
 [Unit]
-Description=Sync HERMES context from host mount to workspace (exact recursive mirror)
+Description=Hermes context freshness sync (host -> workspace mirror)
+Documentation=file:%h/.config/systemd/user/hermes-context.service
 
 [Service]
 Type=oneshot

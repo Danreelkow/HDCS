@@ -71,6 +71,18 @@ for BAD in "/" "" "."; do
   DD=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$BAD" bash sync-hermes-context.sh 2>&1); [ $? -eq 0 ] && fail "degenerate HERMES_CONTEXT_DST='$BAD' was accepted (A18: refuse, cite A-number)"
   DS=$(HERMES_CONTEXT_SRC="$BAD" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1); [ $? -eq 0 ] && fail "degenerate HERMES_CONTEXT_SRC='$BAD' was accepted (A18: refuse, cite A-number)"
 done
+# A9 verify-class fixture (run 038 S4 finding): SRC symlink vs DST regular file with identical bytes -> --verify must FAIL
+rm -rf "$SRC" "$DST"; mkdir -p "$SRC" "$DST"; printf 'sym-target\n' > "$SRC/real"; ln -s real "$SRC/link"; printf 'sym-target\n' > "$DST/real"; printf 'sym-target\n' > "$DST/link"
+V9OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh --verify 2>&1)
+[ $? -eq 0 ] && fail "verify accepted a regular file in place of a SRC symlink with identical bytes (A9: equivalence is lstat-based — never dereference in verify)"
+# A14 log-parent fixture (run 038 S4 finding): the custom log FILE's PARENT dir is owned — DST inside it must be refused
+rm -rf /tmp/hdcs-gate-logparent "$SRC"; mkdir -p "$SRC" /tmp/hdcs-gate-logparent; printf 'p\n' > "$SRC/f"
+for LV in HERMES_CTX_LOG LOG_DIR; do
+  if grep -q "$LV" sync-hermes-context.sh; then
+    LPOUT=$(env HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="/tmp/hdcs-gate-logparent/dst" "$LV=/tmp/hdcs-gate-logparent/x.log" bash sync-hermes-context.sh 2>&1)
+    [ $? -eq 0 ] && fail "DST inside the custom log file's parent was accepted ($LV) — A14: the log file's PARENT is an owned path"
+  fi
+done
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"
