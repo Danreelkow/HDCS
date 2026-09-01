@@ -77,3 +77,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A21 (2026-09-01, operator-delegated): exotic filenames = KNOWN_LIMITATIONS
 - Filenames containing newlines/control characters are legal but exotic; a mirror that copies them correctly (rsync does) but reports/comparison-breaks on them is +open KNOWN_LIMITATIONS, NOT FAIL. Gate does not fixture them. A9-class losslessness applies to normal filenames.
 - Scope notes (no new law, enforcement reminders): A13 order (stage->content-verify->touch DST) applies to the PRIMARY destructive path (rsync), not just the fallback; LOG_DIR is "the log dir" in A14's guard scope — covered, implement it.
+
+## A22 (2026-09-01, operator-delegated): A18 disambiguation — refuse, never replace
+- A18's two sentences contradicted each other (refuse vs accept-and-replace). RESOLVED: DST whose realpath resolves to a symlink (any target outside SRC) is REFUSED with an A-number. Sync never replaces or destroys a user-placed symlink at the DST path level; the operator removes it manually first. The earlier "replaced by the real tree" clause is VOID; the run 021 finding's "reconcile OR refuse" option resolves to refuse.
+- Stage TOCTOU (run 036 finding 2): create the stage with mktemp -d under an already-validated parent, then re-validate the instantiated path (A15 concrete-path rule closes the construct-string-then-mkdir gap).

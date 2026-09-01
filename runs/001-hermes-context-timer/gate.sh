@@ -61,11 +61,11 @@ SAOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$(dirname "$DST")/shadow/i
 rm -rf "$SRC"; mkdir -p "$SRC"; printf 'e\n' > "$SRC/f"; rm -rf "$DST"
 VEOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh --verify 2>&1)
 [ $? -eq 0 ] && fail "--verify reported OK with DST absent (verify must fail when destination does not exist)"
-# A18 replacement fixture (run 034 S4 finding): DST symlink resolving OUTSIDE SRC must be ACCEPTED and replaced by the real tree
-rm -rf "$SRC" "$DST" /tmp/hdcs-gate-dst-real; mkdir -p "$SRC/sub"; printf 'r\n' > "$SRC/sub/f"; mkdir -p /tmp/hdcs-gate-dst-real; ln -s /tmp/hdcs-gate-dst-real "$DST"
-A18OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1) || fail "A18 replacement run exited nonzero: $A18OUT (DST symlink resolving outside SRC must be ACCEPTED, then replaced by the real tree; only symlink-into-SRC is refused)"
-[ -d "$DST" ] && [ ! -L "$DST" ] || fail "A18 replacement: DST is still a symlink after sync (must become the real tree)"
-cmp -s "$SRC/sub/f" "$DST/sub/f" || fail "A18 replacement: tree not synced"
+# A22 disambiguation fixture (run 036 S4 finding): DST resolving to a symlink outside SRC must be REFUSED, path left untouched
+rm -rf "$SRC" "$DST" /tmp/hdcs-gate-dst-real; mkdir -p "$SRC"; printf 'r\n' > "$SRC/f"; mkdir -p /tmp/hdcs-gate-dst-real; ln -s /tmp/hdcs-gate-dst-real "$DST"
+A22OUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1)
+[ $? -eq 0 ] && fail "DST symlink resolving outside SRC was ACCEPTED (A22: refuse with A-number — sync never replaces a user-placed symlink)"
+[ -L "$DST" ] || fail "A22: the DST symlink was destroyed (refusal must leave the path untouched)"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

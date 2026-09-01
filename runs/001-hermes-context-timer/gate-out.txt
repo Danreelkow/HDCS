@@ -1,1 +1,1 @@
-GATE FAIL: A18 replacement: DST is still a symlink after sync (must become the real tree)
+GATE PASS

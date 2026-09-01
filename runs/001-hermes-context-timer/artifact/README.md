@@ -1,76 +1,93 @@
 # hermes-context sync
 
-Mirrors the host-mounted context tree into the workspace: contents, recursive
-directory structure, and symlinks (MIRROR class). Metadata such as timestamps
-and hardlinks is explicitly out of scope. Stale entries in the destination are
-deleted at every depth, so the destination always converges to an exact
-recursive mirror of the source.
+One-way host->workspace mirror of the HERMES context directory (contents +
+recursive directory structure + symlinks; no metadata/timestamps/hardlinks —
+the MIRROR class). Stale entries in DST are deleted at every depth so DST
+always converges to exactly SRC's end state.
 
 ## Install
 
-1. Copy the script outside the mirrored tree (A8):
+1. Copy the script **outside the mirrored tree** (A8):
 
-       install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+       install -m 755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
 
 2. Copy the user units:
 
-       install -m 0644 hermes-context.service hermes-context.timer ~/.config/systemd/user/
-
-3. Enable:
-
+       mkdir -p ~/.config/systemd/user
+       cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
        systemctl --user daemon-reload
        systemctl --user enable --now hermes-context.timer
 
-The service runs `ExecStart=%h/.local/bin/sync-hermes-context.sh` (oneshot,
-user-level, no root). The timer fires every 6 hours
-(`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`).
+   The service runs `ExecStart=%h/.local/bin/sync-hermes-context.sh` (`%h`
+   expands to your home directory). Standalone/cron usage works without
+   systemd — just run the script directly; it appends to
+   `~/.cache/hermes-context/sync.log` (log file is never inside DST).
 
-The script is standalone: it runs fine from cron or by hand without systemd.
+## Source/destination override (A17)
 
-## Paths and overrides (A17)
+Env overrides are the mandated contract mechanism:
 
-Defaults: SRC `/opt/data/workspace/hermes-context/`, DST
-`/workspace/hermes-context/`. Override via environment — this is the mandated
-contract mechanism:
-
-    HERMES_CONTEXT_SRC=/path/to/src HERMES_CONTEXT_DST=/path/to/dst \
+    HERMES_CONTEXT_SRC=/other/src HERMES_CONTEXT_DST=/other/dst \
       ~/.local/bin/sync-hermes-context.sh
 
-## Dry-run test (A6/A16)
+Deployed defaults: SRC=`/opt/data/workspace/hermes-context/`,
+DST=`/workspace/hermes-context/`. Every reference renames together.
 
-    HERMES_CONTEXT_SRC=... HERMES_CONTEXT_DST=... \
-      ~/.local/bin/sync-hermes-context.sh --dry-run
+## Dry-run test procedure (A6/A16)
 
-Prints the plan to stdout only: no files or directories are created anywhere,
-nothing is logged, and a nonexistent DST stays nonexistent. Check afterwards
-that DST is untouched (byte-identical) or still absent.
+    ~/.local/bin/sync-hermes-context.sh --dry-run
 
-`--verify` compares an existing DST against SRC and exits nonzero on any
-mismatch (it fails if DST does not exist).
+Emits a plan to stdout only. Verify DST is byte-identical afterward, and if
+DST did not exist it still does not exist — zero writes anywhere, including
+no log write. Exit 0.
+
+## Verify mode
+
+    ~/.local/bin/sync-hermes-context.sh --verify
+
+Exits nonzero with `FAIL` if DST is absent (or still a symlink); exits 0
+with `OK` only when DST is an exact recursive mirror of SRC. Any mismatch
+is a nonzero failure, never a warn-exit-0.
 
 ## Sync strategy
 
-- Primary: `rsync -a --delete` of the source contents into a script-owned
-  staging directory.
-- Fallback (no rsync): tar-pipe copy plus a prunelist reconciliation that
-  deletes stale entries recursively at all depths.
-- BOTH paths converge identically: the staged copy is content-verified against
-  SRC (files, directories, symlink targets — recursive) BEFORE the destination
-  is touched; only a verified copy replaces DST (`rm -rf DST`, then move the
-  staged tree). A verification failure exits nonzero and leaves DST untouched.
-- Guards run before any write and refuse (nonzero, citing the law number):
-  degenerate paths (A18), SRC==DST or ancestor/descendant relationships
-  resolved via realpath (A12), and owned paths (log dir, staging, entrypoint
-  dir) colliding with SRC/DST boundaries (A14/A15). A DST symlink resolving
-  outside SRC is accepted and replaced by the real tree (A18); a DST resolving
-  into SRC is refused (A12).
+- **Primary:** `rsync -a --delete` of SRC contents into a staging directory
+  (never nested: contents of SRC go into stage, `src/` -> `dst`).
+- **Fallback (no rsync):** tar pipe of SRC into stage, then a recursive
+  reconcile with a mktemp'd prunelist that **deletes stale entries at all
+  depths** and repairs file/dir/symlink type changes.
 
-Logs are appended to `~/.cache/hermes-context/sync.log` on real runs only and
-never live inside the mirrored tree (A8).
+Both paths converge identically to an exact recursive mirror. The staged
+copy is content-verified against SRC (files, recursive dirs, symlink targets)
+**before** DST is touched; a verification failure exits nonzero with DST
+untouched. Only a verified copy is used for installation — the copy is
+content-compared to SRC, which is what "verified" means here. If DST was a
+symlink that passed the path-law guards, it is replaced with the real tree
+(the outside link target is untouched).
+
+## Guards (refusals cite A-numbers, exit nonzero, zero writes)
+
+Refuses: SRC==DST by realpath; ancestor/descendant in either direction;
+DST symlink resolving into SRC; degenerate paths (`/`, empty, `.`);
+stage/log/entrypoint paths colliding with DST/SRC boundaries (A12, A14,
+A15, A18). Every owned path (log dir, log file, stage, entrypoint) is
+resolved with `realpath` — through any existing symlinks, e.g. a symlinked
+`XDG_CACHE_HOME` or a pre-existing `sync.log` symlink — before comparison,
+so a resolved target inside the mirror tree is refused, not the raw string.
+Any log-related environment variable (e.g. `HERMES_CTX_LOG`, `LOG_DIR`)
+that resolves (through symlinks) inside the mirror tree is refused with
+zero writes. Source survival outranks freshness: DST is only replaced
+after a verified copy exists elsewhere.
 
 ## KNOWN_LIMITATIONS
 
-- Exotic filenames (newlines/control characters) are not guaranteed to round-
-  trip through the verification walk (A21); rsync itself copies them fine.
-- Adversarial environment-variable combinations beyond the A14 guard (e.g.
-  pointing auxiliary tool env vars at protected paths) are out of scope.
+- Exotic filenames (newlines/control characters) (A21) — the tooling copies
+  them, but losslessness is scoped to normal filenames.
+- Adversarial environment-variable combinations beyond the A14 guard.
+
+## Files
+
+- `sync-hermes-context.sh` — the sync tool (standalone)
+- `hermes-context.service` — systemd user oneshot unit
+- `hermes-context.timer` — systemd user timer, fires every 6 hours,
+  `Persistent=true`, `WantedBy=timers.target`

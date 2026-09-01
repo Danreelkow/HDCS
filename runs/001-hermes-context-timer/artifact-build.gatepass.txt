@@ -59,38 +59,25 @@ case "$RDST/" in "$RSRC"/*) refuse "A12" "DST inside SRC";; esac
 case "$RSRC/" in "$RDST"/*) refuse "A12" "SRC inside DST (DST is ancestor of SRC)";; esac
 
 # ---- owned concrete paths (A14/A15): computed pure, validated before creation
-# Every owned path is REALPATH-RESOLVED before comparison (A15: concrete
-# instantiated paths, symlink targets resolved), never raw-string compared.
 LOGDIR="${XDG_CACHE_HOME:-$HOME/.cache}/hermes-context"
-
-# resolve the log dir (and any log env var) THROUGH existing symlinks, purely:
-# realpath -m performs no filesystem writes, so the zero-write guard holds.
-LOGDIR_R="$(realpath -m -- "$LOGDIR")" || refuse "A14" "log dir unresolvable: $LOGDIR"
 LOGFILE="$LOGDIR/sync.log"           # log ALWAYS outside DST (A8)
 STAGEPARENT="$LOGDIR"                # stage under script-owned cache dir, never TMPDIR root
 STAGE="$STAGEPARENT/stage.$$"        # A20: PURE string, no mktemp/mkdir yet
-STAGE_R="$LOGDIR_R/stage.$$"
-# if the log FILE itself already exists as a symlink, resolve where it points:
-LOGFILE_R="$LOGDIR_R/sync.log"
-if [ -L "$LOGFILE" ] || [ -e "$LOGFILE" ]; then
-  LOGFILE_R="$(realpath -m -- "$LOGFILE")" || refuse "A8" "log file unresolvable: $LOGFILE"
-fi
 ENTRYDIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd -P)" || ENTRYDIR=""
 
-# ledger 8: any log-related env var resolved (through symlinks) into the
-# mirror tree -> refuse, write nothing
-LOGENV_CANDIDATES=()
-[ -n "${HERMES_CTX_LOG:-}" ] && LOGENV_CANDIDATES+=("$(realpath -m -- "$(dirname -- "$HERMES_CTX_LOG")")")
-[ -n "${LOG_DIR:-}" ] && LOGENV_CANDIDATES+=("$(realpath -m -- "$LOG_DIR")")
+# ledger 8: any log-related env var resolved into the mirror tree -> refuse
+LOGENV_CANDIDATES=("$LOGDIR")
+[ -n "${HERMES_CTX_LOG:-}" ] && LOGENV_CANDIDATES+=("$(dirname -- "$HERMES_CTX_LOG")")
+[ -n "${LOG_DIR:-}" ] && LOGENV_CANDIDATES+=("$LOG_DIR")
 
-for owned in "$LOGDIR_R" "$STAGEPARENT" "$STAGE_R" "$LOGFILE_R" "$ENTRYDIR" "${LOGENV_CANDIDATES[@]}"; do
+for owned in "$LOGDIR" "$STAGEPARENT" "$STAGE" "$ENTRYDIR" "${LOGENV_CANDIDATES[@]}"; do
   [ -n "$owned" ] || continue
   case "$owned/" in "$RDST"/*) refuse "A14" "log/owned path inside mirror tree: $owned";; esac
   case "$owned/" in "$RSRC"/*) refuse "A14" "log/owned path inside SRC: $owned";; esac
   case "$RDST/" in "$owned"/*) refuse "A15" "DST inside owned path: $owned";; esac
   case "$RSRC/" in "$owned"/*) refuse "A15" "SRC inside owned path: $owned";; esac
 done
-[ "$STAGE_R" != "$RSRC" ] && [ "$STAGE_R" != "$RDST" ] || refuse "A14" "stage collides with SRC/DST"
+[ "$STAGE" != "$RSRC" ] && [ "$STAGE" != "$RDST" ] || refuse "A14" "stage collides with SRC/DST"
 
 # ---- --verify mode (ledger 12): FAIL nonzero when DST absent; OK only on exact mirror
 if [ "$VERIFY" = "1" ]; then
@@ -290,14 +277,10 @@ symlink that passed the path-law guards, it is replaced with the real tree
 Refuses: SRC==DST by realpath; ancestor/descendant in either direction;
 DST symlink resolving into SRC; degenerate paths (`/`, empty, `.`);
 stage/log/entrypoint paths colliding with DST/SRC boundaries (A12, A14,
-A15, A18). Every owned path (log dir, log file, stage, entrypoint) is
-resolved with `realpath` — through any existing symlinks, e.g. a symlinked
-`XDG_CACHE_HOME` or a pre-existing `sync.log` symlink — before comparison,
-so a resolved target inside the mirror tree is refused, not the raw string.
-Any log-related environment variable (e.g. `HERMES_CTX_LOG`, `LOG_DIR`)
-that resolves (through symlinks) inside the mirror tree is refused with
-zero writes. Source survival outranks freshness: DST is only replaced
-after a verified copy exists elsewhere.
+A15, A18). Any log-related environment variable (e.g. `HERMES_CTX_LOG`,
+`LOG_DIR`) that resolves inside the mirror tree is refused with zero
+writes. Source survival outranks freshness: DST is only replaced after a
+verified copy exists elsewhere.
 
 ## KNOWN_LIMITATIONS
 

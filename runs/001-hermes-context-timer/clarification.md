@@ -1,13 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: A18 replacement: DST is still a symlink after sync (must become the real tree)
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-(none recorded)
+VERDICT: FAIL
+EVIDENCE: sync-hermes-context.sh:41-50 explicitly accepts a pre-existing DST symlink whose target is outside SRC (“DST symlink resolving OUTSIDE SRC is ACCEPTED”), and sync-hermes-context.sh:153-154 plus README.md “Sync strategy” state that it is replaced. This contradicts A18, which requires refusal of DST symlinks resolving outside SRC with an A12 refusal. Also, sync-hermes-context.sh:74-76 validates only the constructed string `"$LOGDIR_R/stage.$$"`; sync-hermes-context.sh:112-116 then runs `mkdir -p -- "$STAGE"` without refusing an existing stage symlink or resolving the instantiated stage path. A pre-existing `stage.$$` symlink into DST/SRC can therefore make the rsync/tar staging writes operate on a protected tree before verification, violating A14/A15 and A13’s stage-before-touch-DST ordering.
 
 ## Packet
 ```yaml

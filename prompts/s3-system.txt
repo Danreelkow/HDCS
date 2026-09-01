@@ -18,8 +18,8 @@ No thinking cap in prod. Think as long as the build demands — reason in the re
 8. ANY log env var (HERMES_CTX_LOG, LOG_DIR, ...): value inside DST -> refuse nonzero, write nothing
 9. path identity (realpath, component tests — never string prefixes): DST==SRC, ancestor, descendant, symlink-into-SRC -> refuse
 10. degenerate paths: DST or SRC is '/', '', or '.' -> refuse
-11. symlinked DST ANCESTOR resolving into SRC -> refuse; DST symlink resolving OUTSIDE SRC -> ACCEPT, then REPLACE with the real tree (A18)
+11. symlinked DST ANCESTOR resolving into SRC -> refuse; DST itself resolving to ANY symlink (outside SRC) -> REFUSE with A-number (A22: refuse, never replace — sync never destroys a user-placed symlink)
 12. --verify: FAILS when DST absent; OK only on exact mirror
 13. docs: README must contain the service ExecStart path VERBATIM (e.g. install to ~/.local/bin/ — '%h' expands to home)
-14. staging: stage path computed as a PURE string and validated BEFORE any creation; working files never collide with mirror names
+14. staging: create the stage with mktemp -d under an already-validated parent, then re-validate the INSTANTIATED path (A15 — closes the validate-string-then-mkdir TOCTOU); working files never collide with mirror names
 Refusals cite A-numbers. Adversarial env combinations beyond this ledger = KNOWN_LIMITATIONS (+open), not FAIL.
