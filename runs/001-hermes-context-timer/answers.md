@@ -39,3 +39,8 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 
 ## A12 (2026-09-01, operator-delegated): path-identity guard (A11 in spirit)
 - Guard the IDENTITY of the trees, not string equality: compare realpath (symlinks resolved) of SRC and DST; refuse (clean nonzero exit, no writes) when realpath(SRC) == realpath(DST), or when either realpath is an ancestor/descendant of the other, or when DST is (or resolves through) a symlink into SRC. Applies to both sync paths before ANY destructive operation.
+
+## A13 (2026-09-01, operator-delegated): "verified copy" definition (A11/A12 completion)
+- "Verified" means CONTENT-COMPARED: the staging copy counts as verified only after its contents+structure+symlinks (A9 class) are compared against SRC and match — a non-emptiness check is not verification.
+- NO destructive operation on DST (deletion, reconciliation, rename-over) until a verified copy of SRC exists. Order is law: stage -> verify -> only then touch DST.
+- Self-verification inside the script must enforce this (exit nonzero if staging verification fails) and the README must not call an unverified copy "verified".

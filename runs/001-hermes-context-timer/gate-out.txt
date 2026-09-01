@@ -1,1 +1,1 @@
-GATE FAIL: destination not parameterized (contract: read env HERMES_CONTEXT_DST, required)
+GATE PASS

@@ -1,13 +1,9 @@
 [Unit]
-Description=Mirror hermes-context from host mount into workspace
-After=local-fs.target
+Description=Sync hermes context from host to workspace (one-way mirror)
+Documentation=file://%h/.local/share/doc/hermes-context/README.md
 
 [Service]
 Type=oneshot
-# Source path is supplied via the namespaced env var HERMES_CONTEXT_SRC.
-Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-
-[Install]
-WantedBy=default.target
+# No root anywhere: this is a USER unit, run with `systemctl --user`.
 
