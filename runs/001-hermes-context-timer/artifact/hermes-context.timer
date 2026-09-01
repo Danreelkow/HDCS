@@ -2,7 +2,8 @@
 Description=Run hermes context sync every 6 hours
 
 [Timer]
-OnCalendar=*-*-* 00/6:00:00
+OnUnitActiveSec=6h
+OnBootSec=10min
 Persistent=true
 
 [Install]

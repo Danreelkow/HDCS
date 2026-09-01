@@ -122,6 +122,7 @@ if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && f
   if (ok && /GATE PASS/.test(g)) { outcomes.s3 = 'PASS'; s3cached = true; log('s3: CACHED — artifacts re-verified against current gate (zero seat spend)'); }
   else { log('s3: cached artifacts fail the current gate (gate/prompts changed) — full rebuild'); build = null; }
 }
+if (!s3cached && !state.gate_pass) { if (build) log('s3: no recorded gate pass for these artifacts (cold state) — full rebuild'); build = null; }
 if (!s3cached) {
 checkBudget('s3');
 const s3attempts = build ? ['s3-repair'] : ['s3', 's3-repair'];

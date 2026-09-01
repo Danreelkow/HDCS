@@ -1,7 +1,7 @@
 # hermes-context sync
 
-One-way mirror of the hermes context from host to workspace (A7): exact
-replica, stale subtrees deleted, never bidirectional.
+One-way mirror (host -> workspace) of the hermes context: exact replica,
+stale subtrees deleted, never bidirectional (A2/A9).
 
 ## Install
 
@@ -12,50 +12,64 @@ replica, stale subtrees deleted, never bidirectional.
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
 
-The script refuses to run if its own directory (`%h/.local/bin`, i.e. the
-entrypoint directory) lies inside the destination — placement guard A14/A15.
+Standalone execution (no root required, A3):
 
-## Dry-run test
+    ~/.local/bin/sync-hermes-context.sh
+
+Check the timer:
+
+    systemctl --user list-timers hermes-context.timer
+
+## Env override (A17)
+
+All paths are env-parameterized; deployed defaults are the production values.
+
+| Variable | Default |
+|---|---|
+| `SRC_DIR` | `/opt/data/workspace/hermes-context/` |
+| `DST_DIR` | `/workspace/hermes-context` |
+| `LOG_DIR` | `~/.cache/hermes-context` |
+
+Example:
+
+    SRC_DIR=/other/src DST_DIR=/other/dst ~/.local/bin/sync-hermes-context.sh
+
+## Dry-run example
 
     ~/.local/bin/sync-hermes-context.sh --dry-run
 
-Prints the plan only; performs zero writes, including logs, and never
-creates the destination (A6/A16).
+Prints would-create / would-update / would-delete, performs zero writes,
+and never creates DST even if absent (A6/A16). No log lines are appended
+in dry-run mode.
 
-## Source-change procedure
+## Verify
 
-1. Edit the context under the source directory.
-2. Run the script with `--dry-run` and inspect the plan.
-3. Run it live; verify with `diff -r` if desired.
-4. Check the log at `${XDG_CACHE_HOME:-$HOME/.cache}/hermes-sync/hermes-sync.log`.
+    ~/.local/bin/sync-hermes-context.sh --verify
+
+Recursively compares DST against SRC (file contents, directory structure,
+symlink presence + targets, stale files). Exit 0 on mirror; nonzero with
+the mismatched paths listed otherwise.
+
+## Logs
+
+Real runs append a timestamped summary to:
+
+    ~/.cache/hermes-context/sync.log
+
+LOG_DIR always lives outside DST (A14/A15); dry-run writes nothing.
+
+## Refusals (A19 closed list)
+
+- Root execution → refused (A12).
+- DST same as / inside SRC (or vice versa) → refused (A18).
+- SRC missing or not a directory; LOG_DIR or entrypoint inside DST → refused (A14/A15).
+
+All refusal paths write nothing.
 
 ## Sync strategy
 
-One-way host -> workspace. The destination end state always equals the
-source end state (A5): file contents, directory structure, and symlinks,
-recursively. Stale subtrees deleted on the destination — `rsync --delete`
-semantics, with a `cp -a` fallback that reconciles identically (A4).
-Metadata, timestamps, and hardlinks are excluded from verification (A9).
-Never configure bidirectional syncing.
-
-## Env override
-
-| Variable | Default | Notes |
-|---|---|---|
-| `HERMES_CONTEXT_SRC` | `/opt/data/workspace/hermes-context/` | required contract; deployed default when unset (A17) |
-| `HERMES_CONTEXT_DST` | `/workspace/hermes-context/` | required contract; deployed default when unset (A17) |
-| `TMPDIR` | `/tmp` | staging area location (A20); stage refused if it lands inside DST (A14/A15) |
-| `XDG_CACHE_HOME` | `$HOME/.cache` | log parent; refused if inside DST (A14/A15) |
-
-## KNOWN_LIMITATIONS
-
-- Exotic environment combinations (e.g. relative `TMPDIR`, unwritable
-  cache parent) fall back to a non-fatal degraded log write or refusal;
-  residual adversarial cases are logged here rather than as gate FAILs
-  (A10).
-- Hardlink structure and file metadata/timestamps are not mirrored (A9).
-- If neither `rsync` nor a writable stage location exists, the run fails
-  before touching DST (A11/A13).
-- A `DST` path whose *parent* chain contains symlinks is compared via
-  `realpath -m`; only the final DST component symlink is guaranteed to be
-  replaced in place (A18).
+Primary: `rsync -a --delete SRC/ DST/`. Fallback (no rsync): stage via
+`mktemp -d` under LOG_DIR, `cp -a` SRC into it, content-verify the stage
+against SRC (A13), then swap into DST after deleting stale content — the
+end state converges identically to the rsync branch (A5), recursively,
+symlinks preserved.

@@ -1,19 +1,8 @@
-defs:
-  SRC := realpath(HERMES_CONTEXT_SRC), default /opt/data/workspace/hermes-context/
-  DST := realpath(HERMES_CONTEXT_DST), default /workspace/hermes-context/
-  sync := host->workspace, one-way, contents-of-SRC -> DST (no nesting)
-invariants:
-  A5_mirror: ∀ path -> DST end state == SRC end state, recursive, both sync paths
-  A9_class: mirror = {file contents, dir structure, symlinks} recursive; NOT {metadata, timestamps, hardlinks}; verify FAILS nonzero on mismatch
-  A6_purity: --dry-run => zero writes ∀ kind incl. log; DST byte-identical after dry-run; A16: dry-run leaves nonexistent DST uncreated
-  A13_order: stage -> content-verify (A9 class) -> only then mutate DST; unverified copy != verified
-  A11_survival: no rm -rf DST before verified SRC copy exists; SRC==DST rejected
-  A12_identity: refuse when realpath(SRC)==realpath(DST) ∨ ancestor/descendant ∨ DST symlink into SRC
-  A14_A15_placement: refuse only on CONCRETE owned paths (mktemp stage result, resolved log file parent, entrypoint dir) vs realpath(DST), component-boundary compare, never string-prefix
-  A18_degenerate: refuse DST/SRC ∈ {"/", empty, "."} via component test; DST symlink resolving outside SRC refused, symlink replaced by real tree
-  A19_scope: path-law closed = {A12, A14/A15, A18}; refusal must cite an A-number
-  A20_namespace: stage path resolved by pure string calc, validated, then created; mirror files never used for script bookkeeping
-  A4_fallback: no rsync -> cp -a semantics reconciling identically to rsync --delete (A5)
-  A17_param: env override is gate contract; deployed paths are production values only
-  A10_bar: FAIL only on normal-operation defects; exotic env combos -> KNOWN_LIMITATIONS (+open)
-open: [] (A14 closes env-interaction class; A10 sends residual adversarial cases to limitations, non-blocking)
+A9_mirror: ∀ run -> DST end state == SRC end state, recursive (contents+structure+symlinks, stale deleted)
+A2_oneway: sync host->workspace only
+A5_fallback: cp/tar path converges to same end state as rsync --delete
+A6_dryrun: ∀ mode=dry-run -> zero writes ∧ DST unmodified; A16: dry-run never creates DST
+A3_units: systemd user units (Type=oneshot, OnUnitActiveSec=6h) ∧ standalone exec, no root
+A19: refusal authority = closed list (A12, A14/A15, A18); refusals cite A-numbers; zero writes on refusal path
+A17: SRC/DST env-parameterized; deployed values are production defaults
+open: ∅ — all ambiguities resolved via A1..A20

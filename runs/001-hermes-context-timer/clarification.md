@@ -1,46 +1,49 @@
 # Clarification needed — 001-hermes-context-timer
 
-S4 FAIL verdict (after feedback repair):
+## Gate output (after repair round)
+```
+GATE FAIL: source not parameterized (contract: read env HERMES_CONTEXT_SRC, required — namespaced, never bare SRC/DST)
 
-VERDICT: FAIL
-EVIDENCE: `sync-hermes-context.sh` lines 10–11 define the default `DST` with a trailing slash (`/workspace/hermes-context/`), while lines 157–166 mutate using the raw `$DST` rather than canonical `$DST_R`. After removing a missing or non-identical destination at line 162 or 164, line 166 executes `mv "$STAGE" "$DST"`; with the required default trailing-slash destination path, `mv` can fail because the destination does not yet exist as a directory. Thus a normal initial/non-identical sync does not reliably create the required exact mirror, violating the packet’s A5/A13 delivery behavior.
+```
+
+## Open questions recorded by S1
+(none recorded)
 
 ## Packet
 ```yaml
-reg: {domain: cs-programming, canon: shell/systemd/rsync identifiers (rsync --delete, cp -a, systemctl --user, OnUnitActiveSec, mktemp -d, realpath), hcdl A-law}
+reg:
+  domain: cs-programming
+  canon: "rsync/systemd-user vocabulary: idempotent, --delete, --dry-run, realpath, mktemp -d, Type=oneshot, OnUnitActiveSec, systemctl --user"
 intent: >
-  deliver artifact dir: sync-hermes-context.sh (rsync, env-parameterized SRC/DST,
-  --dry-run zero-write, idempotent, exact-mirror A5/A9, cp fallback converging identically,
-  guard set A11/A12/A14/A15/A18/A20, stage->verify->mutate order A13) +
-  hermes-context.service/.timer user units (OnCalendar every 6h, no root) + README
-  (install, source change, dry-run test, A7-correct sync-strategy section).
+  build artifact dir := {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
+  such that ∀ run -> DST := exact mirror of SRC (A9 class: contents+structure+symlinks, recursive, stale deleted),
+  sync direction host->workspace one-way (A2), rsync primary with cp/tar fallback converging identically (A5),
+  --dry-run -> zero writes ∀ kind (A6), systemd USER units timer 6h + standalone execution (A3),
+  guards per A11/A12/A14/A15/A18/A19/A20, self-verification exits nonzero on A9-class mismatch (A9/A13).
 must_keep:
   - "source path is /opt/data/workspace/hermes-context/"
   - "dry-run mode that performs no writes"
   - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical SRC/DST? -> A: /opt/data/workspace/hermes-context/ -> /workspace/hermes-context/ (A1, A17: deployed defaults, env override is contract)"
-  - "Q2: sync direction/semantics? -> A: host->workspace one-way, exact mirror recursive, stale subtrees deleted, both paths converge (A2, A5, A7, A9)"
-  - "Q3: systemd absent? -> A: script standalone-capable; user timer preferred (A3)"
-  - "Q4: rsync absent? -> A: cp -a fallback, reconcile identical to --delete (A4, A5)"
-  - "Q5: dry-run writes? -> A: zero writes incl. log; nonexistent DST not created (A6, A16)"
-  - "Q6: log/staging/install placement? -> A: log outside DST always; entrypoints outside mirrored tree; concrete-path boundary guards (A8, A14, A15)"
-  - "Q7: verification bar? -> A: A9 class contents+structure+symlinks, nonzero on mismatch, content-compared staging (A9, A13)"
-  - "Q8: severity/stopping? -> A: A10 normal-operation bar; residual adversarial env = KNOWN_LIMITATIONS non-blocking"
-  - "Q9: degenerate/identity paths? -> A: component-test refusals for /,empty,.; realpath identity guards; refusals cite A-numbers (A18, A19)"
-  - "Q10: staging order? -> A: pure string-resolve stage path, validate, then create; reserved namespace never collides with mirror files (A20)"
+  - "Q1: canonical SRC/DST values? -> A: A1; SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context (deployed defaults per A17; env override is the mechanism)"
+  - "Q2: fallback semantics when rsync absent? -> A: A4+A5+A7; cp/tar reconcile with recursive stale deletion, identical end state to rsync --delete"
+  - "Q3: logging location given dry-run purity? -> A: A6+A8; log outside DST always (e.g. ~/.cache default), logging only in real-run mode"
+  - "Q4: DST absent lifecycle? -> A: A16; real run mkdir -p DST; dry-run leaves DST nonexistent"
+  - "Q5: mirror equivalence class? -> A: A9; contents+structure+symlinks only; verify FAILs nonzero on mismatch"
+  - "Q6: refusal authority list? -> A: A19 closed list (A12, A14/A15, A18); refusals cite A-numbers, zero writes on refusal path (C4/A20)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
-handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+handoff: {state: "S_0 + Delta -> S_1", report: ["+done", "-resolved", "+open", "+validation"]}
 constraints:
-  - "A5/A7/A9 exact-mirror convergence, recursive, both sync paths"
-  - "A6/A16 dry-run zero-write incl. log; leaves nonexistent DST uncreated"
-  - "A11/A13 stage -> content-verify -> mutate; never rm -rf DST before verified copy"
-  - "A12/A14/A15/A18/A19/A20 guard set; refusals clean nonzero, zero writes, cite A-number"
-  - "A3/A4 no-root user units; rsync-optional standalone script"
+  - "A5 mirror semantics, recursive convergence (A7)"
+  - "A6 dry-run zero writes, byte-identical DST; A16 dry-run never creates DST"
+  - "A9 verification class; A13 verified=content-compared staging before any DST destruction"
+  - "A11/A12/A14/A15/A18/A20 guards; A19 closed path-law list; refusals cite A-numbers"
+  - "A17 env parameterization mandated; deployed paths are production values"
+  - "A3 systemd user units, standalone fallback; A10 severity bar"
 paths:
-  - "/opt/data/workspace/hermes-context/"
   - "/workspace/hermes-context/"
-  - "~/.local/bin (entrypoints, outside mirrored tree)"
-  - "~/.cache (log parent, outside DST)"
-budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 0}
+  - "/opt/data/workspace/hermes-context/"
+  - "~/.local/bin"
+  - "~/.cache/hermes-context/"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
 ```
