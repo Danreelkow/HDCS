@@ -1,1 +1,1 @@
-GATE FAIL: real run exited nonzero: REFUSE: A20: no usable stage parent among '/tmp', '/data/dsh-home/.cache/hermes-context'
+GATE FAIL: sync-hermes-context.sh missing

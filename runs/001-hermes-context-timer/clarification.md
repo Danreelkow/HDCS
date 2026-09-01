@@ -1,9 +1,13 @@
 # Clarification needed — 001-hermes-context-timer
 
-S4 FAIL verdict (after feedback repair):
+## Gate output (after repair round)
+```
+GATE FAIL: sync-hermes-context.sh missing
 
-VERDICT: FAIL
-EVIDENCE: sync-hermes-context.sh, lines 23–31, and README.md, lines 8–12: the packet’s canonical log identifier is `HERMES_CONTEXT_LOG`, but the artifact instead invents and uses `HERMES_CONTEXT_LOG_DIR` and `LOG_DIR`; `HERMES_CONTEXT_LOG` is unsupported. sync-hermes-context.sh, staging block lines 163–185: `mktemp -d` is performed under the unvalidated `TMPDIR` candidate before checking the instantiated stage against `SRC`/`DST`; if `TMPDIR` is `SRC` or `DST`, the script writes into a guarded path before the A11/A13 verification gate, then removes it and refuses. This violates the required stage → verify → touch ordering and the no-write-to-source/untouched-DST guarantees.
+```
+
+## Open questions recorded by S1
+- Q9: severity bar? -> A: A10 normal-operation FAILs only; exotic -> +open"
 
 ## Packet
 ```yaml
