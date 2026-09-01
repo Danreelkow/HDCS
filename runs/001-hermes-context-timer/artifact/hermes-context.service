@@ -1,14 +1,13 @@
 [Unit]
-Description=Sync hermes-context workspace mirror
-Documentation=file:///workspace/hdcs/artifacts/hermes-context-sync/README.md
+Description=Mirror hermes-context from host mount into workspace
+After=local-fs.target
 
 [Service]
 Type=oneshot
-# SRC and DST are required; override via an EnvironmentFile or drop-in if needed.
-Environment=SRC=/opt/data/workspace/hermes-context
-Environment=DST=/workspace/hermes-context
-Environment=LOG=%h/.cache/hermes-context-sync.log
+# Source path is supplied via the namespaced env var HERMES_CONTEXT_SRC.
+Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-# fallback install location (uncomment if installed there instead):
-# ExecStart=/workspace/hdcs/bin/sync-hermes-context.sh
+
+[Install]
+WantedBy=default.target
 

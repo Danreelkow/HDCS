@@ -1,11 +1,15 @@
-A5_mirror: ∀ path -> DST end state == SRC end state, recursive
-A6_purity: --dry-run -> writes = ∅ incl. LOG
-A7_recursive: fallback convergence ∀ depth
-A8_placement: LOG ∉ DST; entrypoints ∉ mirrored tree, preserved
-A9_equiv: verify {contents, structure, symlinks} exact; mismatch -> exit≠0
-A10_bar: FAIL only normal-operation defects; exotic -> KNOWN_LIMITATIONS
-A11_guard: SRC==DST -> reject; ¬rm -rf DST pre verified-copy
-A12_identity: realpath guard pre-ANY-destructive-op, both paths
-A13: idempotent; A14: 1-line log real-run only
-open: [Q16 newline-in-filename NUL-traversal, Q17 LOG∈DST real-run churn]
-state: S_0 + Delta -> S_1, gate READY
+A1_src: SRC := /opt/data/workspace/hermes-context/ (host-mount canonical)
+A1_dst: DST := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
+A2_dir: sync one-way host -> workspace; ∀ op -> ¬write(SRC)
+A3_standalone: script works sans systemd; units are user-level (systemctl --user), no root
+A4_fallback: ¬rsync -> cp -a/tar-pipe path; sync CONTENTS src/ -> dst, ¬nest
+A5_mirror: ∀ path -> DST end state == SRC end state, recursive; stale DELETED both paths
+A6_dryrun: --dry-run -> ∀ writes = ∅ incl. logs; DST byte-identical pre/post
+A7_recursive: cp-path reconciliation deletes stale subtrees ∀ depth
+A8_placement: log always outside DST (~/.cache default); install paths outside mirrored tree (~/.local/bin); sync never deletes own entrypoints
+A9_class: mirror equivalence = {contents, dir structure recursive, symlinks}; ∉ {metadata, timestamps, hardlink topology}; verify FAIL nonzero on mismatch, ¬warn-exit-0
+A10_severity: FAIL only normal-op defects; exotic -> KNOWN_LIMITATIONS in +open, non-blocking
+A11_guard: guard(SRC==DST) mandatory; ¬rm -rf DST before verified copy of SRC elsewhere
+A12_identity: compare realpath(SRC) vs realpath(DST); refuse clean-nonzero-no-writes on equal/ancestor/descendant/symlink-into-SRC; both paths, pre-destructive
+open: KNOWN_LIMITATIONS (A10-class, non-blocking)
+invariants: [A2_dir, A5_mirror, A6_dryrun, A8_placement, A11_guard, A12_identity]

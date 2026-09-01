@@ -1,204 +1,205 @@
 === SHARED CONTEXT (hcdl register of record) ===
-A5_mirror: ∀ path -> DST end state == SRC end state, recursive
-A6_purity: --dry-run -> writes = ∅ incl. LOG
-A7_recursive: fallback convergence ∀ depth
-A8_placement: LOG ∉ DST; entrypoints ∉ mirrored tree, preserved
-A9_equiv: verify {contents, structure, symlinks} exact; mismatch -> exit≠0
-A10_bar: FAIL only normal-operation defects; exotic -> KNOWN_LIMITATIONS
-A11_guard: SRC==DST -> reject; ¬rm -rf DST pre verified-copy
-A12_identity: realpath guard pre-ANY-destructive-op, both paths
-A13: idempotent; A14: 1-line log real-run only
-open: [Q16 newline-in-filename NUL-traversal, Q17 LOG∈DST real-run churn]
-state: S_0 + Delta -> S_1, gate READY
+A1_src: SRC := /opt/data/workspace/hermes-context/ (host-mount canonical)
+A1_dst: DST := /workspace/hermes-context/ (exists: INDEX.md, agents/, config/)
+A2_dir: sync one-way host -> workspace; ∀ op -> ¬write(SRC)
+A3_standalone: script works sans systemd; units are user-level (systemctl --user), no root
+A4_fallback: ¬rsync -> cp -a/tar-pipe path; sync CONTENTS src/ -> dst, ¬nest
+A5_mirror: ∀ path -> DST end state == SRC end state, recursive; stale DELETED both paths
+A6_dryrun: --dry-run -> ∀ writes = ∅ incl. logs; DST byte-identical pre/post
+A7_recursive: cp-path reconciliation deletes stale subtrees ∀ depth
+A8_placement: log always outside DST (~/.cache default); install paths outside mirrored tree (~/.local/bin); sync never deletes own entrypoints
+A9_class: mirror equivalence = {contents, dir structure recursive, symlinks}; ∉ {metadata, timestamps, hardlink topology}; verify FAIL nonzero on mismatch, ¬warn-exit-0
+A10_severity: FAIL only normal-op defects; exotic -> KNOWN_LIMITATIONS in +open, non-blocking
+A11_guard: guard(SRC==DST) mandatory; ¬rm -rf DST before verified copy of SRC elsewhere
+A12_identity: compare realpath(SRC) vs realpath(DST); refuse clean-nonzero-no-writes on equal/ancestor/descendant/symlink-into-SRC; both paths, pre-destructive
+open: KNOWN_LIMITATIONS (A10-class, non-blocking)
+invariants: [A2_dir, A5_mirror, A6_dryrun, A8_placement, A11_guard, A12_identity]
 
 GATE OUTPUT:
-GATE FAIL: source not parameterized
+GATE FAIL: source not parameterized (contract: read env HERMES_CONTEXT_SRC, required — namespaced, never bare SRC/DST)
 
 
 THE ORIGINAL BUILD BRIEF (honor it):
-state: s0 := {SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/, artifact_dir=/workspace/hdcs/artifacts/hermes-context-sync/, LOG default ~/.cache/hermes-context-sync.log, A1-A15 resolved, Q16/Q17 open→KNOWN_LIMITATIONS}. Δ :=
-1. Write sync-hermes-context.sh:
-   1a. Config via env: SRC, DST, LOG (default ~/.cache/hermes-context-sync.log), ART_DIR (default /workspace/hdcs/artifacts/hermes-context-sync/). Expected: script sources env, no hardcoded-only paths.
-   1b. realpath guard A12 pre-ANY-op: canonicalize SRC,DST; reject exit≠0 zero-writes if equal, ancestor/descendant, or DST symlink-resolves into SRC (A11). Expected: guard trips before any write, incl. log.
-   1c. --dry-run mode: rsync -aN --delete --dry-run path; if fallback path, compute plan via NUL-delimited find traversal, diff-only, NO writes incl. LOG (A6). Expected: byte-identical tree before/after dry-run.
-   1d. Real path: rsync -a --delete if rsync present; else NUL-delimited find | cpio/tar-pipe or cp -a + prune of stale entries — same convergence ∀ depth (A4/A5/A7). Never rm -rf DST before a verified copy exists elsewhere (A11).
-   1e. Self-verify A9: recursive compare contents (cmp), structure (file set), symlinks (targets) via NUL-delimited traversal; mismatch exit≠0. Expected: seeded mismatch → nonzero exit.
-   1f. Log: real-run only, 1 line, append (A14); LOG forced outside DST (if LOG ∈ DST or unset-safe default ~/.cache, A8). Exit codes: 0 ok, ≠0 verify/guard fail; exotic → KNOWN_LIMITATIONS note in README, non-blocking (A10).
-2. Write hermes-context.service: ExecStart=%h/.local/bin/sync-hermes-context.sh (fallback /workspace/hdcs/bin), Type=oneshot. Expected: no root, User default --user scope.
-3. Write hermes-context.timer: OnCalendar=*-*-* 00/6:00:00 (every 6h), Persistent=true, unit binding to service. Expected: systemctl --user compatible.
-4. Write README.md: usage (standalone + systemd --user enable), env vars, dry-run semantics, fallback convergence recursive claim (A7 correct), KNOWN_LIMITATIONS for Q16 (newline-in-filename, NUL-traversal scope) and Q17 (LOG∈DST real-run churn only).
-5. Place scripts in artifact_dir; verify all four files present and shellcheck-clean (if available) — non-blocking if shellcheck absent.
+state: s0 := DST exists (/workspace/hermes-context/ with INDEX.md, agents/, config/); SRC canonical at /opt/data/workspace/hermes-context/; no artifact_dir yet; invariants A2,A5,A6,A8,A11,A12 active.
+Δ := [step 1: mkdir -p artifact_dir/
+  -> output: dir containing 4 empty files; output: `ls` shows the 4 filenames below
+step 2: write artifact_dir/sync-hermes-context.sh; script implements:
+  (a) realpath identity guard (A12): compare realpath(SRC) vs realpath(DST); on equal/ancestor/descendant/symlink-into-SRC -> exit 0, zero writes, both paths checked pre-destructive
+  (b) log always to ~/.cache/hermes-context/sync.log, never inside DST; dry-run skips log creation entirely (A6, A8)
+  (c) --dry-run: rsync --dry-run mode or read-only listing; zero writes incl. logs (A6)
+  (d) primary path: rsync -a --delete SRC/ -> DST/ (A5)
+  (e) fallback if rsync absent (A4, A7): verified copy of SRC to temp dir first, then rm -rf DST and move temp contents into place; recursive stale-subtree deletion at all depths; contents-sync, no nesting
+  (f) post-sync verify (A9): recursive compare of contents, dir structure, symlink targets; on mismatch -> nonzero exit + FAIL to stderr, never warn-exit-0
+  (g) sync never deletes its own entrypoints (~/.local/bin script, systemd units live outside mirrored tree) (A8)
+  -> output: executable script, shell -n clean
+step 3: write artifact_dir/hermes-context.service (user unit, ExecStart=%h/.local/bin/sync-hermes-context.sh, no root); output: unit text present, contains ExecStart line
+step 4: write artifact_dir/hermes-context.timer (user unit, OnCalendar=*-*-* 0/6:00:00, Persistent=true); output: unit text present, contains OnCalendar line
+step 5: write artifact_dir/README.md documenting must_keep: source path /opt/data/workspace/hermes-context/, dry-run zero-writes, user-level systemd no root; output: README present, all 3 must_keep strings appear verbatim
+step 6: test matrix (per A1–A12): dry-run on live DST -> DST byte-identical pre/post (checksum gate, log file not created); real sync -> DST == SRC on contents/structure/symlinks; delete marker file in DST, re-sync -> deleted in both paths; fallback path forced (PATH without rsync) -> identical end state as rsync path; identity guard: run with SRC=DST -> exit 0, zero writes
+  -> output: all matrix checks pass with nonzero-on-fail assertions]
 accept:
-- 4 files exist: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md in artifact_dir.
-- bash sync-hermes-context.sh --dry-run: exit 0, tree DST byte-identical before/after, LOG unmodified/absent (A6).
-- Real run (rsync present): exit 0, DST == SRC recursively {contents, structure, symlinks}; stale test file deleted; 1-line appended to LOG; re-run idempotent (no changes, A13).
-- Real run (rsync hidden via PATH shim): fallback converges identically, exit 0 (A4/A7).
-- Seeded mismatch post-sync → verify exit≠0.
-- SRC==DST invocation and DST-inside-SRC invocation → exit≠0, zero writes.
-- .timer: `systemctl --user` parseable, OnCalendar 6h; service ExecStart points at script path.
-constraints: [A5,A6,A7,A8,A9,A10,A11,A12,A13,A14 per shared context; must_keep 3/3 verbatim; no rm -rf DST pre verified-copy; no writes outside {DST, LOG, artifact_dir}; Q16/Q17 → README KNOWN_LIMITATIONS, non-blocking]
-deliverable: [sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md] in /workspace/hdcs/artifacts/hermes-context-sync/
+  - artifact_dir contains exactly: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md
+  - sync-hermes-context.sh passes `bash -n`; rsync primary path present (--delete)
+  - fallback path converges to same end state as rsync path (recursive, stale deleted)
+  - --dry-run: zero writes incl. no log file; DST byte-identical pre/post
+  - verify enforces contents+structure+symlinks; mismatch -> nonzero exit
+  - realpath identity guard fires (exit 0, no writes) on SRC==DST / ancestor / descendant / symlink-into-SRC
+  - log path ~user/.cache/hermes-context/sync.log (outside DST); install path ~/.local/bin (outside mirrored tree)
+  - units are user-level (systemctl --user); no root anywhere
+  - README.md contains all 3 must_keep strings verbatim
+constraints: ["no writes to SRC, ever", "no rm -rf DST before verified copy of SRC elsewhere", "no writes during dry-run (incl. logs)", "no root / no system-level units", "log & install paths outside mirrored tree", "no_resurrect: no accumulate-only or inside-DST-log designs"]
+deliverable: ["artifact_dir/sync-hermes-context.sh", "artifact_dir/hermes-context.service", "artifact_dir/hermes-context.timer", "artifact_dir/README.md"]
 
 YOUR PREVIOUS ARTIFACTS:
 === sync-hermes-context.sh ===
 #!/usr/bin/env bash
-# sync-hermes-context.sh — mirror SRC -> DST (recursive, verified, idempotent)
-# A5 mirror | A6 purity dry-run | A7 recursive fallback convergence | A8 LOG∉DST
-# A9 verify | A10 normal-defects-only | A11/A12 guards | A13 idempotent | A14 1-line log
+# sync-hermes-context.sh — one-way mirror /opt/data/workspace/hermes-context/ -> /workspace/hermes-context/
+# User-level; no root. Primary: rsync -a --delete. Fallback: verified-copy-then-swap.
 set -u
 
-# --- 1a. Config via env -------------------------------------------------------
-SRC="${SRC:-/opt/data/workspace/hermes-context}"
-DST="${DST:-/workspace/hermes-context}"
-LOG="${LOG:-$HOME/.cache/hermes-context-sync.log}"
-ART_DIR="${ART_DIR:-/workspace/hdcs/artifacts/hermes-context-sync}"
+SRC="/opt/data/workspace/hermes-context/"
+DST="/workspace/hermes-context/"
+LOG_DIR="$HOME/.cache/hermes-context"
+LOG_FILE="$LOG_DIR/sync.log"
 
-EXIT_OK=0
-EXIT_VERIFY=1
-EXIT_GUARD=2
+log() {
+    # Never called in dry-run (dry-run skips log creation entirely).
+    mkdir -p "$LOG_DIR"
+    printf '%s %s\n' "$(date -Is)" "$*" >> "$LOG_FILE"
+}
+
+die() {
+    printf 'FAIL: %s\n' "$*" >&2
+    log "FAIL: $*" 2>/dev/null || true
+    exit 1
+}
+
+# ---------- realpath identity guard (A12) ----------
+# Runs pre-destructive, checks BOTH paths. On identity overlap: exit 0, zero writes.
+guard_identity() {
+    local rsrc rdst
+    rsrc="$(realpath -e "$SRC" 2>/dev/null)" || die "cannot resolve SRC: $SRC"
+    rdst="$(realpath -e "$DST" 2>/dev/null)" || die "cannot resolve DST: $DST"
+    [ "$rsrc" = "$rdst" ] && return 1
+    case "$rdst/" in
+        "$rsrc"/*) return 1 ;;   # DST inside SRC (descendant)
+    esac
+    case "$rsrc/" in
+        "$rdst"/*) return 1 ;;   # DST ancestor of SRC
+    esac
+    # symlink-into-SRC: any symlink component of DST resolving into SRC
+    local p
+    p="$(dirname "$rdst")"
+    while [ "$p" != "/" ]; do
+        if [ -L "$p" ]; then
+            local rp
+            rp="$(realpath -e "$p" 2>/dev/null)" || { p="$(dirname "$p")"; continue; }
+            case "$rp" in
+                "$rsrc"|"$rsrc"/*) return 1 ;;
+            esac
+        fi
+        p="$(dirname "$p")"
+    done
+    return 0
+}
 
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-# Zero-write failure path: never touch LOG on guard/dry-run.
-die() { echo "sync-hermes-context: error: $*" >&2; exit "$2"; }
-
-# --- 1b. realpath guard (A12/A11) — pre-ANY-op, incl. LOG --------------------
-SRC_REAL="$(realpath -e "$SRC" 2>/dev/null)" || die "SRC not readable: $SRC" $EXIT_GUARD
-DST_PARENT="$(dirname "$DST")"
-DST_REAL="$(realpath -e "$DST" 2>/dev/null || true)"
-if [ -z "$DST_REAL" ]; then
-    # DST may not exist yet; canonicalize its nearest existing ancestor.
-    DST_REAL="$(realpath -e "$DST_PARENT" 2>/dev/null)/$(basename "$DST")"
-    DST_REAL="${DST_REAL#/}"
-    [ -d "$(dirname "$DST_REAL")" ] || die "DST parent not found: $DST_PARENT" $EXIT_GUARD
-fi
-
-[ "$SRC_REAL" = "$DST_REAL" ] && die "SRC==DST (A11): $SRC_REAL" $EXIT_GUARD
-# ancestor/descendant check (string-prefix with boundary)
-case "$DST_REAL/" in "$SRC_REAL"/*) die "DST inside SRC (A11)" $EXIT_GUARD ;; esac
-case "$SRC_REAL/" in "$DST_REAL"/*) die "SRC inside DST (A11)" $EXIT_GUARD ;; esac
-# DST symlink resolving into SRC
-if [ -L "$DST" ]; then
-    DST_LINK="$(realpath "$DST" 2>/dev/null || true)"
-    case "$DST_LINK/" in "$SRC_REAL"/*) die "DST symlink resolves into SRC" $EXIT_GUARD ;; esac
-fi
-
-# A8: force LOG outside DST
-case "$(realpath -m "$LOG" 2>/dev/null)/" in
-    "$DST_REAL"/*) LOG="$HOME/.cache/hermes-context-sync.log" ;;
-esac
-[ -n "$LOG" ] || LOG="$HOME/.cache/hermes-context-sync.log"
-
-# --- NUL-delimited traversal helper ------------------------------------------
-# prints SRC-relative paths, NUL-delimited (excludes DST if nested — rejected anyway)
-walk() { # $1 = root, $2 = mode (src|dst)
-    local root="$1" mode="$2" p
-    [ -d "$root" ] || { [ "$mode" = dst ] && return 0 || die "SRC missing: $root" $EXIT_VERIFY; }
-    find "$root" -mindepth 0 -print0
-}
-
-rel() { # strip root prefix from an absolute path
-    local root="$1" path="$2"
-    printf '%s' "${path#"$root"}"
-}
-
-# --- Fallback copy (A4/A7): NUL-delimited find | cpipe copy, any depth --------
-fallback_copy() {
-    # copy into staging dir first (verified-copy-before-touch-DST, A11)
-    STAGE="$(mktemp -d "${DST_PARENT:?}/.hermes-sync-stage.XXXXXX")" || return 1
-    ( cd "$SRC_REAL" && find . -mindepth 1 -print0 | cpio -0 -pdm --quiet "$STAGE" 2>/dev/null ) \
-      || { ( cd "$SRC_REAL" && find . -mindepth 1 -print0 | tar --null -T - -cf - | tar -xf - -C "$STAGE" ) || return 1; }
-    return 0
-}
-
-# --- 1e. Self-verify (A9): contents, structure, symlinks ---------------------
-verify() {
-    local sroot="$1" droot="$2"
-    local sp dp
-    # structure + symlinks: compare NUL-delimited file sets with type/target
-    local tmpL tmpR
-    tmpL="$(mktemp)"; tmpR="$(mktemp)"
-    ( cd "$sroot" && find . -mindepth 1 -print0 ) | sort -z | while IFS= read -r -d '' p; do
-        if [ -L "$sroot/$p" ]; then printf 'L %s -> %s\0' "$p" "$(readlink "$sroot/$p")"
-        elif [ -d "$sroot/$p" ]; then printf 'D %s\0' "$p"
-        else printf 'F %s\0' "$p"; fi
-    done | sort -z > "$tmpL"
-    if [ -d "$droot" ]; then
-    ( cd "$droot" && find . -mindepth 1 -print0 ) | sort -z | while IFS= read -r -d '' p; do
-        if [ -L "$droot/$p" ]; then printf 'L %s -> %s\0' "$p" "$(readlink "$droot/$p")"
-        elif [ -d "$droot/$p" ]; then printf 'D %s\0' "$p"
-        else printf 'F %s\0' "$p"; fi
-    done | sort -z > "$tmpR"
-    else : > "$tmpR"; fi
-    cmp -s "$tmpL" "$tmpR" || { rm -f "$tmpL" "$tmpR"; return 1; }
-    rm -f "$tmpL" "$tmpR"
-    # contents: byte-compare every regular file
-    ( cd "$sroot" && find . -mindepth 1 -type f -print0 ) | while IFS= read -r -d '' p; do
-        [ -f "$droot/$p" ] && [ ! -L "$droot/$p" ] && cmp -s "$sroot/$p" "$droot/$p" || exit 9
-    done || return 1
-    return 0
-}
-
-# --- 1c/1d. Sync --------------------------------------------------------------
-RSYNC_BIN="$(command -v rsync 2>/dev/null || true)"
-
-if [ "$DRY_RUN" -eq 1 ]; then
-    # A6: zero writes, incl. LOG. Compute plan diff-only.
-    if [ -n "$RSYNC_BIN" ]; then
-        "$RSYNC_BIN" -aN --delete --dry-run "$SRC_REAL/" "$DST_REAL/" >/dev/null 2>&1 || true
-    else
-        # fallback plan: NUL-delimited diff of trees; no writes
-        verify "$SRC_REAL" "$DST_REAL" || true   # plan only; deliberately no action
-    fi
-    exit $EXIT_OK
-fi
-
-# --- Real run -----------------------------------------------------------------
-mkdir -p "$DST_REAL" || die "cannot create DST" $EXIT_GUARD
-
-if [ -n "$RSYNC_BIN" ]; then
-    "$RSYNC_BIN" -a --delete "$SRC_REAL/" "$DST_REAL/" || die "rsync failed" $EXIT_VERIFY
+# Guard runs in ALL modes (including dry-run) — zero writes either way.
+if guard_identity; then
+    :
 else
-    # A7 fallback: stage verified copy elsewhere, then swap into place.
-    # Never rm -rf DST before a verified copy exists (A11).
-    fallback_copy || die "fallback copy failed" $EXIT_VERIFY
-    verify "$SRC_REAL" "$STAGE" || { rm -rf "$STAGE"; die "staged copy failed verification" $EXIT_VERIFY; }
-    # atomic-ish swap: move old DST aside, move stage in, then remove old
-    OLD="$(mktemp -d "${DST_PARENT:?}/.hermes-sync-old.XXXXXX")"
-    rmdir "$OLD"
-    mv "$DST_REAL" "$OLD" || { rm -rf "$STAGE"; die "swap failed" $EXIT_VERIFY; }
-    mv "$STAGE" "$DST_REAL" || { mv "$OLD" "$DST_REAL"; rm -rf "$STAGE"; die "swap-in failed" $EXIT_VERIFY; }
-    rm -rf "$OLD"
+    printf 'identity guard: SRC and DST overlap (equal/ancestor/descendant/symlink-into-SRC); no writes\n' >&2
+    exit 0
 fi
 
-# --- Verify (A9) ---------------------------------------------------------------
-verify "$SRC_REAL" "$DST_REAL" || die "post-sync verification failed (A9)" $EXIT_VERIFY
+# ---------- dry-run (A6): read-only only, zero writes incl. logs ----------
+if [ "$DRY_RUN" -eq 1 ]; then
+    if command -v rsync >/dev/null 2>&1; then
+        rsync -a --delete --dry-run --itemize-changes "$SRC" "$DST"
+        rc=$?
+    else
+        # read-only diff-based listing; no writes anywhere
+        diff -r --no-dereference "$SRC" "$DST" 2>&1 | sed 's/^/DRY-RUN would change: /'
+        rc=$?
+        [ "$rc" -eq 1 ] && rc=0   # differences reported; listing itself "succeeded"
+    fi
+    printf 'DRY-RUN complete: no writes performed (log not created)\n'
+    exit "$rc"
+fi
 
-# --- Log (A14): 1 line, real-run only ------------------------------------------
-mkdir -p "$(dirname "$LOG")"
-printf '%s sync-hermes-context ok %s -> %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SRC_REAL" "$DST_REAL" >> "$LOG" 2>/dev/null || true
+# ---------- primary path: rsync (A5) ----------
+if command -v rsync >/dev/null 2>&1; then
+    log "sync start (rsync) $SRC -> $DST"
+    rsync -a --delete "$SRC" "$DST" || die "rsync failed"
+else
+    # ---------- fallback path (A4, A7, A11): verified copy FIRST, then destructive swap ----------
+    log "sync start (fallback) $SRC -> $DST"
+    TMP="$(mktemp -d "${TMPDIR:-/tmp}/hermes-sync.XXXXXX")" || die "mktemp failed"
+    trap 'rm -rf "$TMP"' EXIT
+    # copy CONTENTS of SRC (no nesting) into temp
+    ( cd "$SRC" && tar -cf - . ) | ( cd "$TMP" && tar -xf - ) || die "tar-pipe copy failed"
+    # verify the temp copy before any destruction of DST (A11)
+    diff -r --no-dereference "$SRC" "$TMP" >/dev/null 2>&1 || die "temp copy verification failed; DST untouched"
+    # now safe to remove stale DST and move verified copy into place
+    rm -rf "$DST" || die "could not remove DST"
+    mkdir -p "$(dirname "$DST")"
+    mv "$TMP" "$DST" || die "move into place failed"
+    trap - EXIT
+fi
 
-exit $EXIT_OK
+# ---------- post-sync verify (A9): contents + structure + symlinks ----------
+verify() {
+    local a="$1" b="$2" rel
+    # Walk SRC; compare each entry's class and, for symlinks, target.
+    while IFS= read -r -d '' rel; do
+        local sa="$a$rel" sb="$b$rel"
+        if [ -L "$sa" ] && [ -L "$sb" ]; then
+            [ "$(readlink "$sa")" = "$(readlink "$sb")" ] || return 1
+        elif [ -L "$sa" ] || [ -L "$sb" ]; then
+            return 1
+        elif [ -d "$sa" ] && [ -d "$sb" ]; then
+            :
+        elif [ -f "$sa" ] && [ -f "$sb" ]; then
+            cmp -s "$sa" "$sb" || return 1
+        else
+            return 1
+        fi
+    done < <( cd "$a" && find . -mindepth 1 -print0 )
+    # reverse walk: stale entries in DST are mismatches
+    while IFS= read -r -d '' rel; do
+        [ -e "$a$rel" ] || [ -L "$a$rel" ] || return 1
+    done < <( cd "$b" && find . -mindepth 1 -print0 )
+    return 0
+}
+
+if verify "$SRC" "$DST"; then
+    log "sync OK: mirror equivalence verified"
+    printf 'sync OK: %s -> %s (verified)\n' "$SRC" "$DST"
+    exit 0
+else
+    die "post-sync verification FAILED: contents/structure/symlink mismatch"
+fi
 
 === hermes-context.service ===
 [Unit]
-Description=Sync hermes-context workspace mirror
-Documentation=file:///workspace/hdcs/artifacts/hermes-context-sync/README.md
+Description=Mirror hermes-context from host mount into workspace
+After=local-fs.target
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-# fallback install location:
-# ExecStart=/workspace/hdcs/bin/sync-hermes-context.sh
-Environment=LOG=%h/.cache/hermes-context-sync.log
+
+[Install]
+WantedBy=default.target
 
 === hermes-context.timer ===
 [Unit]
 Description=Run hermes-context sync every 6 hours
 
 [Timer]
-OnCalendar=*-*-* 00/6:00:00
+OnCalendar=*-*-* 0/6:00:00
 Persistent=true
 Unit=hermes-context.service
 
@@ -206,92 +207,50 @@ Unit=hermes-context.service
 WantedBy=timers.target
 
 === README.md ===
-# hermes-context-sync
+# hermes-context sync
 
-Mirror `SRC` → `DST` recursively (contents, structure, symlinks), verified, idempotent.
+One-way mirror of the canonical source tree into the workspace:
+`/opt/data/workspace/hermes-context/` -> `/workspace/hermes-context/`
+
+## must_keep
+
+1. Source path: `/opt/data/workspace/hermes-context/` (canonical, never written to).
+2. Dry-run zero-writes: `--dry-run` performs no writes at all, including no log
+   file creation; DST is byte-identical before and after.
+3. User-level systemd, no root: install as user units via
+   `systemctl --user`; the script and units require no root privileges.
 
 ## Files
 
-- `sync-hermes-context.sh` — main script
-- `hermes-context.service` — systemd user service (Type=oneshot)
-- `hermes-context.timer` — 6-hour timer (`OnCalendar=*-*-* 00/6:00:00`, Persistent)
+- `sync-hermes-context.sh` — the sync entrypoint. Install to `~/.local/bin/`
+  (outside the mirrored tree, so sync never deletes its own entrypoint).
+- `hermes-context.service` — user unit; `ExecStart=%h/.local/bin/sync-hermes-context.sh`.
+- `hermes-context.timer` — user unit; runs every 6 hours (`OnCalendar=*-*-* 0/6:00:00`,
+  `Persistent=true`).
 
-## Usage (standalone)
+## Install
 
-    SRC=/opt/data/workspace/hermes-context DST=/workspace/hermes-context \
-      bash sync-hermes-context.sh --dry-run   # zero writes (incl. LOG)
-    bash sync-hermes-context.sh               # real run, verifies after sync
+```sh
+mkdir -p ~/.local/bin ~/.config/systemd/user
+install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-context.timer
+```
 
-Install to `~/.local/bin/sync-hermes-context.sh` (or `/workspace/hdcs/bin/`).
+## Behavior
 
-## Usage (systemd --user)
-
-    mkdir -p ~/.config/systemd/user
-    cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
-    # if installed to /workspace/hdcs/bin instead of ~/.local/bin, edit ExecStart accordingly
-    systemctl --user daemon-reload
-    systemctl --user enable --now hermes-context.timer
-    systemctl --user start hermes-context.service   # run once now
-
-No root required; default `--user` scope.
-
-## Environment variables
-
-| Var       | Default                                   | Notes                                   |
-|-----------|-------------------------------------------|-----------------------------------------|
-| `SRC`     | `/opt/data/workspace/hermes-context`      | source tree                              |
-| `DST`     | `/workspace/hermes-context`               | destination tree                         |
-| `LOG`     | `~/.cache/hermes-context-sync.log`        | forced outside DST (A8)                  |
-| `ART_DIR` | `/workspace/hdcs/artifacts/hermes-context-sync/` | artifact directory                |
-
-## Dry-run semantics (A6)
-
-`--dry-run` computes the sync plan only. With rsync present it invokes
-`rsync -aN --delete --dry-run`; on the fallback path it computes the plan via
-NUL-delimited traversal diff. **No writes of any kind, including LOG.** The DST
-tree is byte-identical before and after a dry-run.
-
-## Sync & convergence
-
-- Primary: `rsync -a --delete`.
-- Fallback (rsync absent): NUL-delimited `find` piped through `cpio`/`tar`
-  into a staging directory, verified against SRC, then swapped into place —
-  same end state at any nesting depth (A5/A7). `rm -rf` of DST is never
-  performed before a verified copy exists elsewhere (A11).
-- Self-verify (A9): recursive compare of contents (`cmp`), structure (file
-  set), and symlink targets via NUL-delimited traversal. Mismatch → exit ≠ 0.
-- Idempotent (A13): re-running with unchanged SRC performs no changes.
-
-## Guards (A11/A12)
-
-Realpath canonicalization runs before any write (including LOG). Rejected
-with exit ≠ 0 and zero writes: `SRC == DST`, DST inside SRC, SRC inside DST,
-DST symlink resolving into SRC.
-
-## Exit codes
-
-- `0` — success (or dry-run plan computed)
-- `1` — verify failure / sync failure
-- `2` — guard rejection
-
-## Logging (A14)
-
-Real runs append exactly one line to `LOG`. Dry-runs and guard rejections
-write nothing.
-
-## KNOWN_LIMITATIONS (non-blocking, A10)
-
-- **Q16 — newline-in-filename / NUL-traversal scope:** traversal is
-  NUL-delimited, so newlines in filenames are handled correctly. However,
-  filenames containing NUL are impossible on POSIX filesystems; pathological
-  filenames that defeat `cpio`/`tar` staging in the fallback path (e.g.
-  extremely long paths or unusual file types on exotic filesystems) may cause
-  the fallback to fail with exit ≠ 0 rather than mis-copy. Rsync path is
-  unaffected.
-- **Q17 — LOG ∈ DST real-run churn:** if `LOG` is explicitly placed inside
-  DST, it is rewritten to the default `~/.cache` location at startup (A8), so
-  no churn occurs within the mirrored tree. If a user re-points `LOG` into
-  DST via env on every run, the log line itself would appear as a DST change
-  on the *next* run only; this is user configuration, not a script defect.
+- Primary path: `rsync -a --delete SRC/ DST/` (recursive mirror, stale entries deleted).
+- Fallback (no rsync): SRC is copied to a temp dir, verified with `diff -r`,
+  then DST is removed and the verified copy moved into place — recursive stale
+  deletion at all depths, contents-sync with no nesting.
+- Identity guard (realpath): if SRC and DST are equal, ancestor/descendant, or
+  DST is a symlink into SRC, the script exits 0 with zero writes, checked on
+  both paths before any destructive operation.
+- Post-sync verification enforces mirror equivalence: contents, recursive
+  directory structure, and symlink targets. Any mismatch -> nonzero exit with
+  `FAIL` on stderr (never warn-exit-0).
+- Log: `~/.cache/hermes-context/sync.log` — always outside DST; not created
+  during dry-run.
 
 Return corrected sections (same format: === <filename> ===), fixing every gate failure.

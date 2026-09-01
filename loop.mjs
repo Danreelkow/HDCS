@@ -93,8 +93,8 @@ checkBudget('s3');
 let build = null;
 for (const attempt of ['s3', 's3-repair']) {
   const input = attempt === 's3'
-    ? `${shared}BUILD BRIEF:\n${brief}`
-    : `${shared}GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure.`;
+    ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
+    : `${shared}GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one).`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
   fs.writeFileSync('artifact-build.txt', build);
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
