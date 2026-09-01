@@ -1,126 +1,172 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way mirror SRC -> DST (user-level)
-# Class: contents + structure + symlinks, recursive. No metadata/timestamps/hardlinks.
-# Writes only to DST and ~/.cache/hermes-context/. Never writes to SRC.
-# Portable: no GNU-only find -printf (BusyBox-safe); uses ls -A (see L1 in README).
+# sync-hermes-context.sh — mirror SRC -> DST (recursive, verified, idempotent)
+# A5 mirror | A6 purity dry-run | A7 recursive fallback convergence | A8 LOG∉DST
+# A9 verify | A10 normal-defects-only | A11/A12 guards | A13 idempotent | A14 1-line log
+#
+# Fully parameterized: SRC and DST are REQUIRED from the environment.
+# LOG and ART_DIR have env-overridable defaults. No hardcoded-only paths.
 set -u
 
-SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
-DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-LOG_DIR="${HOME}/.cache/hermes-context"
-LOG_FILE="${LOG_DIR}/sync.log"
+# --- 1a. Config via env -------------------------------------------------------
+: "${SRC:?sync-hermes-context: SRC must be set in the environment}"
+: "${DST:?sync-hermes-context: DST must be set in the environment}"
+LOG="${LOG:-$HOME/.cache/hermes-context-sync.log}"
+ART_DIR="${ART_DIR:-$HOME/.cache/hermes-context-sync-artifacts}"
 
-DRYRUN=0
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRYRUN=1 ;;
-    *) echo "unknown argument: $arg" >&2; exit 2 ;;
-  esac
-done
+EXIT_OK=0
+EXIT_VERIFY=1
+EXIT_GUARD=2
 
-# --- normalize (ensure trailing slash semantics: contents of SRC -> DST) ---
-SRC="${SRC%/}/"
-DST="${DST%/}/"
+DRY_RUN=0
+[ "${1:-}" = "--dry-run" ] && DRY_RUN=1
 
-fail() {
-  echo "FAIL: $*" >&2
-  exit 1
-}
+# Zero-write failure path: never touch LOG on guard/dry-run.
+die() { echo "sync-hermes-context: error: $*" >&2; exit "$2"; }
 
-# --- guards (1b) — run before any write, incl. log dir creation ---
-[ "$SRC" = "$DST" ] && fail "SRC == DST ('$SRC') — refusing to mirror onto itself"
-[ -d "$SRC" ] || fail "SRC does not exist or is not a directory: $SRC"
+# --- 1b. realpath guard (A12/A11) — pre-ANY-op, incl. LOG --------------------
+SRC_REAL="$(realpath -e -- "$SRC" 2>/dev/null)" || die "SRC not readable: $SRC" $EXIT_GUARD
+DST_REAL="$(realpath -e -- "$DST" 2>/dev/null || true)"
+if [ -z "$DST_REAL" ]; then
+    # DST may not exist yet; canonicalize its nearest existing ancestor.
+    DST_PARENT="$(dirname -- "$DST")"
+    DST_BASE="$(basename -- "$DST")"
+    DST_PARENT_REAL="$(realpath -e -- "$DST_PARENT" 2>/dev/null)" \
+        || die "DST parent not found: $DST_PARENT" $EXIT_GUARD
+    DST_REAL="$DST_PARENT_REAL/$DST_BASE"
+fi
 
-# A8/L2: reject DST placed under the log dir (adversarial config)
-case "$DST" in
-  "$LOG_DIR"|"$LOG_DIR"/*) fail "DST under log dir ($LOG_DIR) — adversarial config, aborting" ;;
+[ "$SRC_REAL" = "$DST_REAL" ] && die "SRC==DST (A11): $SRC_REAL" $EXIT_GUARD
+# ancestor/descendant check (string-prefix with boundary)
+case "$DST_REAL/" in
+    "$SRC_REAL"/*) die "DST inside SRC (A11): $DST_REAL" $EXIT_GUARD ;;
 esac
-
-# --- dry-run paths (A6: zero writes anywhere, incl. log dir) ---
-if [ "$DRYRUN" -eq 1 ]; then
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete --dry-run "$SRC" "$DST" || fail "rsync dry-run failed"
-    echo "dry-run: no changes written"
-  else
-    diff -r "$SRC" "$DST" >/dev/null 2>&1 \
-      && echo "dry-run: DST already mirrors SRC" \
-      || echo "dry-run: differences exist; would reconcile (no writes performed)"
-  fi
-  exit 0
+case "$SRC_REAL/" in
+    "$DST_REAL"/*) die "SRC inside DST (A11): $SRC_REAL" $EXIT_GUARD ;;
+esac
+# DST symlink resolving into SRC (redundant with realpath check but explicit)
+if [ -L "$DST" ]; then
+    DST_LINK="$(realpath -- "$DST" 2>/dev/null || true)"
+    case "$DST_LINK/" in
+        "$SRC_REAL"/*) die "DST symlink resolves into SRC (A11)" $EXIT_GUARD ;;
+    esac
 fi
 
-# --- real runs only from here on: log dir may now be created ---
-mkdir -p "$LOG_DIR" || fail "cannot create log dir $LOG_DIR"
+# A8: force LOG outside DST (before ANY write, incl. LOG itself)
+LOG_REAL="$(realpath -m -- "$LOG" 2>/dev/null || printf '%s' "$LOG")"
+case "$LOG_REAL/" in
+    "$DST_REAL"/*) LOG="$HOME/.cache/hermes-context-sync.log" ;;
+esac
+[ -n "$LOG" ] || LOG="$HOME/.cache/hermes-context-sync.log"
 
-log() {
-  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "$LOG_FILE"
+# --- 1e. Self-verify (A9): contents, structure, symlinks ---------------------
+# Emits NUL-delimited records: "D <path>", "F <path>", "L <path> -> <target>"
+fingerprint() { # $1 = root
+    local root="$1" p
+    if [ ! -d "$root" ]; then return 1; fi
+    ( cd "$root" && find . -mindepth 1 -print0 ) |
+    while IFS= read -r -d '' p; do
+        if [ -L "$root/$p" ]; then
+            printf 'L %s -> %s\0' "$p" "$(readlink -- "$root/$p")"
+        elif [ -d "$root/$p" ]; then
+            printf 'D %s\0' "$p"
+        else
+            printf 'F %s\0' "$p"
+        fi
+    done
 }
 
-# --- rsync path (1c) ---
-if command -v rsync >/dev/null 2>&1; then
-  rsync -a --delete "$SRC" "$DST" || fail "rsync failed"
-  log "rsync sync $SRC -> $DST"
+verify() { # $1 = SRC root, $2 = DST root
+    local sroot="$1" droot="$2" tmpL tmpR p
+    [ -d "$sroot" ] || return 1
+    tmpL="$(mktemp)" || return 1
+    tmpR="$(mktemp)" || { rm -f "$tmpL"; return 1; }
+    fingerprint "$sroot" | sort -z > "$tmpL"
+    fingerprint "$droot" | sort -z > "$tmpR" || : > "$tmpR"
+    cmp -s "$tmpL" "$tmpR"
+    local rc_struct=$?
+    rm -f "$tmpL" "$tmpR"
+    [ "$rc_struct" -eq 0 ] || return 1
+    # contents: byte-compare every regular file (NUL-delimited traversal)
+    local fail=0
+    while IFS= read -r -d '' p; do
+        if ! cmp -s -- "$sroot/$p" "$droot/$p"; then
+            fail=1
+            break
+        fi
+    done < <( cd "$sroot" && find . -mindepth 1 -type f -print0 )
+    return "$fail"
+}
+
+# --- Fallback copy (A4/A7): NUL-delimited find, any depth, staged first ------
+fallback_copy() { # $1 = staging dir
+    local stage="$1"
+    if command -v cpio >/dev/null 2>&1; then
+        ( cd "$SRC_REAL" && find . -mindepth 1 -print0 |
+          cpio -0 -pdm --quiet "$stage" 2>/dev/null ) && return 0
+    fi
+    if command -v tar >/dev/null 2>&1; then
+        ( cd "$SRC_REAL" && find . -mindepth 1 -print0 |
+          tar --null -T - -cf - 2>/dev/null |
+          tar -xf - -C "$stage" 2>/dev/null ) && return 0
+    fi
+    # last resort: cp -a with NUL-safe per-entry copy
+    mkdir -p "$stage" || return 1
+    while IFS= read -r -d '' p; do
+        cp -a -- "$SRC_REAL/$p" "$stage/$p" 2>/dev/null || return 1
+    done < <( cd "$SRC_REAL" && find . -mindepth 1 -print0 )
+    return 0
+}
+
+# --- 1c/1d. Sync --------------------------------------------------------------
+RSYNC_BIN="$(command -v rsync 2>/dev/null || true)"
+
+if [ "$DRY_RUN" -eq 1 ]; then
+    # A6: zero writes of any kind, including LOG. Plan/diff computation only.
+    if [ -n "$RSYNC_BIN" ]; then
+        "$RSYNC_BIN" -aN --delete --dry-run -- "$SRC_REAL/" "$DST_REAL/" >/dev/null 2>&1
+        # plan-only: a differing tree is the expected plan signal, not a defect
+        exit $EXIT_OK
+    fi
+    # fallback plan: NUL-delimited diff of trees; no writes, no action
+    verify "$SRC_REAL" "$DST_REAL" >/dev/null 2>&1 || true
+    exit $EXIT_OK
+fi
+
+# --- Real run -----------------------------------------------------------------
+mkdir -p -- "$DST_REAL" || die "cannot create DST: $DST_REAL" $EXIT_GUARD
+
+if [ -n "$RSYNC_BIN" ]; then
+    "$RSYNC_BIN" -a --delete -- "$SRC_REAL/" "$DST_REAL/" \
+        || die "rsync failed" $EXIT_VERIFY
 else
-  # --- cp fallback (1d) ---
-  STAGE="${LOG_DIR}/stage.$$"
-  trap 'rm -rf "$STAGE"' EXIT
-  mkdir -p "$STAGE" || fail "cannot create staging dir $STAGE"
-
-  # copy contents of SRC (incl. dotfiles) into staging
-  cp -a "$SRC"/. "$STAGE"/ || fail "staging copy failed"
-
-  # source survival check: verified copy exists before touching DST (A11).
-  # An empty source is legitimate: mirror of empty SRC is empty DST (A5/A9).
-  [ -d "$STAGE" ] || fail "verified copy missing after staging"
-
-  # reconcile DST recursively: delete stale files/subtrees at any depth
-  # (only after verified copy exists — A11). Portable listing via ls -A (L1).
-  mkdir -p "$DST"
-  while IFS= read -r name; do
-    [ -e "$STAGE/$name" ] || [ -L "$STAGE/$name" ] || rm -rf -- "${DST}${name}"
-  done < <(cd "$DST" && ls -A)
-
-  # copy new/changed items: remove existing DST entry first so cp -a replaces
-  # it outright (never nests a directory beneath an existing one — A4/A5)
-  while IFS= read -r name; do
-    rm -rf -- "${DST}${name}"
-    cp -a -- "$STAGE/$name" "$DST/$name" || fail "copy failed for $name"
-  done < <(cd "$STAGE" && ls -A)
-
-  rm -rf "$STAGE"
-  trap - EXIT
-  log "cp-fallback sync $SRC -> $DST"
+    # A7 fallback: stage a verified copy elsewhere, then swap into place.
+    # Never rm -rf DST before a verified copy exists elsewhere (A11).
+    DST_PARENT_DIR="$(dirname -- "$DST_REAL")"
+    STAGE="$(mktemp -d "${DST_PARENT_DIR}/.hermes-sync-stage.XXXXXX")" \
+        || die "cannot create staging dir" $EXIT_VERIFY
+    fallback_copy "$STAGE" \
+        || { rm -rf -- "$STAGE"; die "fallback copy failed" $EXIT_VERIFY; }
+    verify "$SRC_REAL" "$STAGE" \
+        || { rm -rf -- "$STAGE"; die "staged copy failed verification (A9)" $EXIT_VERIFY; }
+    # verified copy now exists (STAGE); swap is safe
+    OLD="$(mktemp -d "${DST_PARENT_DIR}/.hermes-sync-old.XXXXXX")" \
+        || { rm -rf -- "$STAGE"; die "cannot stage old DST" $EXIT_VERIFY; }
+    rmdir -- "$OLD" || { rm -rf -- "$STAGE"; die "swap prep failed" $EXIT_VERIFY; }
+    mv -- "$DST_REAL" "$OLD" \
+        || { rm -rf -- "$STAGE"; die "swap failed" $EXIT_VERIFY; }
+    mv -- "$STAGE" "$DST_REAL" \
+        || { mv -- "$OLD" "$DST_REAL" 2>/dev/null; rm -rf -- "$STAGE"; die "swap-in failed" $EXIT_VERIFY; }
+    rm -rf -- "$OLD"
 fi
 
-# --- self-verify (1e): contents + structure + symlinks, recursive ---
-# diff -r compares contents and structure recursively, ignoring
-# metadata/timestamps/hardlinks. Symlinks are compared separately below.
-VERIFY_OUT="$(mktemp "${LOG_DIR}/.verify.XXXXXX")" || fail "cannot create verify temp file"
-VERIFY_STATUS=0
-if ! diff -r "$SRC" "$DST" > "$VERIFY_OUT" 2>&1; then
-  VERIFY_STATUS=1
-fi
-# symlink class check: same set of symlinks with same targets, at any depth
-SYMLINK_OUT="$(mktemp "${LOG_DIR}/.verify.XXXXXX")" || fail "cannot create verify temp file"
-( cd "$SRC" && find . -type l ) | sort > "$SYMLINK_OUT"
-SRC_LINKS="$SYMLINK_OUT"
-SYMLINK_OUT="$(mktemp "${LOG_DIR}/.verify.XXXXXX")" || fail "cannot create verify temp file"
-( cd "$DST" && find . -type l ) | sort > "$SYMLINK_OUT"
-if ! cmp -s "$SRC_LINKS" "$SYMLINK_OUT"; then
-  VERIFY_STATUS=1
-  { echo "symlink sets differ (SRC vs DST):"; diff "$SRC_LINKS" "$SYMLINK_OUT"; } >> "$VERIFY_OUT"
-fi
-rm -f "$SRC_LINKS" "$SYMLINK_OUT"
+# --- Verify (A9) ---------------------------------------------------------------
+verify "$SRC_REAL" "$DST_REAL" \
+    || die "post-sync verification failed (A9)" $EXIT_VERIFY
 
-if [ "$VERIFY_STATUS" -ne 0 ]; then
-  echo "FAIL: post-sync verification mismatch (SRC vs DST):" >&2
-  cat "$VERIFY_OUT" >&2
-  rm -f "$VERIFY_OUT"
-  exit 1
-fi
-rm -f "$VERIFY_OUT"
+# --- Log (A14): 1 line, real-run only ------------------------------------------
+mkdir -p -- "$(dirname -- "$LOG")" 2>/dev/null || true
+printf '%s sync-hermes-context ok %s -> %s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SRC_REAL" "$DST_REAL" >> "$LOG" 2>/dev/null || true
 
-log "verify OK $SRC -> $DST"
-echo "sync OK: $SRC -> $DST"
-exit 0
+exit $EXIT_OK
 

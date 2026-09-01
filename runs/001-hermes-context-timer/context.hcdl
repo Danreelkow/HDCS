@@ -1,19 +1,11 @@
-defs:
-  SRC := value(HERMES_CONTEXT_SRC, default=/opt/data/workspace/hermes-context/)
-  DST := value(HERMES_CONTEXT_DST, default=/workspace/hermes-context/)
-  sync_path_rs := rsync -a --delete (contents of SRC -> DST)
-  sync_path_cp := cp -a + recursive reconciliation (delete stale subtrees ∀ depth)
-invariants:
-  A2_oneway: ∀ run -> writes only to DST; ¬∃ write to SRC
-  A4_contents: sync maps SRC/* -> DST (¬ nest SRC inside DST); fallback when ¬∃ rsync
-  A5_mirror: ∀ path ∈ {sync_path_rs, sync_path_cp} -> end state identical
-  A7_recursive: reconciliation deletes stale subtrees ∀ depth -> DST ==^mirror SRC
-  A6_dryrun: --dry-run -> zero writes ∀ targets incl log; DST byte-identical pre/post
-  A8_placement: log ∈ ~/.cache/hermes-context/ (¬ inside DST, no exceptions); entrypoints ∈ ~/.local/bin ∨ /workspace/hdcs/bin (¬ inside mirrored tree)
-  A9_class: mirror ≡ contents ∧ structure ∧ symlinks, recursive; ¬ metadata ∧ ¬ timestamps ∧ ¬ hardlinks; self-verify FAIL(nonzero) on mismatch, never warn-0
-  A10_bar: FAIL iff defect reachable in normal operation (default cfg, documented usage, plausible misconfig losing/corrupting data); exotic -> +open KNOWN_LIMITATIONS w/ repro
-  A11_guard: reject SRC == DST; ¬ rm -rf DST before verified copy of SRC exists elsewhere; source survival > freshness
-open:
-  L1_newlines: filenames w/ newline break cp fallback iteration (repro: touch $'a\nb') — KNOWN_LIMITATION
-  L2_dst_logdir: DST := log dir adversarial config — KNOWN_LIMITATION (A8 default prevents)
-  L3_no_systemd: hosts lacking systemd -> standalone script + cron note in README
+A5_mirror: ∀ path -> DST end state == SRC end state, recursive
+A6_purity: --dry-run -> writes = ∅ incl. LOG
+A7_recursive: fallback convergence ∀ depth
+A8_placement: LOG ∉ DST; entrypoints ∉ mirrored tree, preserved
+A9_equiv: verify {contents, structure, symlinks} exact; mismatch -> exit≠0
+A10_bar: FAIL only normal-operation defects; exotic -> KNOWN_LIMITATIONS
+A11_guard: SRC==DST -> reject; ¬rm -rf DST pre verified-copy
+A12_identity: realpath guard pre-ANY-destructive-op, both paths
+A13: idempotent; A14: 1-line log real-run only
+open: [Q16 newline-in-filename NUL-traversal, Q17 LOG∈DST real-run churn]
+state: S_0 + Delta -> S_1, gate READY
