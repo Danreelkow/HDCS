@@ -1,38 +1,24 @@
-```
-# hermes-context freshness timer — current law (S1 register of record)
-reg: cs-programming / ops-automation; canon: rsync, systemd user units, idempotent mirror semantics
-
+reg: cs-programming (shell + systemd user units)
 defs:
-  SRC := $HERMES_CONTEXT_SRC (default /opt/data/workspace/hermes-context/)
-  DST := $HERMES_CONTEXT_DST (default /workspace/hermes-context/)
-  MIRROR_CLASS := {file contents, directory structure recursive, symlinks} — NOT metadata/timestamps/hardlinks [A9]
-  OWNED_PATH := concrete instantiated script path (stage dir, log file's parent, entrypoint dir) [A15]
-  VERIFIED := stage content-compared vs SRC on MIRROR_CLASS, match [A13]
-
-invariants (operator rulings, all resolved):
-  A1: SRC canonical := /opt/data/workspace/hermes-context/; DST := /workspace/hermes-context/
-  A2: sync direction host->workspace, one-way
-  A3: systemctl --user units; script also standalone-executable (no-systemd hosts)
-  A4: rsync required-or-fallback cp -a semantics; sync src/ CONTENTS into dst (no nesting)
-  A5_mirror: ∀ sync path -> DST end state == SRC end state (exact mirror, stale deleted, --delete equivalent), recursive
-  A6: dry-run -> ZERO writes incl. logs; DST byte-identical post-dry-run
-  A7: fallback deletes stale subtrees at every depth; README states this correctly
-  A8: log + entrypoints always OUTSIDE DST tree; sync never deletes its own entrypoints
-  A9: verification enforces exactly MIRROR_CLASS; mismatch -> nonzero exit, never warn-exit-0
-  A10: FAIL bar = normal-operation defects only; exotic triggers -> +open KNOWN_LIMITATIONS w/ repro
-  A11: guard SRC==DST; no rm -rf DST before VERIFIED copy exists; stage->verify->touch DST (order is law)
-  A12: identity guard via realpath: refuse if realpath(SRC)==realpath(DST) or ancestor/descendant or DST resolves through symlink into SRC; both paths, pre-destruction
-  A13: verified := content-compared stage; README never calls unverified copy "verified"
-  A14: refuse if realpath(DST) ==/contains/inside OWNED_PATH (concrete); script-owned stage dir if TMPDIR fails
-  A15: owned = concrete path, component-boundary-aware comparison, never string-prefix; over-broad refusal = wall = defect
-  A16: DST may be absent: real run mkdir -p; dry-run must NOT create; gate: dry-run leaves DST nonexistent
-  A17: deployed paths = production values of mandated env override; not scope restrictions
-  A18: refuse DST/SRC ∈ {"/", empty, "."} (component test, not slash-suffix); DST symlink outside SRC: REFUSED
-  A19: no ownership requirements; closed path-law list = {A12, A14/A15, A18}; refusals must cite an A-number
-  A20: stage-path computed as pure string, validated, THEN created (mktemp-then-refuse = defect); script bookkeeping uses mktemp names, never overwrites mirror files
-  A21: newline/control-char filenames -> KNOWN_LIMITATIONS, not FAIL; A13 order applies to rsync path too; LOG_DIR in guard scope
-  A22: DST symlink at path level -> REFUSE (never replace, operator removes manually); stage = mktemp -d under validated parent + re-validate instantiated path
-
+  SRC := ${HERMES_CONTEXT_SRC-default /opt/data/workspace/hermes-context}
+  DST := ${HERMES_CONTEXT_DST-default /workspace/hermes-context}
+  SET-BUT-EMPTY -> refuse (A18); UNSET -> production default (A23)
+  mirror := A9 class: contents + recursive structure + symlinks; NOT metadata/timestamps/hardlinks
+invariants:
+  A2_oneway: ∀ run -> host->workspace only, no writeback
+  A5_mirror: ∀ path (rsync --delete | cp-fallback) -> DST end state == SRC end state, recursive
+  A6_dryrun: --dry-run -> zero writes ∀ kind incl. logs; DST byte-identical; absent DST stays absent (A16)
+  A8_placement: log file parent + entrypoint dir live OUTSIDE DST always
+  A11_order: stage -> content-verify (A13: A9-class compare vs SRC) -> only then touch DST; ∀ destructive op
+  A12_identity: refuse when realpath(SRC)==realpath(DST) ∨ ancestor/descendant ∨ DST symlink into SRC
+  A14/A15_guard: refuse iff realpath(DST) == owned ∨ owned ⊂ DST ∨ DST ⊂ owned; owned = CONCRETE paths (instantiated stage dir, log file parent, entrypoint dir); component-boundary compare, never string-prefix
+  A18_degenerate: refuse SRC/DST ∈ {"/", "", "."} via component test; DST symlink outside SRC -> REFUSE, never replace (A22)
+  A19_closed_law: refusals cite A12|A14/A15|A18 only; else invented scope = wall
+  A20/A23_stage: pure-string parent candidates -> validate -> mktemp -d under validated parent (atomic, not C4 violation) -> re-validate instantiated path; reserved working names never collide with mirror files (mktemp for bookkeeping)
+  A21_exotic: newline/control-char filenames -> KNOWN_LIMITATIONS (+open), not FAIL
+  A10_bar: FAIL only on normal-operation defects; adversarial env beyond A14 guard -> +open
+  A17_param: env override is the gate contract; deployed defaults are production values, not scope limits
+  self-verify: A9-class recursive compare, mismatch -> exit nonzero, never warn-and-exit-0
 open:
-  +open KNOWN_LIMITATIONS: exotic filenames (newline/control chars) break reporting/comparison — repro: corpus w/ \n in names
-  +open KNOWN_LIMITATIONS: adversarial env combos beyond A14 guard — closed by citation of A14, no re-derivation
+  KNOWN_LIMITATIONS: exotic filenames (A21); adversarial env combos beyond A14 (A10/A14)
+  none blocking

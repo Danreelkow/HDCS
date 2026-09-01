@@ -1,2 +1,1 @@
-GATE FAIL: sync script syntax error
-sync-hermes-context.sh: line 82: syntax error: unexpected end of file from `while' command on line 81
+GATE FAIL: real run exited nonzero: REFUSE: A20: no usable stage parent among '/tmp', '/data/dsh-home/.cache/hermes-context'
