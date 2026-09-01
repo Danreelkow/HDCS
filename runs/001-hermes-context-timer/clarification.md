@@ -2,7 +2,8 @@
 
 ## Gate output (after repair round)
 ```
-GATE FAIL: dry-run exited nonzero: REFUSED A14/A15: DST collides with script-owned stage area
+GATE FAIL: sync script syntax error
+sync-hermes-context.sh: line 1: unexpected EOF while looking for matching ``'
 
 ```
 

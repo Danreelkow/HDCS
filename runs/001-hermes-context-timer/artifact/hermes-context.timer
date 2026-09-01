@@ -1,3 +1,4 @@
+```ini
 [Unit]
 Description=Run hermes-context sync every 6 hours
 

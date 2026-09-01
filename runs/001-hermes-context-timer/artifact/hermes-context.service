@@ -1,5 +1,6 @@
+```ini
 [Unit]
-Description=Hermes context freshness sync (host -> workspace, one-way)
+Description=Hermes context freshness sync (host -> workspace mirror)
 
 [Service]
 Type=oneshot
