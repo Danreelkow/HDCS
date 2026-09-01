@@ -1,2 +1,8 @@
 VERDICT: FAIL
-EVIDENCE: `sync-hermes-context.sh:118-126` labels the staging copy as “verified” but only checks that it is non-empty; it never compares the staged tree’s file contents, recursive structure, or symlink targets with `SRC`. The fallback then begins destructive reconciliation at `sync-hermes-context.sh:128` and can remove paths from `DST` without the required verified source copy established elsewhere (A11).
+EVIDENCE: hermes-context.timer:6 defines `OnCalendar=0 */6:00:00`, which is not a valid systemd calendar expression for a six-hour cadence; the user timer therefore cannot reliably load/run. The README repeats the same invalid expression at the install instructions’ timer description and does not provide a valid alternative such as `*-*-* 00/6:00:00`.
+
+EVIDENCE: sync-hermes-context.sh:107-125 implements `tree_compare` using `[ -d "$b/$p" ]` and `[ -f "$b/$p" ]`, which follow symlinks, so a directory/file replaced by a symlink to a matching directory/file can be accepted as structurally equal. This violates A9’s recursive contents+structure+symlink equivalence requirement.
+
+EVIDENCE: sync-hermes-context.sh:126-137 only enumerates candidate entries of types directory, regular file, and symlink, and likewise only records those types from SRC at lines 93-105. Special filesystem entries in SRC (for example FIFOs) are neither verified nor rejected as extras, so the script can report success without an exact recursive structure mirror.
+
+EVIDENCE: sync-hermes-context.sh:36 sets `LOG_FILE` directly from `HERMES_CTX_LOG`, and README.md “Safety guards” permits that override without checking it is outside DST. A user setting `HERMES_CTX_LOG` inside `/workspace/hermes-context/` causes the log to be within the tree that lines 162-163 recursively delete, violating A8’s requirement that logs are always outside DST.

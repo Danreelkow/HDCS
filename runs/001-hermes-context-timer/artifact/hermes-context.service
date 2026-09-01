@@ -1,7 +1,13 @@
 [Unit]
-Description=Hermes context freshness sync (one-way mirror SRC -> DST, user unit)
+Description=Hermes context one-way mirror sync (host -> workspace)
+After=local-fs.target
 
 [Service]
 Type=oneshot
+# Default install location: ~/.local/bin/sync-hermes-context.sh.
+# If you installed the script to /workspace/hdcs/bin (or elsewhere) instead,
+# update this ExecStart path to match before running daemon-reload.
 ExecStart=%h/.local/bin/sync-hermes-context.sh
+Environment=HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
+Environment=HERMES_CONTEXT_DST=/workspace/hermes-context/
 

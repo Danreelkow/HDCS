@@ -1,37 +1,43 @@
-state: s0 := SRC=/opt/data/workspace/hermes-context/ (exists: INDEX.md, agents/, config/); DST=/workspace/hermes-context/; artifact dir /workspace/hdcs/artifacts/hermes-context-freshness/ empty; no deliverables built yet. Invariants A2–A13 binding as registered.
+state: s0 := artifact dir empty; SRC=/opt/data/workspace/hermes-context/ exists with INDEX.md, agents/, config/; DST=/workspace/hermes-context/ exists; sync_ps two paths (rsync primary, cp-fallback); guards A11/A12/A13 unbuilt; user units absent.
+Δ :=
+  1. Create artifact dir /workspace/hdcs/hermes-context-artifact/ with sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md.
+     Expected: 4 files exist; `ls` lists exactly them.
+  2. Write sync-hermes-context.sh:
+     - flag parsing: `--dry-run` sets DRYRUN=1; usage exit 2 on unknown flags.
+     - A12 identity guard first: resolve realpath(SRC), realpath(DST); refuse clean exit 1 with no writes iff equal realpath, ancestor/descendant relation, or DST path contains a symlink component resolving into SRC. Run before any other action.
+     - A11 guard: SRC==DST reject; no `rm -rf`/delete of DST before a staged copy of SRC is verified.
+     - A13 order: stage SRC to temp staging dir (mktemp under ${TMPDIR:-/tmp}) -> verify staged tree vs SRC via content+structure+symlink recursive compare (A9 class; byte compare contents, symlink targets, dir structure; ignore metadata/timestamps) -> only on verify success touch DST; staging/verify failure -> exit nonzero, DST untouched.
+     - Real run: prefer rsync (`rsync -a --delete SRC/ stage/`); if rsync absent, cp -a / tar-pipe fallback with recursive reconcile including stale-subtree deletion (A7). Both paths converge to same mirror end state.
+     - Apply to DST: replace DST contents to mirror (delete stale recursively), via verified staging copy; entrypoints and logs outside DST never touched.
+     - Logging: on real run append one line (timestamp, result, path count or error) to ${HERMES_CTX_LOG:-$HOME/.cache/hermes-context/log} (mkdir -p, outside DST). Dry-run: zero writes of any kind, incl. no log file.
+     - Exit codes: 0 success/dry-run clean; nonzero on guard refusal, verify mismatch (never warn-exit-0).
+     Expected: `bash -n sync-hermes-context.sh` passes; `shellcheck` (if present) no errors; script standalone-runnable without systemd (A3).
+  3. Write hermes-context.service (Type=oneshot, ExecStart pointing at installed sync script, User-scoped, no root) and hermes-context.timer (OnCalendar=0 */6:00:00, Persistent=true, Unit=hermes-context.service).
+     Expected: `systemd-analyze verify` (if available) clean; `grep OnCalendar` shows 6h cadence.
+  4. Write README.md: install steps (script -> ~/.local/bin or /workspace/hdcs/bin; units -> ~/.config/systemd/user/; `systemctl --user daemon-reload && systemctl --user enable --now hermes-context.timer`), source-change note (next timer tick or manual run), dry-run test instructions, sync-strategy section stating exact-mirror semantics: recursive, stale deleted both sync paths (A7), fallback identical, "verified" only means content-compared staging vs SRC.
+     Expected: grep finds "exact mirror", "--dry-run", "systemctl --user"; no claim of unverified-copy-as-verified.
+  5. Self-test: `sync-hermes-context.sh --dry-run` on live SRC/DST -> exit 0; checksum DST (find -type f -exec sha256sum) pre/post identical; no log line written.
+     Expected: dry-run exit 0, DST checksums identical pre/post, no log write.
+  6. Self-test real run: run script; verify DST == SRC mirror (diff -r contents; symlink target compare recursive); run again -> idempotent, exit 0. Create stale file in DST, rerun, confirm deleted.
+     Expected: diff -r SRC DST empty; second run exit 0 no errors; stale file removed.
+  7. Guard tests: (a) HERMES_CONTEXT_DST=$SRC -> clean nonzero exit, no writes; (b) DST set to parent/ancestor of SRC -> nonzero; (c) DST via symlink resolving into SRC -> nonzero; each with no DST modification.
+     Expected: three guard cases exit nonzero with refusal message; checksums unchanged.
 
-Δ := 
-1. mkdir -p /workspace/hdcs/artifacts/hermes-context-freshness/
-   → expected: dir exists, empty.
-2. Write sync-hermes-context.sh (bash, set -euo pipefail):
-   a. Parse --dry-run flag; resolve SRC=${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}, DST=${HERMES_CONTEXT_DST:-/workspace/hermes-context/} via realpath.
-   b. A12 guard: if realpath(SRC)==realpath(DST) ∨ either is ancestor/descendant of other ∨ DST resolves through symlink into SRC → exit nonzero, zero writes, message to stderr.
-   c. Log path: ${HERMES_CONTEXT_LOG:-$HOME/.cache/hermes-context/sync.log}; assert realpath(log) not inside realpath(DST) (A8); mkdir -p log dir only on real runs.
-   d. Real run: mkdir staging dir on same filesystem as DST (e.g. DST/../.hc-stage.$$); copy SRC→staging (rsync -a --delete SRC/ stage/ if rsync ∈ PATH, else cp -a SRC/. stage/ then reconcile deletions by diffing and removing stale entries recursively — A4/A5/A7 semantics).
-   e. A13 verify: content-compare staging vs SRC recursively (diff -r or per-file cmp, incl. symlink targets); fail → rm staging, exit nonzero.
-   f. Touch DST: rsync -a --delete stage/ DST/ (or mv/reconcile equivalent achieving identical A9 end state); rm staging.
-   g. Dry-run: compute planned changes (rsync --dry-run --delete if available; else read-only diff listing) → print to stdout only; ZERO writes to DST, staging, log, or any target (A6).
-   h. Real run success → append one-line log entry (timestamp, mode, status) to log file.
-   i. Idempotent: second consecutive real run = no-op changes, exit 0.
-   → expected: script exists, bash -n passes, shellcheck passes (or no errors), executable bit set.
-3. Write hermes-context.service: [Unit] Description=...; [Service] Type=oneshot; ExecStart=%h/.local/bin/sync-hermes-context.sh (fallback: absolute artifact path documented in README).
-   → expected: file exists, ExecStart points outside DST.
-4. Write hermes-context.timer: [Timer] OnCalendar=6h (OnUnitActiveSec=6h equivalent accepted); Persistent=true; [Install] WantedBy=timers.target.
-   → expected: file exists, 6h cadence, user-unit form (no root, no system paths).
-5. Write README.md: install steps (copy script to ~/.local/bin, units to ~/.config/systemd/user/, systemctl --user enable --now hermes-context.timer), source-change note (auto-mirrored ≤6h or run script manually), --dry-run test instructions, A7 section stating recursive exact-mirror with stale deletion at all depths, KNOWN_LIMITATIONS section (newline-in-filename corpora; hostile env DST→log dir) with repro notes.
-   → expected: file exists; contains sections install/dry-run/sync-strategy/limitations; A7 wording correct.
-6. Self-check pass: bash -n all shell; grep must_keep items present; confirm no path in deliverables writes to SRC.
-   → expected: all checks exit 0.
+accept:
+  - Exactly 4 files in /workspace/hdcs/hermes-context-artifact/: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md
+  - `--dry-run`: exit 0, DST sha256 manifest identical pre/post, no log file write (A6/V1)
+  - Real run end state: `diff -r` SRC vs DST empty; all symlinks same targets, recursive; mismatch case (seeded) -> nonzero exit (A5/A7/A9/V2)
+  - cp-fallback path (simulate rsync absent via PATH shim) yields identical mirror end state incl. stale deletion
+  - Guard tests a/b/c exit nonzero, zero writes (A12/V3)
+  - Audit: no destructive op on DST precedes staging-verify pass (A11/A13/V4)
+  - Log path resolves outside DST; entrypoints not inside mirrored tree (A8)
+  - Script runs standalone without systemd (A3); units are user units, no root
+  - README contains MUST_KEEP phrases: "source path is /opt/data/workspace/hermes-context/", "dry-run mode that performs no writes", "systemd user units, no root required"
 
-accept: 
-- All 4 files exist in /workspace/hdcs/artifacts/hermes-context-freshness/ and are non-empty.
-- bash -n sync-hermes-context.sh exits 0; script is executable.
-- Script contains: realpath-based A12 guard before any write; staging dir creation; recursive content-verify of staging vs SRC before touching DST; nonzero exit on verify fail; --dry-run branch with no mkdir/redirect/rsync-write to DST or log; log path default ~/.cache/hermes-context/sync.log with outside-DST assertion.
-- rsync branch uses -a --delete; fallback branch achieves identical A9 end state incl. recursive stale deletion.
-- .service ExecStart resolves outside /workspace/hermes-context/; .timer cadence = 6h; both are user units (no root, no /etc/systemd/system).
-- README contains correct A7 recursive-deletion statement and KNOWN_LIMITATIONS with repro notes.
-- grep for "dry-run", "--delete", "realpath", "systemctl --user" each hits in expected files.
+constraints:
+  - A12 identity check before any destructive op; A11 no rm -rf DST pre verified copy; A13 stage->verify->touch DST
+  - A9: mismatch -> nonzero exit, never warn-exit-0
+  - No unverified-copy-as-verified; no accumulate-only fallback; no logs/artifacts inside DST
+  - MUST_KEEP phrases verbatim in README
 
-constraints: [A2 no writes to SRC ever; A4 fallback = A9-identical semantics, no nesting; A5/A7 exact mirror, stale deleted recursively; A6 dry-run zero writes incl. logs; A8 log+install paths outside DST; A9 verify fail = nonzero, never warn+exit0; A11/A12/A13 guards+order=law: stage→verify→touch DST; A10 exotic triggers → KNOWN_LIMITATIONS not FAIL; no root anywhere; deliverable_set exactly the 4 files]
-
-deliverable: [sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md — all in /workspace/hdcs/artifacts/hermes-context-freshness/]
+deliverable: [sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md]
