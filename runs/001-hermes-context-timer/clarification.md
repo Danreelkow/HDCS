@@ -2,7 +2,7 @@
 
 ## Gate output (after repair round)
 ```
-GATE FAIL: real run exited nonzero: sync-hermes-context.sh: line 162: mode_unused: unbound variable
+GATE FAIL: dry-run exited nonzero: REFUSED A14/A15: DST collides with script-owned stage area
 
 ```
 

@@ -1,8 +1,6 @@
 [Unit]
-Description=Hermes context freshness sync (one-way SRC -> DST mirror)
-Documentation=file:%h/.local/bin/sync-hermes-context.sh
+Description=Hermes context freshness sync (host -> workspace, one-way)
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-
