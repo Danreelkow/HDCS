@@ -1,1 +1,1 @@
-GATE PASS
+GATE FAIL: README does not document the service ExecStart location: /.local/bin/sync-hermes-context (docs must match the unit)

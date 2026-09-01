@@ -1,0 +1,34 @@
+register: hermes-context-sync run-001 (fix cycle 1)
+scope: build deliverables for one-way SRC->DST mirror
+
+s0:
+  SRC: /opt/data/workspace/hermes-context/ (host-mount, read-only w.r.t. sync)
+  DST: /workspace/hermes-context/ (exists w/ INDEX.md, agents/, config/)
+  backend: rsync preferred, tar fallback mandatory
+  open: []
+
++done:
+  - artifact dir /workspace/hdcs/artifact/ created
+  - sync-hermes-context.sh written (755): CLI --dry-run/--src/--dst, env HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST, guards A11/A12/A14 before any fs action, stage->verify->apply->re-verify (A13), A9 verify class, dry-run zero writes (A6), single log line per non-dry-run at ~/.cache/hermes-context-sync.log, tar fallback w/ clear-after-verified-copy
+  - fix cycle 1: A14 guard narrowed — the raw TMPDIR base is no longer treated as a script-owned path; only the staging prefix TMPDIR/hermes-context-sync-stage* is guarded. Resolves GATE FAIL where legitimate --dst /tmp/hdcs-gate-dst was refused as "DST inside owned path" merely for living under TMPDIR. A14 E2E case (TMPDIR=X --dst X) still refuses, since X/hermes-context-sync-stage is owned and lies inside/at the refused DST.
+  - hermes-context.service written (Type=oneshot, ExecStart=%h/.local/bin/sync-hermes-context)
+  - hermes-context.timer written (OnCalendar=*-*-* 00/6:00:00, Persistent=true, WantedBy=timers.target)
+  - README.md written (install no root, source-change, dry-run zero-writes test w/ sha256 manifest, A7 wording, KNOWN_LIMITATIONS, staging-prefix clarification)
+  - E2E exercised: dry-run no-op, apply converges, stale subtree deleted any depth, tar backend no nesting, idempotent re-run, guard refusals
+
+-resolved:
+  - run-001 gate: A14 false-positive on non-owned DST paths under TMPDIR (TMPDIR base != script-owned; only staging prefix is)
+  - run-014 S4: timer OnCalendar validated form '*-*-* 00/6:00:00'
+  - run-015 S4: type-change convergence (file<->dir) via stage+reconcile; docs match ExecStart location
+  - runs 007-014 A8 class: log/entrypoint/stage fixed outside DST; env log override refused
+
++open: []
+
++validation:
+  - A: 5 deliverables exist; bash -n sync-hermes-context.sh = 0; systemd-analyze verify both units = 0
+  - B: dry-run exit 0, DST sha256+symlink manifest identical pre/post, no log write, no TMPDIR residue; dry-run with --dst under TMPDIR (e.g. /tmp/hdcs-gate-dst) exits cleanly, no false A14 refusal
+  - C: apply exit 0; diff -r --no-dereference SRC DST empty; all SRC symlinks present as symlinks; log +1 line status OK
+  - D: nested DST/x/y/z/stale.tmp deleted; HCTX_BACKEND=tar run clean with INDEX.md at DST root (no nesting); second apply idempotent no-op
+  - E: --dst SRC (A11), --dst parent-of-SRC (A12), TMPDIR=X --dst X (A14) each nonzero, zero writes, no log line
+  - F: README contains required wording incl. verbatim source path
+  - G: this register has +open: []

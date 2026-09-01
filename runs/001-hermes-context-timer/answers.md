@@ -48,3 +48,8 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A14 (2026-09-01, operator-delegated): protected-path class closes the env-interaction theme
 - GENERALIZED guard (replaces per-var whack-a-mole): the script computes its own internal paths (log dir, staging dir, entrypoint dir) and REFUSES (clean nonzero, no writes) if HERMES_CONTEXT_DST realpath equals or contains any of them, or if the resolved staging location equals/is-inside DST or SRC (TMPDIR included — force a script-owned stage dir if TMPDIR fails the check).
 - This closes the entire "env var X pointed at Y" class. FURTHERMORE: adversarial env combinations beyond this guard are KNOWN_LIMITATIONS (+open), NOT FAIL — the judge must cite A14 and stop re-deriving this class through new doors. Judgment returns to intent-vs-law, not env algebra.
+
+## A15 (2026-09-01, operator-delegated): A14 precision — concrete paths, not parents (gate-not-wall calibration)
+- "Owned path" = the CONCRETE instantiated path: the actual stage dir the script creates (e.g. its mktemp -d result), the resolved log FILE's parent dir, the resolved entrypoint dir. Never a generic ancestor like TMPDIR or /tmp itself.
+- Comparison rule: refuse only when realpath(DST) == owned, or owned is inside DST, or DST is inside owned — using path-boundary-aware comparison (split on components or trailing-slash boundary), never bare string-prefix matching.
+- Run 017's refusal of /tmp/hdcs-gate-dst was a WALL (over-broad A14 implementation), not a gate — this ruling is the calibration.
