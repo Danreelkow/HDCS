@@ -1,5 +1,8 @@
 {
  "s1_at": 1788295046959,
  "s2_at": 1788295083107,
- "gate_pass": false
+ "gate_pass": true,
+ "gate_at": 1788295796529,
+ "s3_hash": "43c423977fae01de4ee1e05a42955445",
+ "s4_pass": false
 }

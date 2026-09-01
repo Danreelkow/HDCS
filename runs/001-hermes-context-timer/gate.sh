@@ -53,14 +53,24 @@ grep -q outside-victim /tmp/hdcs-gate-outside || fail "symlink-swap: cp FOLLOWED
 rm -rf "$SRC" "$DST"; mkdir -p "$SRC/sub"; printf 't\n' > "$SRC/sub/f"
 TSOUT=$(HERMES_CONTEXT_SRC="$SRC/" HERMES_CONTEXT_DST="$DST/" bash sync-hermes-context.sh 2>&1) || fail "trailing-slash run exited nonzero: $TSOUT"
 cmp -s "$SRC/sub/f" "$DST/sub/f" || fail "trailing-slash DST: initial sync did not converge (canonicalize DST/SRC once, mutate only through canonical forms)"
+# A12/realpath fixture (run 028 S4 findings): symlinked ANCESTOR of DST resolving into SRC must be refused (realpath guards, not lexical prefixes); --verify must FAIL when DST is absent
+rm -rf "$SRC" "$DST" "$DSTLINK"; mkdir -p "$SRC/sub"; printf 'v\n' > "$SRC/sub/f"; mkdir -p "$(dirname "$DST")/shadow"; ln -s "$SRC" "$(dirname "$DST")/shadow/inner"
+SAOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$(dirname "$DST")/shadow/inner/dst" bash sync-hermes-context.sh 2>&1)
+[ $? -eq 0 ] && fail "symlinked DST ancestor resolving into SRC was accepted (A12: realpath-based guards required, lexical prefixes are bypassable)"
+[ -e "$SRC/sub/f" ] && cmp -s "$SRC/sub/f" <(printf 'v\n') || fail "symlink-ancestor run wrote into SRC"
+rm -rf "$SRC"; mkdir -p "$SRC"; printf 'e\n' > "$SRC/f"; rm -rf "$DST"
+VEOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh --verify 2>&1)
+[ $? -eq 0 ] && fail "--verify reported OK with DST absent (verify must fail when destination does not exist)"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"
 grep -qF "$ESP" README.md || fail "README does not document the service ExecStart location: $ESP (docs must match the unit)"
 # A8 fixture (promoted from runs 007-014: env-override log guard kept slipping past repairs)
-if grep -q "HERMES_CTX_LOG" sync-hermes-context.sh; then
-  LOGFAIL=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" HERMES_CTX_LOG="$DST/evil.log" bash sync-hermes-context.sh 2>&1)
-  [ $? -eq 0 ] && fail "log-override pointing inside DST was accepted (A8: refuse, nonzero exit)"
-  [ -f "$DST/evil.log" ] && fail "log written inside DST despite A8"
-fi
+for LOGVAR in HERMES_CTX_LOG LOG_DIR; do
+  if grep -q "$LOGVAR" sync-hermes-context.sh; then
+    LOGFAIL=$(env HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" "$LOGVAR=$DST/evil.log" bash sync-hermes-context.sh 2>&1)
+    [ $? -eq 0 ] && fail "$LOGVAR override pointing inside DST was accepted (A14 scope: the log dir is an owned path)"
+    [ -f "$DST/evil.log" ] && fail "log written inside DST despite A8 ($LOGVAR)"
+  fi
+done
 echo "GATE PASS"

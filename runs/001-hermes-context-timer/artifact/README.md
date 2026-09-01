@@ -1,75 +1,63 @@
 # hermes-context sync
 
-One-way mirror (host -> workspace) of the hermes context: exact replica,
-stale subtrees deleted, never bidirectional (A2/A9).
+One-way mirror of the hermes context from the host into the workspace (A2/A9):
+the destination end state always converges to the source end state — contents,
+directory structure, and symlinks — with stale destination files deleted.
 
-## Install
+## Files
 
-    cp sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-    chmod +x ~/.local/bin/sync-hermes-context.sh
-    mkdir -p ~/.config/systemd/user
+- `~/.local/bin/sync-hermes-context.sh` — the sync script (standalone exec or systemd user unit, A3)
+- `~/.config/systemd/user/hermes-context.service` — oneshot service unit
+- `~/.config/systemd/user/hermes-context.timer` — 6h timer
+
+## Standalone usage
+
+    ~/.local/bin/sync-hermes-context.sh            # real run (rsync --delete, cp/tar fallback)
+    ~/.local/bin/sync-hermes-context.sh --dry-run  # read-only diff report, zero writes (A6/A16)
+    ~/.local/bin/sync-hermes-context.sh --verify   # recursive SRC vs DST comparison; nonzero on mismatch
+
+## systemd user units (A3, no root)
+
     cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
-
-Standalone execution (no root required, A3):
-
-    ~/.local/bin/sync-hermes-context.sh
-
-Check the timer:
-
     systemctl --user list-timers hermes-context.timer
 
-## Env override (A17)
+The service runs `%h/.local/bin/sync-hermes-context.sh` (Type=oneshot).
 
-All paths are env-parameterized; deployed defaults are the production values.
+## Environment overrides (A17)
 
-| Variable | Default |
-|---|---|
-| `SRC_DIR` | `/opt/data/workspace/hermes-context/` |
-| `DST_DIR` | `/workspace/hermes-context` |
-| `LOG_DIR` | `~/.cache/hermes-context` |
+All paths are env-parameterized; the deployed values below are the production defaults:
 
-Example:
+- `SRC_DIR` (or `HERMES_CONTEXT_SRC`) — default `/opt/data/workspace/hermes-context/`
+- `DST_DIR` (or `HERMES_CONTEXT_DST`) — default `/workspace/hermes-context`
+- `LOG_DIR` (or `HERMES_CTX_LOG`) — default `~/.cache/hermes-context/`
 
-    SRC_DIR=/other/src DST_DIR=/other/dst ~/.local/bin/sync-hermes-context.sh
+All paths are canonicalized with `realpath` before guards run, so symlinked
+ancestors cannot spoof a source/destination relationship. Guards run before
+any write; on refusal nothing is created or modified.
+
+## Staging (A13)
+
+Every real run (rsync primary and cp/tar fallback alike) first copies SRC into
+a staging tree, content-verifies the staging against SRC, and only then
+mutates DST. A failed staging verification leaves DST untouched.
 
 ## Dry-run example
 
     ~/.local/bin/sync-hermes-context.sh --dry-run
+    # prints would-create / would-update / would-delete; never creates or touches DST (A6/A16)
 
-Prints would-create / would-update / would-delete, performs zero writes,
-and never creates DST even if absent (A6/A16). No log lines are appended
-in dry-run mode.
+## Logging
 
-## Verify
+Real runs append a timestamped summary to `~/.cache/hermes-context/sync.log`
+(override with `LOG_DIR` or `HERMES_CTX_LOG`). Dry-run mode writes no log
+lines. A log directory that resolves inside DST is refused (A8) with a
+nonzero exit and zero writes.
 
-    ~/.local/bin/sync-hermes-context.sh --verify
+## Refusals (A19/A20 — closed list, zero writes on refusal path)
 
-Recursively compares DST against SRC (file contents, directory structure,
-symlink presence + targets, stale files). Exit 0 on mirror; nonzero with
-the mismatched paths listed otherwise.
-
-## Logs
-
-Real runs append a timestamped summary to:
-
-    ~/.cache/hermes-context/sync.log
-
-LOG_DIR always lives outside DST (A14/A15); dry-run writes nothing.
-
-## Refusals (A19 closed list)
-
-- Root execution → refused (A12).
-- DST same as / inside SRC (or vice versa) → refused (A18).
-- SRC missing or not a directory; LOG_DIR or entrypoint inside DST → refused (A14/A15).
-
-All refusal paths write nothing.
-
-## Sync strategy
-
-Primary: `rsync -a --delete SRC/ DST/`. Fallback (no rsync): stage via
-`mktemp -d` under LOG_DIR, `cp -a` SRC into it, content-verify the stage
-against SRC (A13), then swap into DST after deleting stale content — the
-end state converges identically to the rsync branch (A5), recursively,
-symlinks preserved.
+- Running as root → refused, cites A12
+- Missing/non-directory source → refused, cites A14/A15
+- Destination equal to or inside source (realpath-resolved) → refused, cites A18
+- Log directory resolving inside DST → refused, cites A8

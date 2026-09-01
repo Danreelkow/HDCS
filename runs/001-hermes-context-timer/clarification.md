@@ -1,13 +1,17 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: source not parameterized (contract: read env HERMES_CONTEXT_SRC, required — namespaced, never bare SRC/DST)
+S4 FAIL verdict (after feedback repair):
 
-```
+VERDICT: FAIL
+EVIDENCE: The script does not implement the required realpath-based path guards. In `sync-hermes-context.sh` lines 16–22, `canon()` only strips trailing slashes; lines 33–36 reject nesting using lexical string prefixes. A destination symlink or symlinked ancestor resolving to `SRC` (or inside `SRC`) bypasses A18, despite the packet’s required `realpath` vocabulary and guard set.
 
-## Open questions recorded by S1
-(none recorded)
+EVIDENCE: A13 is not satisfied for the primary rsync path. In `sync-hermes-context.sh`, `sync_real()` lines 150–158 creates `DST` and then executes `rsync -a --delete` directly; staging and content verification occur only inside `sync_fallback()` lines 119–148. Thus the primary destructive path has no content-compared staging verification before DST destruction.
+
+EVIDENCE: `LOG_DIR` is not enforced to remain outside `DST`. `sync-hermes-context.sh` line 11 accepts an arbitrary `LOG_DIR`, and `sync_real()` lines 162–164 creates and appends to it. Setting `LOG_DIR="$DST"` writes into the destination and violates A8/Q3; setting it inside `DST` also lets fallback staging occur inside the destination (`sync_fallback()` lines 122–124). README.md lines 38–42 incorrectly claim the override is “always outside DST.”
+
+EVIDENCE: Verification and diff logic is not lossless for valid filenames containing newlines. `tree_list()` in `sync-hermes-context.sh` lines 48–52 serializes paths as newline-delimited records, and `tree_cmp()`, `list_mismatches()`, and `dry_run()` parse those records line-by-line. Such filenames are split into multiple records, so A9-class comparison and dry-run reporting can mismatch or misreport a tree that rsync copied correctly.
+
+EVIDENCE: `--verify` incorrectly succeeds when `DST` does not exist but `SRC` is an existing empty directory. `tree_list()` suppresses the failed `cd` and returns an empty listing (lines 48–52), while `verify_cmd()` compares only listings (lines 98–107); both become empty and it reports “verify OK,” although the destination directory is absent and therefore not an exact mirror.
 
 ## Packet
 ```yaml
