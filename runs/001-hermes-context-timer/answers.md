@@ -61,3 +61,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A17 (2026-09-01, operator-delegated): parameterization vs deployed defaults (judge calibration)
 - The packet's fixed paths (e.g. /opt/data/workspace/hermes-context/) are the DEPLOYED configuration — the values the unit/timer passes at install time. They are NOT a prohibition on env parameterization: HERMES_CONTEXT_SRC/DST env override is the mandated mechanism (gate contract), and the deployed paths are simply its production values.
 - Judges: never read a deployed default as a scope restriction. The S4 verdict that called env override "inventing scope" was WRONG and caused a contract regression in the repair. Contract (gate.sh) and A-law outrank verdicts.
+
+## A18 (2026-09-01, operator-delegated): degenerate-path refusals (root safety)
+- Refuse (clean nonzero, no writes) when HERMES_CONTEXT_DST or SRC is "/" , empty, or "." — always, before any destructive op. The component-boundary guards must handle these as special cases first (the "$RD/"-pattern form misses DST=/ : test components, not slash-suffixed strings).
+- DST symlink resolving outside SRC: refuse (A12) — after A12+placement guards pass, DST must END as a real directory tree identical to SRC (A5/A9); if the old DST was a symlink, it is replaced by the real tree (symlink removed, not retained).

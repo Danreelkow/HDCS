@@ -1,72 +1,57 @@
 # hermes-context sync
 
-Standing one-way sync (A2) of the host canonical mount into the workspace:
-exact recursive mirror — file contents + directory structure (recursive) +
-symlinks; NOT metadata/timestamps/hardlinks.
-mirror := A9 class: file contents + directory structure (recursive) + symlinks; NOT metadata/timestamps/hardlinks
+One-way mirror `SRC -> DST` of the hermes context tree. The source is never
+modified; the destination is replaced only from a verified staging copy.
 
-SRC := /opt/data/workspace/hermes-context/  (host canonical mount, MUST_KEEP; fixed, not overridable)
-DST := /workspace/hermes-context/  (override with `HERMES_CONTEXT_DST`)
+## Environment overrides
 
-## Install (no root)
+- `HERMES_CONTEXT_SRC` — source tree, default `/opt/data/workspace/hermes-context/`
+- `HERMES_CONTEXT_DST` — destination tree, default `/workspace/hermes-context/`
+- `HERMES_CONTEXT_LOG_DIR` — log dir, default `~/.cache/hermes-context/` (refused if it points inside SRC or DST)
 
-Install to ~/.local/bin/ (outside the mirrored tree, A8):
+## Install
 
-    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-    mkdir -p ~/.config/systemd/user
-    install hermes-context.service hermes-context.timer ~/.config/systemd/user/
+Copy the entrypoint to either location (outside the mirrored tree):
 
-The service runs ExecStart=%h/.local/bin/sync-hermes-context.sh — the unit path
-`%h/.local/bin/sync-hermes-context.sh` must exist; keep script and unit in step.
+    cp sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh && chmod +x ~/.local/bin/sync-hermes-context.sh
 
-Enable the user timer (systemctl --user, no root):
+or use it in place at `/workspace/hdcs/bin/sync-hermes-context.sh`. The systemd
+user units below expect the `/.local/bin/sync-hermes-context.sh` location; if
+you keep the script in `/workspace/hdcs/bin/`, adjust `ExecStart=` accordingly.
 
+Enable the timer (6h cadence, persistent):
+
+    cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now hermes-context.timer
-    systemctl --user list-timers hermes-context.timer
 
-## Dry-run test (A6/A16)
+The service unit `ExecStart=%h/.local/bin/sync-hermes-context.sh` runs the
+script as the normal user; no root directives.
 
-`--dry-run` prints the plan and performs ZERO writes — no log entry, and DST is
-never created (it stays byte-identical or nonexistent):
+## Standalone fallback (no systemd)
 
-    ~/.local/bin/sync-hermes-context.sh --dry-run
-
-Then do a real run and check the log (one line per real run only):
+Invoke directly, optionally from cron:
 
     ~/.local/bin/sync-hermes-context.sh
-    cat ~/.cache/hermes-context/sync.log
 
-## Semantics
+Every real run appends one log line to `~/.cache/hermes-context/hermes-context.log`.
 
-Primary path: `rsync -a --delete` (contents sync, src/ -> dst, no nesting), so
-stale subtrees are deleted at every depth and file<->dir type changes reconcile.
-cp_path := fallback when rsync absent; tar-pipe or cp -a + recursive reconcile; semantics MUST equal rsync_path
-The fallback (tar-pipe from a fresh staging dir, verified, then `cp -a`) reaches
-the identical end state; run with `PATH` stripped of rsync to test parity.
+## Source-change note
 
-Safety ordering (A11): stage -> content-verify vs SRC -> only then touch DST.
-The script never deletes DST before a verified (content-compared, A13) staging
-copy exists, never writes to SRC, and refuses cleanly (nonzero exit, no writes)
-on: SRC==DST via realpath, ancestor/descendant relation, DST resolving through a
-symlink into SRC, or DST conflicting with owned concrete paths (stage dir,
-resolved log parent dir, entrypoint dir) in EITHER direction — DST inside an
-owned path, or an owned path inside DST — via component-split comparison, not
-string prefix (A12/A14/A15). In particular, a log dir inside DST would violate
-A8 (post-sync log write would modify the mirrored tree) and is refused.
+Edit files under `HERMES_CONTEXT_SRC` only. The next timer tick (or the next
+manual run) mirrors the new state to the destination. Stale subtrees are
+deleted at all depths on the destination.
 
-## KNOWN_LIMITATIONS
+## Dry-run test procedure
 
-Cited per A10, non-blocking (exotic triggers, not reachable in normal op):
-- A14/A15: adversarial env combos beyond the guard — e.g. `TMPDIR` set to a
-  path that is itself a symlink racing to point inside DST between the mktemp
-  and the realpath check; a DST intermediate component replaced by a symlink
-  into SRC after `realpath -m` but before the copy. Repro notes: run the script
-  with a hostile inotify/timer that swaps symlinks mid-run; the realpath-based
-  guards check at decision time only. Plausible mitigations (open-tree fds) are
-  out of scope here.
-- Log path is fixed to `~/.cache/hermes-context/sync.log`; a `HOME` pointing
-  inside the mirrored tree would be refused by the owned-path guard, not
-  relocated.
-- Fallback path requires GNU `tar` and `cp -a` (preserves symlinks; metadata
-  parity is not required by A9).
+    HERMES_CONTEXT_SRC=/tmp/src HERMES_CONTEXT_DST=/tmp/dst \
+      ~/.local/bin/sync-hermes-context.sh --dry-run
+
+The dry run prints the plan and performs zero writes anywhere — it never
+creates the destination or the log dir.
+
+## Guards
+
+Refused (exit 2, zero writes): `SRC == DST`, either path an ancestor of the
+other, the destination being a symlink resolving into the source, or a log
+directory pointing inside SRC or DST.

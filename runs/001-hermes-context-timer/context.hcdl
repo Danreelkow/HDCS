@@ -1,27 +1,17 @@
-reg: cs-programming / shell+systemd tooling
-intent: standing sync host_mount -> /workspace/hermes-context, exact mirror, user-level systemd, standalone-capable
-defs:
-  SRC := /opt/data/workspace/hermes-context/  (host canonical mount, MUST_KEEP)
-  DST := /workspace/hermes-context/ (HERMES_CONTEXT_DST default; may be absent pre-run)
-  rsync_path := rsync -a --delete (contents sync, src/ -> dst, no nesting)
-  cp_path := fallback when rsync absent; tar-pipe or cp -a + recursive reconcile; semantics MUST equal rsync_path
-  mirror := A9 class: file contents + directory structure (recursive) + symlinks; NOT metadata/timestamps/hardlinks
-  verified_copy := staging copy content-compared vs SRC (A9 class), match required before any DST destructive op
-invariants:
-  A2: sync direction host -> workspace, one-way
-  A5/A7: ∀ path (rsync|cp) -> DST end state == SRC end state, recursive, stale subtrees deleted at every depth
-  A6: --dry-run -> ZERO writes incl. logs; DST byte-identical or nonexistent (A16: dry-run must NOT create DST)
-  A8: log file parent + entrypoint dir live OUTSIDE mirrored tree, always
-  A11: guard SRC==DST; never rm -rf DST before verified_copy exists; order: stage -> verify -> touch DST
-  A12: identity guard via realpath; refuse when realpath(SRC)==realpath(DST), ancestor/descendant relation, or DST resolves through symlink into SRC; both paths, before any destructive op; clean nonzero, no writes
-  A13: verified = content-compared, non-emptiness != verification; self-verify exits nonzero on staging mismatch; README never calls unverified copy "verified"
-  A14/A15: refuse when realpath(DST) == owned, owned inside DST, or DST inside owned (boundary-aware, component split, not string prefix); owned = concrete instantiated paths (mktemp stage dir, resolved log FILE parent, entrypoint dir), NOT generic ancestors (TMPDIR, /tmp); adversarial env beyond guard -> KNOWN_LIMITATIONS
-  A16: real run mkdir -p DST if absent; dry-run leaves DST nonexistent
-  A10: severity bar = FAIL only on defects reachable in normal op (default config, documented usage, plausible data-losing misconfig); exotic triggers -> KNOWN_LIMITATIONS with repro notes, cited not suppressed
-  units: systemctl --user, no root; timer OnCalendar=every 6h (OnUnitActiveSec=6h or OnCalendar=00/6h); script standalone-executable
-  logging: one-line summary per real run only
-  no_resurrect: [A5, A6, A7, A8, A9, A10, A11, A12, A13, A14, A15, A16]
-open:
-  +open KNOWN_LIMITATIONS: adversarial env combos beyond A14 guard (cited, non-blocking)
-validation:
-  gate: dry-run purity on absent DST; mirror equality both paths (contents+structure+symlinks); guard refusals clean-nonzero-no-writes; stage->verify->touch ordering
+A1: SRC := /opt/data/workspace/hermes-context/, DST := /workspace/hermes-context/
+A2: ∀ sync -> one-way SRC->DST, no writeback
+A3: schedule := systemctl --user timer 6h; script standalone when systemd absent
+A4: rsync-optional; fallback cp -a/tar pipe; sync CONTENTS src/ -> dst, no nesting
+A5_mirror: ∀ path -> DST end state == SRC end state, recursive
+A6_dryrun_purity: --dry-run -> zero writes ∀ target incl. logs; DST stays nonexistent (Q16)
+A7: fallback reconcile recursive, stale subtrees deleted ∀ depth
+A8_placement: log & entrypoints outside mirrored tree (log ~/.cache, entrypoints ~/.local/bin | /workspace/hdcs/bin)
+A9_verify_class: equivalence := contents+structure+symlinks; metadata/timestamps/hardlinks ∉ scope
+A10: severity bar — FAIL ∀ normal-operation defects; adversarial -> KNOWN_LIMITATIONS (+open)
+A11: SRC==DST rejected; source survival outranks freshness; stage+verify precede ∀ DST destruction
+A12: guards := realpath identity/ancestor/symlink-into-SRC, both paths, pre-destruction
+A13: verified := content-compared staging copy (A9 class); order stage->verify->touch DST; self-verify exit≠0 on staging failure
+A14: env-interaction guard := protected-path on script-owned concrete paths; adversarial residue -> KNOWN_LIMITATIONS
+A15: guard breadth := concrete instantiated paths, component-boundary comparison, ¬string-prefix
+A17: HERMES_CONTEXT_SRC/DST env override = mandated gate contract; deployed paths production values only
+open: []

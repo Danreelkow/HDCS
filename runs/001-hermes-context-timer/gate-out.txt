@@ -1,1 +1,1 @@
-GATE FAIL: source not parameterized (contract: read env HERMES_CONTEXT_SRC, required — namespaced, never bare SRC/DST)
+GATE PASS

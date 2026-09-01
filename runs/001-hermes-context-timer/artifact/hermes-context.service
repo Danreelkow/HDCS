@@ -1,6 +1,6 @@
 [Unit]
-Description=Sync hermes-context mount into workspace (exact mirror)
-Documentation=file://%h/.local/share/doc/hermes-context/README.md
+Description=One-way mirror of the hermes context tree (SRC -> DST)
+Documentation=file:%h/.local/bin/sync-hermes-context.sh
 
 [Service]
 Type=oneshot
