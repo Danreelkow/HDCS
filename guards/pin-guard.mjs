@@ -41,9 +41,9 @@ for (const m of yml.matchAll(/^\s+(?:model|summarizationModel):\s*(\S+)\s*$/gm))
   if (seats.excluded[m[1]]) violations.push(`excluded model pinned: ${m[1]} (${seats.excluded[m[1]].split(';')[0]})`);
 }
 
-// The override switch must stay wired: persona must carry the BYPASS MODE clause.
-if (!yml.includes('BYPASS MODE (operator override switch)')) {
-  violations.push('persona lost the BYPASS MODE clause — picker no longer acts as the override switch');
+// The template switch must stay wired: persona must carry the MODE SELECTOR clause.
+if (!yml.includes('MODE SELECTOR (model picker is the switch)')) {
+  violations.push('persona lost the MODE SELECTOR clause — picker no longer switches agent templates');
 }
 
 console.log('HDCS seat-pin guard — ' + PRESET);
