@@ -1,16 +1,15 @@
-reg_canon: cs-programming; vocabulary := exact identifiers (rsync, --delete, --dry-run, systemctl --user, HERMES_CONTEXT_SRC/DST/LOG, cp -a, systemd unit directives).
-A1_src: HERMES_CONTEXT_SRC default := /opt/data/workspace/hermes-context/ (canonical host-side mount, kb digests)
-A1_dst: HERMES_CONTEXT_DST default := /workspace/hermes-context/ (exists; holds INDEX.md, agents/, config/)
-A2_direction: ∀ run -> sync host->workspace, one-way; ¬∃ writeback to SRC
-A3_standalone: script must execute without systemd; units are systemctl --user, no root
-A4_fallback: ¬∃ rsync -> cp -a semantics (or tar pipe); semantics: contents of SRC/ -> DST (trailing-slash mirror), never DST/SRC-nest
-A5_mirror: ∀ run -> DST end state == SRC end state exactly; rsync path uses --delete; cp fallback reconciles (no accumulate-only); both paths converge to identical end state
-A6_dryrun_purity: --dry-run -> ZERO writes ∀ targets, incl. log files; DST byte-identical post-dry-run (mechanical gate: full-tree byte compare, not probe-file)
-A7_recursive: A5 is recursive; cp fallback deletes stale subtrees ∀ depth (mirrors rsync --delete); README sync-strategy section states this
-A8_placement: log path := ~/.cache/hermes-context/ default, ALWAYS outside DST (∀ modes, no carve-outs, no post-mirror rewrite); install paths := ~/.local/bin (or /workspace/hdcs/bin), never artifact/ inside DST; sync never deletes/moves its own entrypoints
+defs:
+  SRC := $HERMES_CONTEXT_SRC default /opt/data/workspace/hermes-context/
+  DST := $HERMES_CONTEXT_DST default /workspace/hermes-context/
+  rsync_path := rsync -a --delete src/ -> dst/ (contents, no nesting)
+  fallback_path := cp -a + recursive reconciliation (delete stale subtrees ∀ depth)
+  mirror_class := {file contents, dir structure recursive, symlinks}; ¬{timestamps, metadata, hardlink topology} per A9
 invariants:
-  I1: ∀ mode m ∈ {real, dry} -> DST_post(dry) == DST_pre
-  I2: ∀ real run -> DST_post == SRC (recursive, byte-faithful)
-  I3: ∀ artifact (log, script, unit, README) -> artifact ∉ mirrored tree
-  I4: idempotent: run^2 == run^1
-open: none — all ambiguities resolved by A1..A8
+  A2_oneway: ∀ run -> writes only to DST; SRC read-only
+  A5_mirror: ∀ path ∈ {rsync_path, fallback_path} -> DST end state == SRC end state, recursive (A7)
+  A6_purity: --dry-run -> ∀ write == 0, incl. logs; DST byte-identical post-run
+  A8_placement: log ∈ ~/.cache (outside DST always); entrypoints ∈ ~/.local/bin | /workspace/hdcs/bin, never inside DST; sync never deletes own entrypoints
+  A3_standalone: script executable w/o systemd; units user-level (systemctl --user), no root
+  A4_detect: rsync absent -> fallback_path engaged
+  self_verify: verify mirror_class recursively; mismatch -> exit != 0 (never warn+0)
+open: none — all ambiguities resolved by A1-A9

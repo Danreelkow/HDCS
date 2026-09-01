@@ -23,3 +23,8 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A8 (2026-09-01, operator-delegated ruling on S4 verdict #5): placement law
 - Confirmed both findings. The log lives OUTSIDE the destination ALWAYS (the ~/.cache default; never inside DST, no carve-outs, no post-mirror rewrite exceptions — A5 exact mirror means exact).
 - Install paths live OUTSIDE the mirrored tree: ~/.local/bin (or /workspace/hdcs/bin), never artifact/ inside DST. A sync must never delete or move the installed service's own entrypoints.
+
+## A9 (2026-09-01, operator ruling): equivalence class of "exact mirror"
+- Mirror = levels 1-3 ONLY: file contents + directory structure (recursive, both sync paths) + symlinks. NOT included: file/root metadata, timestamps, hardlink topology.
+- The self-verification must enforce exactly this class: verify contents+structure+symlinks recursively, and FAIL (nonzero exit) on any mismatch — never warn-and-exit-0.
+- Judge scope: complaints about metadata/root-metadata/hardlinks are out-of-scope per this ruling.
