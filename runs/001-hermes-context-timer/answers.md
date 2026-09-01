@@ -33,3 +33,9 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 - FAIL only on defects reachable in NORMAL operation: default config, documented usage, plausible misconfiguration that loses or corrupts user data.
 - Exotic/adversarial triggers (newline-in-filename corpora, hostile env combinations like pointing DST at the log dir) go to the packet's +open section as KNOWN_LIMITATIONS with repro notes — they do not block delivery.
 - The judge still cites everything it finds; the bar classifies, it does not suppress.
+
+## A11 (2026-09-01, operator-delegated): destructive-misconfig guard
+- Confirmed A10-class FAIL. The script MUST guard SRC == DST (reject or clean no-op) and MUST NOT rm -rf the destination before establishing a verified copy of the source elsewhere. Source survival outranks mirror freshness.
+
+## A12 (2026-09-01, operator-delegated): path-identity guard (A11 in spirit)
+- Guard the IDENTITY of the trees, not string equality: compare realpath (symlinks resolved) of SRC and DST; refuse (clean nonzero exit, no writes) when realpath(SRC) == realpath(DST), or when either realpath is an ancestor/descendant of the other, or when DST is (or resolves through) a symlink into SRC. Applies to both sync paths before ANY destructive operation.

@@ -1,12 +1,8 @@
 [Unit]
-Description=Hermes context one-way mirror (SRC -> DST, exact mirror with stale deletion)
+Description=One-way mirror hermes-context SRC -> DST
 Documentation=file://%h/.local/share/hdcs/README.md
 
 [Service]
 Type=oneshot
 ExecStart=%h/.local/bin/sync-hermes-context.sh
-Environment=HERMES_CONTEXT_LOG=%h/.cache/hermes-context/sync.log
-
-[Install]
-WantedBy=default.target
 

@@ -1,19 +1,19 @@
-reg: cs-programming, canon: rsync/systemd-user-unit/shell-scripting vocabulary (rsync flags, systemctl --user, OnCalendar, exit codes)
 defs:
-  SRC := $HERMES_CONTEXT_SRC default /opt/data/workspace/hermes-context/
-  DST := $HERMES_CONTEXT_DST default /workspace/hermes-context/
-  LOG := outside DST always, default ~/.cache/hermes-context/sync.log
+  SRC := value(HERMES_CONTEXT_SRC, default=/opt/data/workspace/hermes-context/)
+  DST := value(HERMES_CONTEXT_DST, default=/workspace/hermes-context/)
+  sync_path_rs := rsync -a --delete (contents of SRC -> DST)
+  sync_path_cp := cp -a + recursive reconciliation (delete stale subtrees ∀ depth)
 invariants:
-  A2_oneway: ∀ run -> SRC -> DST only, no writeback to host mount
-  A4_contents: sync CONTENTS of SRC into DST (src/ -> dst), never nest SRC inside DST
-  A4_fallback: ∃ no rsync -> cp -a/tar-pipe fallback with identical semantics
-  A5_mirror: ∀ path (rsync|fallback) -> DST end state == SRC end state; stale files DELETED (--delete / recursive reconcile); no accumulate-only mode
-  A6_dryrun_purity: --dry-run -> ZERO writes incl. logs; DST byte-identical post-run
-  A7_recursive: reconciliation deletes stale subtrees ∀ depth; README states this correctly
-  A8_placement: LOG ∉ DST ∧ install paths (~/.local/bin or /workspace/hdcs/bin) ∉ mirrored tree; sync never deletes own entrypoints
-  A9_equiv_class: mirror = {file contents, dir structure recursive, symlinks} only; metadata/timestamps/hardlinks excluded; self-verify enforces exactly this, mismatch -> nonzero exit, never warn-exit-0
-  A10_severity: FAIL only on normal-operation defects (default config, documented usage, plausible misconfig losing/corrupting data); exotic triggers -> KNOWN_LIMITATIONS in +open, non-blocking
-  units: systemd USER units (systemctl --user), timer OnCalendar every 6h, no root; script standalone-capable sans systemd
+  A2_oneway: ∀ run -> writes only to DST; ¬∃ write to SRC
+  A4_contents: sync maps SRC/* -> DST (¬ nest SRC inside DST); fallback when ¬∃ rsync
+  A5_mirror: ∀ path ∈ {sync_path_rs, sync_path_cp} -> end state identical
+  A7_recursive: reconciliation deletes stale subtrees ∀ depth -> DST ==^mirror SRC
+  A6_dryrun: --dry-run -> zero writes ∀ targets incl log; DST byte-identical pre/post
+  A8_placement: log ∈ ~/.cache/hermes-context/ (¬ inside DST, no exceptions); entrypoints ∈ ~/.local/bin ∨ /workspace/hdcs/bin (¬ inside mirrored tree)
+  A9_class: mirror ≡ contents ∧ structure ∧ symlinks, recursive; ¬ metadata ∧ ¬ timestamps ∧ ¬ hardlinks; self-verify FAIL(nonzero) on mismatch, never warn-0
+  A10_bar: FAIL iff defect reachable in normal operation (default cfg, documented usage, plausible misconfig losing/corrupting data); exotic -> +open KNOWN_LIMITATIONS w/ repro
+  A11_guard: reject SRC == DST; ¬ rm -rf DST before verified copy of SRC exists elsewhere; source survival > freshness
 open:
-  KNOWN_LIMITATIONS: exotic/adversarial inputs (newline-in-filename corpora, DST pointed at LOG dir) — repro notes recorded, non-blocking per A10
-===
+  L1_newlines: filenames w/ newline break cp fallback iteration (repro: touch $'a\nb') — KNOWN_LIMITATION
+  L2_dst_logdir: DST := log dir adversarial config — KNOWN_LIMITATION (A8 default prevents)
+  L3_no_systemd: hosts lacking systemd -> standalone script + cron note in README
