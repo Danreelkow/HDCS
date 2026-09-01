@@ -2,7 +2,7 @@
 
 ## Gate output (after repair round)
 ```
-gate.sh: line 57: DSTLINK: unbound variable
+GATE FAIL: README does not document the service ExecStart location: /.local/bin/sync-hermes-context.sh (docs must match the unit)
 
 ```
 
