@@ -4,6 +4,7 @@ Description=Run hermes-context sync every 6h
 [Timer]
 OnCalendar=*-*-* 00/6:00:00
 Persistent=true
+Unit=hermes-context.service
 
 [Install]
 WantedBy=timers.target

@@ -79,7 +79,7 @@ let build = null;
 for (const attempt of ['s3', 's3-repair']) {
   const input = attempt === 's3'
     ? `BUILD BRIEF:\n${brief}`
-    : `GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure. Honor the operator answers in the brief.`;
+    : `GATE OUTPUT:\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS:\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure.`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 8192);
   fs.writeFileSync('artifact-build.txt', build);
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
@@ -97,9 +97,30 @@ for (const attempt of ['s3', 's3-repair']) {
   else log('S3 gate failed; running repair round');
 }
 
-// --- S5 (only if S1 passed; skip on gate fail to save cost) ---
-if (outcomes.s3 === 'FAIL') { log('S3 gate failed; skipping S5 egress'); }
-else {
+// --- S4: decorrelated judgment gate — fires only when something was produced ---
+// Operator policy: skip S4 when nothing was produced (that needs clarification, not a verdict).
+// Ungated artifacts (NO GATE) still count as produced -> S4 judges them.
+if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
+  checkBudget('s4');
+  const artifacts = fs.existsSync('artifact') ? fs.readdirSync('artifact').join(', ') : '';
+  const gateOut = fs.existsSync('gate-out.txt') ? fs.readFileSync('gate-out.txt', 'utf8') : '(no mechanical gate ran)';
+  const s4 = seat('s4', seats.s4, 's4-system.txt', `hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 4096);
+  fs.writeFileSync('s4-verdict.txt', s4);
+  outcomes.s4 = /VERDICT:\s*PASS/i.test(s4) ? 'PASS' : (/VERDICT:\s*FAIL/i.test(s4) ? 'FAIL' : 'UNPARSED');
+  log(`S4: ${outcomes.s4}`);
+  if (outcomes.s4 === 'PASS') outcomes.route = 'DELIVERED';
+  else if (outcomes.s4 === 'FAIL') { outcomes.route = 'NEEDS-CLARIFICATION'; fs.writeFileSync('clarification.md', `# Clarification needed — ${runName}\n\nS4 FAIL verdict:\n\n${s4}\n\n## Packet\n\`\`\`yaml\n${packet}\n\`\`\`\n`); }
+} else if (outcomes.s3 === 'FAIL') {
+  log('S3 gate failed after repair; routing to clarification (no S4/S5 spend)');
+  const opens = [...packet.matchAll(/Q\d+[^\n]*/g)].map(m => m[0]).filter(l => /OPEN/i.test(l));
+  fs.writeFileSync('clarification.md', `# Clarification needed — ${runName}\n\n## Gate output (after repair round)\n\`\`\`\n${fs.readFileSync('gate-out.txt', 'utf8')}\n\`\`\`\n\n## Open questions recorded by S1\n${opens.length ? opens.map(o => '- ' + o).join('\n') : '(none recorded)'}\n\n## Packet\n\`\`\`yaml\n${packet}\n\`\`\`\n`);
+  outcomes.route = 'NEEDS-CLARIFICATION';
+}
+
+// --- S5 (skip when nothing was produced) ---
+if (outcomes.route === 'NEEDS-CLARIFICATION') {
+  log('egress skipped: nothing to debrief until clarification');
+} else {
   checkBudget('s5');
   let s5model = seats.s5;
   for (const [attempt, m] of [['s5', s5model], ['s5-fallback', seats.s5_fallback]]) {
@@ -115,4 +136,5 @@ else {
 }
 
 report();
+if (outcomes.route === 'NEEDS-CLARIFICATION') process.exit(2);
 process.exit(Object.values(outcomes).some(v => v.startsWith('FAIL')) ? 1 : 0);

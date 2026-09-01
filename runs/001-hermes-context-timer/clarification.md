@@ -1,3 +1,12 @@
+# Clarification needed — 001-hermes-context-timer
+
+S4 FAIL verdict:
+
+VERDICT: FAIL
+EVIDENCE: `sync-hermes-context.sh:61-64` invokes `rsync -a --delete` while `sync-hermes-context.sh:66-69` excludes the artifact files from synchronization; this adds undeclared deletion/protection scope and means the destination is not a lossless contents mirror of `SRC/`. `sync-hermes-context.sh:83-85` and `sync-hermes-context.sh:96-98` use `cp -a`/tar without deletion, so fallback behavior diverges from the rsync path and stale destination files are never reconciled. `sync-hermes-context.sh:27-28` appends to `LOG_FILE` even for `--dry-run`; if `HERMES_CONTEXT_LOG` points into `HERMES_CONTEXT_DST`, the required zero-write dry run mutates the destination.
+
+## Packet
+```yaml
 reg: {domain: cs-programming, canon: "shell/systemd ops vocabulary — rsync flags, ExecStart, OnCalendar, systemctl --user, exit codes, env var defaults"}
 intent: >
   goal := build standing sync of Hermes context host->workspace.
@@ -46,3 +55,4 @@ paths:
   - "/workspace/hermes-context/README.md"
   - "/opt/data/workspace/hermes-context/"
 budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+```
