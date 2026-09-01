@@ -1,5 +1,5 @@
 [Unit]
-Description=Hermes context mirror sync
+Description=Hermes context one-way sync (SRC to DST, user-level, no root)
 
 [Service]
 Type=oneshot

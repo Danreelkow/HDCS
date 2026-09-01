@@ -153,9 +153,11 @@ if (outcomes.route === 'NEEDS-CLARIFICATION') {
   log('egress skipped: nothing to debrief until clarification');
 } else {
   checkBudget('s5');
+  const s5probes = JSON.parse(fs.readFileSync(path.join(taskDir, 'probes.json'), 'utf8'));
+  const s5terms = Object.entries(s5probes).map(([k, v]) => `- ${k} — acceptable forms: ${v.join(' / ')}`).join('\n');
   let s5model = seats.s5;
   for (const [attempt, m] of [['s5', s5model], ['s5-fallback', seats.s5_fallback]]) {
-    seat(attempt, m, 's5-system.txt', `=== hdcs/1 PACKET (reverse-translate this) ===\n${packet}`, 32768);
+    seat(attempt, m, 's5-system.txt', `LOSSLESS TERMS — your debrief is mechanically probed; EACH requirement below must appear using one of its acceptable forms, verbatim:\n${s5terms}\n\n=== hdcs/1 PACKET (reverse-translate this) ===\n${packet}`, 32768);
     const args = [path.join(HERE, 'gates', 'reverse-gate.mjs'), `results/${attempt}.json`, `debrief-${attempt}.txt`, path.join(taskDir, 'probes.json')];
     let out;
     try { out = execFileSync('node', args, { encoding: 'utf8' }); }

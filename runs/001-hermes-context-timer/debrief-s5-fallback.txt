@@ -1,43 +1,26 @@
-What we're building: a script that keeps a folder of Hermes context files automatically copied from one location to another, plus the pieces that run it on a schedule.
+**The job**
+Build a standing one-way sync, SRC->DST, keeping /workspace/hermes-context an exact A9-class mirror of /opt/data/workspace/hermes-context/: contents+structure+symlinks, recursive, stale-deleted (A5, A7). The source path is /opt/data/workspace/hermes-context/ (MUST_KEEP); destination default /workspace/hermes-context/ (A1). Engine: rsync --delete; rsync may be absent, so a cp -a fallback must converge, recursively and on both sync paths, to the identical end state — a contents-of-source sync (src/->dst), no nesting (A4). One-way, host->workspace, no write-back (A2).
 
-**Folders involved**
+**Deliverables**
+One artifact dir: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md. Scheduling: systemd user units, no root required — a systemctl --user timer firing every 6 hours via OnCalendar, ExecStart runs the script (A3). The script must also run standalone when systemd is absent. Configuration goes through HERMES_CONTEXT_SRC, HERMES_CONTEXT_DST, HERMES_CONTEXT_LOG; the env-var mechanism is mandated, and shipped defaults are production values, not scope limits (A17).
 
-- The source of truth is `/opt/data/workspace/hermes-context/` on the host.
-- The copy lives at `/workspace/hermes-context/`.
-- The script and docs go in `/workspace/hdcs/hermes-sync/`, the script itself into `~/.local/bin/`, and two small systemd files into `~/.config/systemd/user/`.
-- A simple one-line log of each run goes to `~/.cache/hermes-context/sync.log`.
+**Dry run**
+--dry-run is a dry-run mode that performs no writes: no log, no DST creation, DST left byte-identical or nonexistent (A6, A16). A real run may mkdir -p DST; DST must not be required to pre-exist.
 
-**How it works**
+**Order law**
+stage -> content-verify -> mutate (A13): stage the copy in a mktemp -d area, content-compare it against the A9 class (levels 1–3 only — contents, structure, symlinks; verify FAILs nonzero on mismatch), and only a verified copy may touch DST. Never rm -rf DST before a verified copy exists (A11). The log always lives under ~/.cache/... and never inside DST; entrypoints install at ~/.local/bin or /workspace/hdcs/bin, outside the mirrored tree (A8).
 
-- Copying goes one way only: host to workspace. Nothing is ever written back to the source.
-- The copy is a true mirror: if a file disappears or changes at the source, the copy matches — old files are deleted. The tool of choice is rsync with its delete option; if rsync isn't installed, the script falls back to plain copying (using `cp -a`, with a tar-pipe as a last resort).
-- "Mirror" means files, folder structure, and symbolic links match exactly. It does not promise matching timestamps, permissions metadata, or hardlinks.
-- The script is idempotent: running it again changes nothing if things already match, and it prints one short summary line per run.
+**Guards — closed list; every refusal cites its A-number (A19)**
+- A11: refuse SRC==DST.
+- A12: realpath-based identity/ancestry checks; refuse a symlink into SRC.
+- A14/A15: a generalized owned-concrete-path guard over env-var combinations; beyond-guard combos are documented limitations, and no over-broad parent-wall refusals.
+- A18: refuse empty string, '.', and '/' via component tests; refuse a DST symlink pointing outside SRC; a symlinked DST is replaced by a real tree.
 
-**Scheduling**
+**Severity and scope**
+FAIL covers normal-operation defects only; exotic environments go to KNOWN_LIMITATIONS (A10). No ownership requirements beyond ordinary OS write permission; the path-law list is closed, and inventing extra scope — including ownership — is out (A19).
 
-- A systemd user timer runs the sync every six hours using `systemctl --user`, so no root or admin rights are needed.
-- The script also works fine when run by hand, on its own.
-
-**Dry-run mode**
-
-- There's a dry-run option that performs the entire check but writes absolutely nothing — not even log entries. After a dry run, the destination is either byte-identical to before or didn't exist and still doesn't.
-
-**Safety guards**
-
-- Before any destructive operation, the script checks that the source and destination are genuinely different folders — it refuses to run if they're the same path, one contains the other, or the paths are degenerate (empty, root, etc.). It uses real resolved paths for this comparison, not just the typed strings.
-- Deletions happen safely: changes are staged first, verified, and only then applied to the destination — the destination is never touched until the new state is confirmed good.
-- Scratch/temp files are created only in concrete, owned locations outside the destination folder, with a fallback to the system temp directory if needed.
-- Protecting the source matters more than having the freshest copy: if anything looks risky, the source is left untouched.
-
-**Environment overrides**
-
-- The paths are set as sensible defaults, but they can be overridden with environment variables — that's the intended design, not a loophole. Deployed default paths don't lock the script down.
-
-**Quality bar**
-
-- Bugs that would appear in normal everyday use must be fixed before delivery. Truly exotic edge cases can be documented in a "known limitations" section instead.
+**no_resurrect — prior defects that must not return**
+accumulate-only fallback (A5); probe-only dry-run gate (A6, A16); metadata-in-scope verify (A9); over-broad parent-wall refusals (A15); "DST must pre-exist" (A16); invented scope including ownership (A19).
 
 **Process**
-
-- Work proceeds in phases: plan, build, verify (by someone other than the builder), deliver. If verification fails, there are at most two fix-and-recheck rounds before we stop and report honestly what's done, what was decided, and what's still open.
+Phases: plan, scoped-build, verify, deliver. Builders are chosen dynamically; the verifier is decorrelated from them; gate is READY|NOT_READY; at most 2 fix cycles and 2 questions; roughly 60 lines, token budget an estimate. Handoff: the next seat receives state S_1 (S_0 plus this packet's delta) with a report of work done (+done), answers locked (-resolved), open items (+open), and validation (+validation). Remaining ambiguities (Q17): OPEN.
