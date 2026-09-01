@@ -1,13 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: sync-hermes-context.sh missing
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-(none recorded)
+VERDICT: FAIL
+EVIDENCE: `sync-hermes-context.sh`, lines 44–47: the script unconditionally refuses any `DST_RAW` that is a symlink (`fail "A18" "DST is a symlink..."`). A18 requires allowing a DST symlink when its resolved path passes A12/A14/A15/A18 guards, then replacing it with a real tree; only a symlink resolving into SRC is specifically refused under A12. This valid guarded case is therefore incorrectly rejected, and the README’s guard description likewise omits the required symlink-replacement behavior.
 
 ## Packet
 ```yaml

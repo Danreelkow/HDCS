@@ -170,7 +170,9 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     if (outcomes.s4 !== 'FAIL' || s4round === 1) break;
     // doctrine option (operator-approved 2026-09-01): ONE S4->S3 feedback repair before human routing
     log('S4 FAIL -> feedback repair round (judge evidence fed to builder)');
-    const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `${shared}ACCEPTANCE CONTRACT (gate.sh — every fix MUST keep satisfying this; env names, file names, behaviors):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nGATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding EXCEPT where the verdict contradicts the gate contract or the A-law in SHARED CONTEXT — contract and law win over the verdict):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed the gate — minimal diff):\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 32768);
+    if (state.gate_pass && fs.existsSync('artifact-build.txt')) fs.copyFileSync('artifact-build.txt', 'artifact-build.gatepass.txt');
+    const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `${shared}ACCEPTANCE CONTRACT (gate.sh — every fix MUST keep satisfying this; env names, file names, behaviors):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nGATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding EXCEPT where the verdict contradicts the gate contract or the A-law in SHARED CONTEXT — contract and law win over the verdict):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed the gate — minimal diff, no placeholders, complete valid shell in every section):\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 32768);
+    if (!fb.trim()) { log('s3-feedback: empty response — keeping gate-passing artifacts'); break; }
     fs.writeFileSync('artifact-build.txt', fb);
     for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
     for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
@@ -179,7 +181,16 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
     fs.writeFileSync('gate-out.txt', g);
     log('gate: ' + g.trim().split('\n').pop());
-    if (!(ok && /GATE PASS/.test(g))) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log('feedback repair broke the mechanical gate'); break; }
+    if (!(ok && /GATE PASS/.test(g))) {
+      outcomes.s3 = 'FAIL'; state.gate_pass = false;
+      log('feedback repair broke the mechanical gate');
+      if (fs.existsSync('artifact-build.gatepass.txt')) {
+        fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
+        state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
+        log('restored gate-passing snapshot — next lap repairs from the clean baseline with S4 evidence');
+      }
+      break;
+    }
   }
   if (outcomes.s4 === 'PASS' && !s4valid) { state.s4_pass = true; state.s4_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8')); }
   else if (outcomes.s4 !== 'PASS') state.s4_pass = false;
