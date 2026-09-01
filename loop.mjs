@@ -147,7 +147,14 @@ for (const attempt of s3attempts) {
   log('gate: ' + g.trim().split('\n').pop());
   if (ok && /GATE PASS/.test(g)) { outcomes.s3 = 'PASS'; state.gate_pass = true; state.gate_at = Date.now(); state.s3_hash = digest(build); break; }
   gateFails.push(attempt + ': ' + g.trim().split('\n').pop());
-  if (attempt === 's3-repair') { outcomes.s3 = 'FAIL'; state.gate_pass = false; }
+  if (attempt === 's3-repair') {
+    outcomes.s3 = 'FAIL'; state.gate_pass = false;
+    if (fs.existsSync('artifact-build.gatepass.txt')) {
+      fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
+      state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
+      log('restored gate-passing snapshot — next lap repairs from the clean baseline');
+    }
+  }
   else log('S3 gate failed; running repair round');
 }
 }

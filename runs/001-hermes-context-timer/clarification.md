@@ -1,9 +1,13 @@
 # Clarification needed — 001-hermes-context-timer
 
-S4 FAIL verdict (after feedback repair):
+## Gate output (after repair round)
+```
+GATE FAIL: real run exited nonzero: sync-hermes-context.sh: line 162: mode_unused: unbound variable
 
-VERDICT: FAIL
-EVIDENCE: sync-hermes-context.sh lines 18–19 use `${HERMES_CONTEXT_SRC:-...}` and `${HERMES_CONTEXT_DST:-...}`, so explicitly empty overrides are replaced by defaults instead of being refused under A18. In `compare_mirror()` (approximately lines 55–63), the rsync verification command uses `-L` (`rsync -rLnc`), dereferencing symlinks; therefore it does not enforce A9’s symlink-equivalence class and can accept a regular file containing the symlink target’s bytes as matching the source symlink. The ownership guard (approximately lines 43–54) adds `HERMES_CTX_LOG` itself but not its parent directory, despite A14’s concrete OWNED_PATH definition requiring the log file’s parent to be guarded; a DST nested under a custom log file’s parent but not containing the log file is consequently not refused.
+```
+
+## Open questions recorded by S1
+(none recorded)
 
 ## Packet
 ```yaml
