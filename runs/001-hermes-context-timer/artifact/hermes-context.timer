@@ -1,8 +1,9 @@
 [Unit]
-Description=Run hermes-context contents-sync every 6 hours
+Description=Run hermes-context sync every 6 hours
 
 [Timer]
 OnCalendar=*-*-* 00/6:00:00
+OnUnitActiveSec=6h
 Persistent=true
 Unit=hermes-context.service
 

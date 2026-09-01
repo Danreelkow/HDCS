@@ -57,3 +57,7 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 ## A16 (2026-09-01, operator-delegated): DST lifecycle (run 019 wall calibration)
 - DST may not exist before a run. The script MUST create it (mkdir -p) on real runs; dry-run MUST NOT create it. "DST must pre-exist" is not law — the fixture lifecycle deliberately runs dry-run against an absent DST.
 - Gate probe strengthened: dry-run must leave DST nonexistent (not merely probe-free).
+
+## A17 (2026-09-01, operator-delegated): parameterization vs deployed defaults (judge calibration)
+- The packet's fixed paths (e.g. /opt/data/workspace/hermes-context/) are the DEPLOYED configuration — the values the unit/timer passes at install time. They are NOT a prohibition on env parameterization: HERMES_CONTEXT_SRC/DST env override is the mandated mechanism (gate contract), and the deployed paths are simply its production values.
+- Judges: never read a deployed default as a scope restriction. The S4 verdict that called env override "inventing scope" was WRONG and caused a contract regression in the repair. Contract (gate.sh) and A-law outrank verdicts.

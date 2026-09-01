@@ -1,51 +1,72 @@
-# sync-hermes-context
+# hermes-context sync
 
-One-way contents-sync `SRC -> DST` (never writes back to SRC). Mirror class:
-contents, structure, symlinks. Deletions in SRC propagate to DST. Order is
-stage -> verify (content-compare) -> touch DST, so a failed verify never
-touches DST. Primary transport is rsync; if rsync is absent the script falls
-back to a tar pipe (same end state).
+Standing one-way sync (A2) of the host canonical mount into the workspace:
+exact recursive mirror — file contents + directory structure (recursive) +
+symlinks; NOT metadata/timestamps/hardlinks.
+mirror := A9 class: file contents + directory structure (recursive) + symlinks; NOT metadata/timestamps/hardlinks
 
-## Files
-- `sync-hermes-context.sh` — the sync engine (standalone executable)
-- `hermes-context.service` — systemd --user oneshot unit
-- `hermes-context.timer` — systemd --user timer, fires every 6 hours
+SRC := /opt/data/workspace/hermes-context/  (host canonical mount, MUST_KEEP; fixed, not overridable)
+DST := /workspace/hermes-context/  (override with `HERMES_CONTEXT_DST`)
 
-## Install (user units only, no root)
-1. `install -Dm755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh`
-2. `install -Dm644 hermes-context.service hermes-context.timer -t ~/.config/systemd/user/`
-3. Edit `Environment=` lines in `hermes-context.service` if needed, then:
-   - `systemctl --user daemon-reload`
-   - `systemctl --user enable --now hermes-context.timer`
-   - `systemctl --user list-timers hermes-context.timer` to confirm
+## Install (no root)
 
-Standalone exec (no systemd): the script has built-in defaults
-(`SRC=/opt/data/workspace/hermes-context/`, `DST=/workspace/hermes-context/`),
-so `~/.local/bin/sync-hermes-context.sh` works as-is; both paths are
-env-overridable (see below).
+Install to ~/.local/bin/ (outside the mirrored tree, A8):
 
-## Change the source/destination
-Env vars `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST` override the s0
-defaults, both under systemd (edit the unit's `Environment=` lines) and
-standalone. Log path defaults to `~/.cache/sync-hermes-context.log` and may be
-moved via `HERMES_CTX_LOG` — it is refused if it points inside DST.
+    install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+    mkdir -p ~/.config/systemd/user
+    install hermes-context.service hermes-context.timer ~/.config/systemd/user/
 
-## Dry-run test procedure
-`HERMES_CONTEXT_SRC=... HERMES_CONTEXT_DST=... sync-hermes-context.sh --dry-run`
-prints a one-line plan and performs zero writes — no DST changes, no log file
-created. A missing DST is a valid dry-run input: it reports a full-population
-plan and exits 0 without creating anything. Confirm with checksums or
-`diff -r --no-dereference SRC DST` before and after; they must be
-byte-identical.
+The service runs ExecStart=%h/.local/bin/sync-hermes-context.sh — the unit path
+`%h/.local/bin/sync-hermes-context.sh` must exist; keep script and unit in step.
 
-## Guards
-- SRC == DST (literal or by realpath) aborts before any destructive op.
-- DST at or under a protected path (`/`, `/etc`, `/usr`, `/bin`, `/sbin`,
-  `/var`, `/boot`, `/dev`, `/proc`, `/sys`; override via `HERMES_CTX_PROTECTED`)
-  aborts. Comparison is boundary-aware (path components, not string prefixes).
+Enable the user timer (systemctl --user, no root):
+
+    systemctl --user daemon-reload
+    systemctl --user enable --now hermes-context.timer
+    systemctl --user list-timers hermes-context.timer
+
+## Dry-run test (A6/A16)
+
+`--dry-run` prints the plan and performs ZERO writes — no log entry, and DST is
+never created (it stays byte-identical or nonexistent):
+
+    ~/.local/bin/sync-hermes-context.sh --dry-run
+
+Then do a real run and check the log (one line per real run only):
+
+    ~/.local/bin/sync-hermes-context.sh
+    cat ~/.cache/hermes-context/sync.log
+
+## Semantics
+
+Primary path: `rsync -a --delete` (contents sync, src/ -> dst, no nesting), so
+stale subtrees are deleted at every depth and file<->dir type changes reconcile.
+cp_path := fallback when rsync absent; tar-pipe or cp -a + recursive reconcile; semantics MUST equal rsync_path
+The fallback (tar-pipe from a fresh staging dir, verified, then `cp -a`) reaches
+the identical end state; run with `PATH` stripped of rsync to test parity.
+
+Safety ordering (A11): stage -> content-verify vs SRC -> only then touch DST.
+The script never deletes DST before a verified (content-compared, A13) staging
+copy exists, never writes to SRC, and refuses cleanly (nonzero exit, no writes)
+on: SRC==DST via realpath, ancestor/descendant relation, DST resolving through a
+symlink into SRC, or DST conflicting with owned concrete paths (stage dir,
+resolved log parent dir, entrypoint dir) in EITHER direction — DST inside an
+owned path, or an owned path inside DST — via component-split comparison, not
+string prefix (A12/A14/A15). In particular, a log dir inside DST would violate
+A8 (post-sync log write would modify the mirrored tree) and is refused.
 
 ## KNOWN_LIMITATIONS
-- Exotic env combos only: e.g. very old diffutils lacking `--no-dereference`
-  falls back to plain `diff -r`; filesystems without symlink support cannot
-  honor the symlink part of the mirror class; DST on a read-only mount fails
-  at the touch phase (by design, nonzero exit).
+
+Cited per A10, non-blocking (exotic triggers, not reachable in normal op):
+- A14/A15: adversarial env combos beyond the guard — e.g. `TMPDIR` set to a
+  path that is itself a symlink racing to point inside DST between the mktemp
+  and the realpath check; a DST intermediate component replaced by a symlink
+  into SRC after `realpath -m` but before the copy. Repro notes: run the script
+  with a hostile inotify/timer that swaps symlinks mid-run; the realpath-based
+  guards check at decision time only. Plausible mitigations (open-tree fds) are
+  out of scope here.
+- Log path is fixed to `~/.cache/hermes-context/sync.log`; a `HOME` pointing
+  inside the mirrored tree would be refused by the owned-path guard, not
+  relocated.
+- Fallback path requires GNU `tar` and `cp -a` (preserves symlinks; metadata
+  parity is not required by A9).
