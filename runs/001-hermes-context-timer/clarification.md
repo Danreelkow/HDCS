@@ -2,7 +2,7 @@
 
 ## Gate output (after repair round)
 ```
-GATE FAIL: OnCalendar not a valid repeating cadence: 00/6:00:00 (valid: '*-*-* 00/6:00:00')
+gate.sh: line 57: DSTLINK: unbound variable
 
 ```
 

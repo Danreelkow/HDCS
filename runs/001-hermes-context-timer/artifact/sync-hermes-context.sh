@@ -1,203 +1,216 @@
 #!/usr/bin/env bash
-# sync-hermes-context.sh — one-way host->workspace context mirror (A2/A9)
-# rsync primary; cp/tar fallback converges to identical end state (A5/A7)
-# A13: BOTH paths stage -> content-verify against SRC -> only then touch DST
-# A6/A16: --dry-run performs ZERO writes (no log, no mkdir, no mktemp)
-# A19/A20: refusals cite A-numbers, write nothing; guards precede every write
-# A8: log/stage/entrypoint concrete paths are boundary-checked vs SRC and DST
-# NOTE: uses only portable find/sed/sort (no GNU -printf); filenames containing
-#       newlines/control chars are a documented KNOWN_LIMITATION (A21).
-set -euo pipefail
+# sync-hermes-context.sh — mirror /opt/data/workspace/hermes-context/ (or $HERMES_CONTEXT_SRC)
+# into /workspace/hermes-context/ (or $HERMES_CONTEXT_DST).
+# One-way host->workspace sync (A2). rsync primary, tar fallback (A4), both converge to
+# an exact recursive mirror with stale deletion at all depths (A5/A7).
+# Stage -> content-verify -> touch DST, for BOTH paths (A13). Dry-run is zero-write (A6/A16).
+# Refusals cite the violated law (A19). A DST that is a symlink is refused if it resolves
+# into SRC (A12/A18); otherwise the symlink itself is replaced with a real tree (A18).
+set -u
 
-# --- env parameterization (A17): contract names, deployed defaults ---
-SRC_RAW=${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}
-DST_RAW=${HERMES_CONTEXT_DST:-/workspace/hermes-context}
-LOG_RAW=${HERMES_CTX_LOG:-$HOME/.cache/hermes-context}
+PROG=$(basename "$0")
 
-MODE="${1:-}"
+refuse() { echo "refused: $1: $2" >&2; exit 1; }
+log()    { printf '%s %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*" >> "$LOGFILE" 2>/dev/null || true; }
 
-die() { printf 'refused: %s\n' "$2" >&2; exit "${1:-2}"; }
-
-# --- lexical cleanup before resolution ---
-strip_trailing() {
-  local p=$1
-  while [ -n "$p" ] && [ "$p" != "/" ] && [ "${p%/}" != "$p" ]; do p=${p%/}; done
-  printf '%s' "$p"
-}
-
-# resolve_path: realpath of deepest existing ancestor + not-yet-existing lexical
-# tail — so guards hold for DST/LOG paths that do not exist yet. No writes.
-resolve_path() {
-  local p=$1 cur tail=""
-  if [ -e "$p" ] || [ -L "$p" ]; then realpath -- "$p"; return 0; fi
-  cur=$p
-  while [ ! -e "$cur" ] && [ "$cur" != "/" ]; do
-    tail="/$(basename -- "$cur")$tail"
-    cur=$(dirname -- "$cur")
-  done
-  printf '%s%s' "$(realpath -- "$cur")" "$tail"
-}
-
-# --- A18: degenerate-path refusal BEFORE resolution (component tests) ---
-for _p in "$SRC_RAW" "$DST_RAW"; do
-  case "$(strip_trailing "$_p")" in
-    ""|"."|".."|"/") die 2 "A18: degenerate path '$_p' (empty, '.', '..', or '/'); nothing was written" ;;
+# --- 1a. parameters (A17: env override is the contract mechanism) -----------------
+DRY_RUN=0
+VERIFY_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run)  DRY_RUN=1 ;;
+    --verify)   VERIFY_ONLY=1 ;;
+    *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
-SRC=$(resolve_path "$(strip_trailing "$SRC_RAW")")
-DST=$(resolve_path "$(strip_trailing "$DST_RAW")")
-LOG_DIR=$(resolve_path "$(strip_trailing "$LOG_RAW")")
-[ "$SRC" = "/" ] && die 2 "A18: source resolves to '/'"
-[ "$DST" = "/" ] && die 2 "A18: destination resolves to '/'"
 
-# --- guards: everything below writes nothing (A19/A20) ---
-[ -d "$SRC" ] || die 2 "A1: source '$SRC' does not exist or is not a directory"
+SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
+DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
 
-# A12: realpath identity / ancestor / descendant / DST-inside-SRC, both ways
-if [ "$DST" = "$SRC" ] || [ "${DST#"$SRC"/}" != "$DST" ] \
-   || [ "${SRC#"$DST"/}" != "$SRC" ]; then
-  die 2 "A12: SRC '$SRC' and DST '$DST' are equal or ancestor/descendant (realpath-resolved)"
+# canonicalize once (strip trailing slashes); all later mutation goes through these
+while [ "$SRC" != "${SRC%/}" ]; do SRC="${SRC%/}"; done
+while [ "$DST" != "${DST%/}" ]; do DST="${DST%/}"; done
+
+# --- 1b. guards: BEFORE any write; component-split / realpath based ---------------
+
+# A18: degenerate paths (component tests, not slash-suffix strings)
+for p in "$SRC" "$DST"; do
+  [ -n "$p" ]          || refuse "A18" "degenerate path (empty) rejected"
+  [ "$p" != "." ]      || refuse "A18" "degenerate path '.' rejected"
+  [ "$p" != "/" ]      || refuse "A18" "degenerate path '/' rejected"
+done
+
+# boundary-aware containment (component split, never string-prefix) (A15)
+contains() { # contains ANCESTOR PATH -> true if PATH == ANCESTOR or inside it
+  [ "$2" = "$1" ] && return 0
+  case "$2" in "$1"/*) return 0 ;; esac
+  return 1
+}
+
+# A12: realpath identity / ancestor / descendant / DST-resolves-into-SRC
+RSRC=$(realpath "$SRC" 2>/dev/null) || refuse "A12" "source path does not resolve: $SRC"
+RDST=$(realpath -m "$DST" 2>/dev/null) || refuse "A12" "destination path does not resolve: $DST"
+[ "$RSRC" != "$RDST" ] || refuse "A12" "realpath(SRC) == realpath(DST): $RSRC"
+contains "$RSRC" "$RDST" && refuse "A12" "DST ($RDST) is inside or resolves into SRC ($RSRC)"
+contains "$RDST" "$RSRC" && refuse "A12" "SRC ($RSRC) is inside DST ($RDST)"
+
+# A18: DST itself a symlink — if it resolves into SRC the A12 check above already
+# refused; otherwise record it so the replace step removes the LINK, never its target.
+DST_IS_LINK=0
+[ -L "$DST" ] && DST_IS_LINK=1
+
+# A14/A15: owned concrete instantiated paths — log dir parent, stage path, entrypoint dir
+# stage path computed by PURE string computation, no mktemp/mkdir/write yet (A20)
+LOGDIR="$HOME/.cache/hermes-context"
+LOGFILE="$LOGDIR/sync.log"
+STAGE_PARENT="$LOGDIR"
+STAGE="$STAGE_PARENT/.hc-stage.$$"
+
+# entrypoint dir (concrete resolved dir of this script) must not touch the mirror
+SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd) || SCRIPT_DIR=""
+if [ -n "$SCRIPT_DIR" ]; then
+  contains "$RDST" "$SCRIPT_DIR" && refuse "A14" "entrypoint dir ($SCRIPT_DIR) is inside DST — sync would delete its own entrypoint (A8)"
+  contains "$SCRIPT_DIR" "$RDST" && refuse "A14" "entrypoint dir ($SCRIPT_DIR) contains DST"
+  contains "$RSRC" "$SCRIPT_DIR" && refuse "A14" "entrypoint dir ($SCRIPT_DIR) is inside SRC"
 fi
 
-# A14/A15: concrete owned paths (log FILE parent, stage parent, entrypoint dir)
-# boundary-checked (component split) vs realpath(DST)/realpath(SRC).
-owned_collision() { # $1=owned resolved path  $2=label
-  local p=$1 label=$2
-  [ "$p" = "$DST" ] || [ "${p#"$DST"/}" != "$p" ] && \
-    die 2 "A14/A15: $label '$p' collides with DST '$DST' boundary"
-  [ "$p" = "$SRC" ] || [ "${p#"$SRC"/}" != "$p" ] && \
-    die 2 "A14/A15: $label '$p' collides with SRC '$SRC' boundary"
-}
-owned_collision "$LOG_DIR" "log directory"
+# log dir / stage parent (concrete instantiated path) must not touch SRC or DST boundaries
+for owned in "$LOGDIR" "$STAGE_PARENT"; do
+  contains "$RDST" "$owned" && refuse "A14" "owned path ($owned) is inside DST (A8: log/stage never inside mirrored tree)"
+  contains "$owned" "$RDST" && refuse "A14" "owned path ($owned) contains DST"
+  contains "$RSRC" "$owned" && refuse "A14" "owned path ($owned) is inside SRC"
+  contains "$owned" "$RSRC" && refuse "A14" "owned path ($owned) contains SRC"
+done
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd) || SCRIPT_DIR=""
-[ -n "$SCRIPT_DIR" ] && owned_collision "$SCRIPT_DIR" "entrypoint directory"
-# stage parent == LOG_DIR (validated above); stage name reserved (A20):
-#   mktemp -d "$LOG_DIR/.hc-stage.XXXXXX" is created ONLY after all guards pass.
-# env-var-pointed stage/log beyond these owned paths: KNOWN_LIMITATIONS (A14).
+# --- 1c. dry-run: plan to stdout ONLY, zero side effects (A6/A16) -----------------
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "dry-run plan (no writes performed):"
+  echo "  source:      $SRC -> $RSRC"
+  echo "  destination: $DST -> $RDST"
+  [ "$DST_IS_LINK" -eq 1 ] && echo "  note:        DST is a symlink; it will be replaced with a real tree (A18)"
+  echo "  strategy:    $(command -v rsync >/dev/null 2>&1 && echo 'rsync -a --delete (primary)' || echo 'tar-pipe fallback + recursive reconcile')"
+  echo "  actions:     stage contents of SRC, content-verify, then replace DST wholesale (stale entries deleted at any depth)"
+  echo "  log:         $LOGFILE (not written in dry-run)"
+  exit 0
+fi
 
-# --- helpers ---
-type_of() {
-  if [ -L "$1" ]; then printf 'l'
-  elif [ -d "$1" ]; then printf 'd'
-  elif [ -e "$1" ]; then printf 'f'
-  else printf 'x'; fi
-}
+# --- --verify: compare existing DST against SRC, MIRROR class, nonzero on mismatch
+if [ "$VERIFY_ONLY" -eq 1 ]; then
+  verify_copy() { # $1=src $2=dst ; recursive content/type/symlink-target comparison
+    local s=$1 d=$2 rel
+    [ -d "$d" ] || return 1
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      if [ -L "$s/$rel" ]; then
+        [ -L "$d/$rel" ] || return 1
+        [ "$(readlink "$s/$rel")" = "$(readlink "$d/$rel")" ] || return 1
+      elif [ -d "$s/$rel" ]; then
+        { [ -d "$d/$rel" ] && [ ! -L "$d/$rel" ]; } || return 1
+      elif [ -f "$s/$rel" ]; then
+        { [ -f "$d/$rel" ] && [ ! -L "$d/$rel" ]; } || return 1
+        cmp -s "$s/$rel" "$d/$rel" || return 1
+      fi
+    done < <(cd "$s" && find . -mindepth 1 | sed 's|^\./||' | LC_ALL=C sort)
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      if [ ! -e "$s/$rel" ] && [ ! -L "$s/$rel" ]; then return 1; fi
+    done < <(cd "$d" && find . -mindepth 1 | sed 's|^\./||')
+    return 0
+  }
+  if [ ! -d "$RDST" ]; then
+    echo "verify failed: destination does not exist: $DST" >&2
+    exit 1
+  fi
+  if verify_copy "$RSRC" "$RDST"; then
+    echo "verify OK: DST matches SRC (contents, recursive dirs, symlinks)"
+    exit 0
+  else
+    echo "verify failed: DST does not match SRC (A9)" >&2
+    exit 1
+  fi
+fi
 
-# newline-delimited sorted "type relpath" listing (portable: no find -printf).
-# Newline-in-filename safety is out of scope (A21 KNOWN_LIMITATIONS).
-tree_list() { # $1=tree root -> stdout
-  (cd "$1" 2>/dev/null || exit 9
-   find . -mindepth 1 -type d | sed 's|^|d |'
-   find . -mindepth 1 -type f | sed 's|^|f |'
-   find . -mindepth 1 -type l | sed 's|^|l |') | LC_ALL=C sort
-}
+# --- 1d. real run: now (and only now) create owned paths and DST -------------------
+STAGE_CREATED=""
+cleanup() { [ -n "$STAGE_CREATED" ] && rm -rf "$STAGE"; }
+trap cleanup EXIT
 
-# structure + content + symlink-target mismatches between two trees (A9/A13)
-list_mismatches() { # $1=src $2=dst -> stdout lines "create|delete|update: path"
-  local a=$1 b=$2 line t p
-  comm -23 <(tree_list "$a") <(tree_list "$b") | sed 's/^[a-z] /create: /'
-  comm -13 <(tree_list "$a") <(tree_list "$b") | sed 's/^[a-z] /delete: /'
-  comm -12 <(tree_list "$a") <(tree_list "$b") | while IFS= read -r line; do
-    t=${line%% *}; p=${line#* }
-    case $t in
-      f) cmp -s -- "$a/$p" "$b/$p" || printf 'update: %s\n' "$p" ;;
-      l) [ "$(readlink -- "$a/$p")" = "$(readlink -- "$b/$p")" ] || printf 'update: %s\n' "$p" ;;
-    esac
-  done
+mkdir -p "$LOGDIR" || { echo "cannot create log dir $LOGDIR" >&2; exit 1; }
+mkdir -p "$STAGE_PARENT" || { echo "cannot create stage parent $STAGE_PARENT" >&2; exit 1; }
+mkdir -p "$STAGE" || { echo "cannot create stage $STAGE" >&2; exit 1; }
+STAGE_CREATED=1
+
+log "run start src=$RSRC dst=$RDST"
+
+# --- 1e. build MIRROR-class staged copy --------------------------------------------
+if command -v rsync >/dev/null 2>&1; then
+  # primary: contents of SRC into stage, delete anything extra, symlinks preserved as links
+  rsync -a --delete --copy-links=no "$SRC/" "$STAGE/" \
+    || { log "FAIL rsync staging"; echo "rsync staging failed" >&2; exit 1; }
+else
+  # A4/A7 fallback: tar-pipe, then recursive reconcile deleting stale entries at all depths
+  tar -C "$SRC" -cf - . | tar -C "$STAGE" -xf - \
+    || { log "FAIL tar staging"; echo "tar fallback staging failed" >&2; exit 1; }
+  # reserved-namespace prunelist via mktemp (A20); reconcile all depths (A7)
+  PLIST=$(mktemp "$STAGE/.prunelist.XXXXXX") || { log "FAIL prunelist mktemp"; exit 1; }
+  ( cd "$STAGE" && find . -mindepth 1 ! -name '.prunelist*' ! -path './.prunelist*' ) \
+    | sed 's|^\./||' | LC_ALL=C sort > "$PLIST"
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    if [ ! -e "$SRC/$rel" ] && [ ! -L "$SRC/$rel" ]; then
+      rm -rf -- "${STAGE:?}/$rel"
+    fi
+  done < "$PLIST"
+  rm -f "$PLIST"
+fi
+
+# --- 1f. content-verify stage vs SRC (A9/A13): FAIL nonzero, never warn-exit-0 -----
+verify_stage() {
+  local rel
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    if [ -L "$RSRC/$rel" ]; then
+      [ -L "$STAGE/$rel" ] || return 1
+      [ "$(readlink "$RSRC/$rel")" = "$(readlink "$STAGE/$rel")" ] || return 1
+    elif [ -d "$RSRC/$rel" ]; then
+      { [ -d "$STAGE/$rel" ] && [ ! -L "$STAGE/$rel" ]; } || return 1
+    elif [ -f "$RSRC/$rel" ]; then
+      { [ -f "$STAGE/$rel" ] && [ ! -L "$STAGE/$rel" ]; } || return 1
+      cmp -s "$RSRC/$rel" "$STAGE/$rel" || return 1
+    fi
+  done < <(cd "$RSRC" && find . -mindepth 1 | sed 's|^\./||' | LC_ALL=C sort)
+  while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    if [ ! -e "$RSRC/$rel" ] && [ ! -L "$RSRC/$rel" ]; then return 1; fi
+  done < <(cd "$STAGE" && find . -mindepth 1 ! -name '.prunelist*' | sed 's|^\./||')
   return 0
 }
 
-tree_cmp() { [ -z "$(list_mismatches "$1" "$2")" ]; }
+if ! verify_stage; then
+  log "FAIL staging verification mismatch (A9/A13) — DST untouched"
+  echo "staged copy failed content verification against SRC; DST left untouched" >&2
+  exit 1
+fi
+log "staged copy content-verified (VERIFIED_COPY exists)"
 
-# --- dry-run (A6/A16): stdout-only plan; no log write, no mkdir, no mktemp ---
-dry_run() {
-  list_mismatches "$SRC" "$DST" \
-    | sed -e 's/^create:/would-create:/' -e 's/^delete:/would-delete:/' \
-          -e 's/^update:/would-update:/'
-  echo "dry-run complete: no writes performed (A6/A16)"
-  exit 0
-}
-
-# --- verify subcommand: recursive SRC vs DST compare, nonzero on mismatch ---
-verify_cmd() {
-  if [ ! -d "$DST" ]; then
-    echo "VERIFY FAIL: DST '$DST' does not exist — not a mirror of SRC (A9)" >&2
-    exit 1
-  fi
-  local bad
-  bad=$(list_mismatches "$SRC" "$DST")
-  if [ -n "$bad" ]; then
-    echo "VERIFY FAIL: DST does not mirror SRC (A9). Mismatched paths:" >&2
-    printf '%s\n' "$bad" >&2
-    exit 1
-  fi
-  echo "verify OK: DST mirrors SRC (contents+structure+symlinks)"
-  exit 0
-}
-
-# --- staging (A13, BOTH paths): copy SRC -> stage, verify stage, print path ---
-build_verified_stage() {
-  local STAGE
-  mkdir -p "$LOG_DIR"
-  STAGE=$(mktemp -d "$LOG_DIR/.hc-stage.XXXXXX")   # reserved namespace (A20)
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "$SRC/" "$STAGE/"            # contents of SRC, no nesting
-  elif command -v tar >/dev/null 2>&1; then
-    (cd "$SRC" && tar -cf - .) | (cd "$STAGE" && tar -xf -)
-  else
-    cp -a "$SRC/." "$STAGE/"
-  fi
-  if ! tree_cmp "$SRC" "$STAGE"; then
-    rm -rf -- "$STAGE"
-    echo "ERROR (A13/A9): staging verification failed; DST untouched" >&2
-    exit 3
-  fi
-  printf '%s' "$STAGE"
-}
-
-# --- apply verified staging to DST (--delete semantics incl. fallback, A5/A7) ---
-apply_stage() {
-  local STAGE=$1 rel sp dp
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete "$STAGE/" "$DST/"
-    return 0
-  fi
-  # fallback: delete stale / type-mismatched DST entries at all depths (A7)
-  while IFS= read -r rel; do
-    rel=${rel#./}
-    [ -z "$rel" ] && continue
-    sp="$SRC/$rel"; dp="$DST/$rel"
-    if [ -L "$dp" ] || [ -e "$dp" ]; then
-      if { [ ! -e "$sp" ] && [ ! -L "$sp" ]; } || [ "$(type_of "$sp")" != "$(type_of "$dp")" ]; then
-        rm -rf -- "$dp"
-      fi
-    fi
-  done < <(cd "$DST" && find . -mindepth 1)
-  cp -a "$STAGE/." "$DST/"
-}
-
-# --- real-run sync ---
-sync_real() {
-  local STAGE mode=fallback
-  command -v rsync >/dev/null 2>&1 && mode=rsync
-  STAGE=$(build_verified_stage)          # A13: verified BEFORE DST is touched
-  if [ -L "$DST" ]; then rm -f -- "$DST"; fi   # A18: replace symlink w/ real tree
-  mkdir -p "$DST"                        # A16: real run only
-  apply_stage "$STAGE"
-  rm -rf -- "$STAGE"
-  if ! tree_cmp "$SRC" "$DST"; then      # A9 post-sync self-check
-    echo "ERROR: post-sync verification failed (A9)" >&2
-    exit 3
-  fi
-  printf '%s sync OK src=%s dst=%s mode=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
-    "$SRC" "$DST" "$mode" >> "$LOG_DIR/sync.log"   # real runs only (A8)
-}
-
-case "$MODE" in
-  --dry-run) dry_run ;;
-  --verify|verify) verify_cmd ;;
-  "") sync_real ;;
-  *) echo "usage: $0 [--dry-run|--verify]" >&2; exit 2 ;;
-esac
+# --- 1g. only after verified copy: replace DST (A11/A18) ---------------------------
+mkdir -p "$(dirname "$RDST")"
+if [ "$DST_IS_LINK" -eq 1 ]; then
+  # A18: DST was a symlink passing guards — replace the LINK itself with a real
+  # tree; never rm -rf through the link (that would hit its resolved target).
+  rm -f -- "$DST"
+else
+  rm -rf -- "$RDST"   # guards already ensured DST is not SRC or inside/containing it
+fi
+if mv "$STAGE" "$RDST" 2>/dev/null; then
+  STAGE_CREATED=""
+else
+  # cross-filesystem: copy out of stage, then remove stage
+  mkdir -p "$RDST" || { log "FAIL cross-fs DST create"; exit 1; }
+  cp -a "$STAGE/." "$RDST/" || { log "FAIL cross-fs copy"; exit 1; }
+  rm -rf "$STAGE"
+  STAGE_CREATED=""
+fi
+log "run complete: DST replaced with verified mirror of SRC"
+exit 0
 

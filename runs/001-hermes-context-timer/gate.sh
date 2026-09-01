@@ -54,7 +54,7 @@ rm -rf "$SRC" "$DST"; mkdir -p "$SRC/sub"; printf 't\n' > "$SRC/sub/f"
 TSOUT=$(HERMES_CONTEXT_SRC="$SRC/" HERMES_CONTEXT_DST="$DST/" bash sync-hermes-context.sh 2>&1) || fail "trailing-slash run exited nonzero: $TSOUT"
 cmp -s "$SRC/sub/f" "$DST/sub/f" || fail "trailing-slash DST: initial sync did not converge (canonicalize DST/SRC once, mutate only through canonical forms)"
 # A12/realpath fixture (run 028 S4 findings): symlinked ANCESTOR of DST resolving into SRC must be refused (realpath guards, not lexical prefixes); --verify must FAIL when DST is absent
-rm -rf "$SRC" "$DST" "$DSTLINK"; mkdir -p "$SRC/sub"; printf 'v\n' > "$SRC/sub/f"; mkdir -p "$(dirname "$DST")/shadow"; ln -s "$SRC" "$(dirname "$DST")/shadow/inner"
+rm -rf "$SRC" "$DST" "$(dirname "$DST")/shadow"; mkdir -p "$SRC/sub"; printf 'v\n' > "$SRC/sub/f"; mkdir -p "$(dirname "$DST")/shadow"; ln -s "$SRC" "$(dirname "$DST")/shadow/inner"
 SAOUT=$(HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$(dirname "$DST")/shadow/inner/dst" bash sync-hermes-context.sh 2>&1)
 [ $? -eq 0 ] && fail "symlinked DST ancestor resolving into SRC was accepted (A12: realpath-based guards required, lexical prefixes are bypassable)"
 [ -e "$SRC/sub/f" ] && cmp -s "$SRC/sub/f" <(printf 'v\n') || fail "symlink-ancestor run wrote into SRC"
