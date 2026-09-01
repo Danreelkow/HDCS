@@ -1,27 +1,25 @@
 defs:
-  SRC := realpath(${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/})
-  DST := realpath(${HERMES_CONTEXT_DST:-/workspace/hermes-context/})
-  sync_ps := [rsync --delete path, cp-fallback/tar-pipe path with recursive reconcile]
-  mirror := exact content+structure+symlink equivalence, recursive, per A9 class (¬metadata, ¬timestamps, ¬hardlink topology)
+  SRC := $HERMES_CONTEXT_SRC, default /opt/data/workspace/hermes-context/
+  DST := $HERMES_CONTEXT_DST, default /workspace/hermes-context/
+  ART := artifact dir containing sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md
+  LOG := one-line run summary, path via HERMES_CONTEXT_LOG, default ~/.cache/, NEVER ∈ DST
+  rsync_path := rsync -a --delete (contents of SRC -> DST, trailing-slash src/)
+  cp_path := fallback when rsync absent; tar-pipe or cp -a + recursive reconcile
 invariants:
-  A1: SRC := /opt/data/workspace/hermes-context/, DST := /workspace/hermes-context/ (exists, holds INDEX.md, agents/, config/)
-  A2: sync direction host -> workspace, one-way; ¬∃ writeback to SRC
-  A3: units := systemctl --user; script standalone-runnable (cron/ installer callable) when ¬systemd
-  A4: rsync-missing -> cp -a / tar-pipe fallback; sync CONTENTS src/ -> dst, ¬nest src inside dst
-  A5_mirror: ∀ sync_path -> DST end state == exact mirror of SRC, recursive; stale DELETED, ¬accumulate-only
-  A6_purity: ∀ run with --dry-run -> zero writes ∀ kind incl. log files; DST byte-identical pre/post dry-run
-  A7: A5 recursive — cp-fallback deletes stale subtrees ∀ depth (≡ rsync --delete); README sync-strategy states this
-  A8_placement: log := outside DST ∀ (default ~/.cache/hermes-context/log); install paths := ~/.local/bin or /workspace/hdcs/bin, ¬artifact/ inside DST; sync ¬deletes/moves own entrypoints
-  A9_class: verify(contents ∧ structure ∧ symlinks, recursive); mismatch -> exit ¬0, ¬warn-exit-0; metadata complaints out-of-scope
-  A10_bar: FAIL iff defect reachable in normal operation (default config, documented usage, plausible data-losing misconfig); exotic triggers -> KNOWN_LIMITATIONS in +open with repro notes; judge cites ∀ findings, bar classifies ¬suppresses
-  A11_destructive: guard SRC==DST (reject/clean no-op); ¬rm -rf DST before verified copy of SRC exists elsewhere; source survival > mirror freshness
-  A12_identity: compare realpath identity ¬string equality; refuse (clean ¬0, ¬writes) iff realpath(SRC)==realpath(DST) ∨ ancestor/descendant relation ∨ DST resolves through symlink into SRC; applies ∀ sync paths before ∀ destructive op
-  A13_order: stage -> verify (content-compare vs SRC, A9 class; ¬non-emptiness) -> only then touch DST; staging-verify fail -> exit ¬0; README ¬calls unverified copy "verified"
+  A1: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (exists, holds INDEX.md, agents/, config/)
+  A2: ∀ sync -> direction host->workspace one-way; ¬∃ writeback to SRC
+  A3: units are systemctl --user; ¬root; script standalone-capable (cron/caller invokes directly)
+  A4: script detects rsync absence -> cp_path fallback; sync CONTENTS (src/ -> dst), ¬nest SRC inside DST
+  A5_mirror: ∀ path ∈ {rsync_path, cp_path} -> DST end state == SRC end state exactly; stale files DELETED, ¬accumulate-only
+  A6_purity: --dry-run -> ZERO writes ∀ kind incl. logs; DST byte-identical post-dry-run
+  A7_recursive: reconcile deletes stale subtrees ∀ depth; recursive convergence both paths
+  A8_placement: LOG ∉ DST ∀ mode; install paths ∉ mirrored tree (~/.local/bin or /workspace/hdcs/bin); sync never deletes/moves own entrypoints
+  A9_class: mirror ≡ {file contents, dir structure (recursive), symlinks}; ∉ class: metadata, timestamps, hardlink topology; self-verify FAIL(nonzero) on mismatch, ¬warn-exit-0
+  A10_bar: FAIL only on defects reachable in normal operation; exotic triggers -> KNOWN_LIMITATIONS (+open), classify ¬suppress
+  A11_guard: guard SRC==DST; ∀ rm -rf DST -> precondition ∃ verified copy of SRC elsewhere; SRC survival > freshness
+  A12_identity: compare realpath(SRC) vs realpath(DST); refuse(clean nonzero, no writes) if equal ∨ ancestor/descendant ∨ DST resolves through symlink into SRC; enforced ∀ path pre-destructive
+  A13_verified: verified := contents+structure+symlinks (A9 class) compared vs SRC ∧ match; ¬non-emptiness; order: stage -> verify -> touch DST; README ¬call unverified copy "verified"
 open:
-  KNOWN_LIMIT: newline-in-filename corpora
-  KNOWN_LIMIT: hostile env combos (e.g. DST -> log dir) per A10 classification
+  KNOWN_LIMITATIONS: newline-in-filename corpora; hostile env (DST := log dir); per A10 non-blocking
 validation:
-  V1: dry-run byte-identity gate on DST (A6)
-  V2: mirror equality check contents+structure+symlinks recursive, nonzero exit on mismatch (A5/A7/A9)
-  V3: path-identity guard unit-test: same realpath, ancestor, symlinked-into cases (A12)
-  V4: destructive-op sequencing audit: ¬touch DST pre staging-verify (A11/A13)
+  dry-run byte-identity gate; recursive mirror equality both paths; realpath guards; staging verify gate

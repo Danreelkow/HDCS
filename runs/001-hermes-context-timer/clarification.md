@@ -3,53 +3,49 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: hermes-context.timer:6 defines `OnCalendar=0 */6:00:00`, which is not a valid systemd calendar expression for a six-hour cadence; the user timer therefore cannot reliably load/run. The README repeats the same invalid expression at the install instructions’ timer description and does not provide a valid alternative such as `*-*-* 00/6:00:00`.
+EVIDENCE: `sync-hermes-context.sh`, cp_path reconciliation block (the `comm -z -13 ... "$WORK/stale.list"` loop followed by `cp -a "$STAGE/." "$RDST/"`): stale detection removes only paths absent from the stage, not paths whose type changes. For example, if SRC contains regular file `x` while DST contains directory `x`, `x` appears in both listings, is not removed, and `cp -a` cannot replace the directory with the file; the fallback therefore does not converge to the exact A5/A7 mirror end state. The analogous source-directory/DST-file transition is also not reconciled.
 
-EVIDENCE: sync-hermes-context.sh:107-125 implements `tree_compare` using `[ -d "$b/$p" ]` and `[ -f "$b/$p" ]`, which follow symlinks, so a directory/file replaced by a symlink to a matching directory/file can be accepted as structurally equal. This violates A9’s recursive contents+structure+symlink equivalence requirement.
-
-EVIDENCE: sync-hermes-context.sh:126-137 only enumerates candidate entries of types directory, regular file, and symlink, and likewise only records those types from SRC at lines 93-105. Special filesystem entries in SRC (for example FIFOs) are neither verified nor rejected as extras, so the script can report success without an exact recursive structure mirror.
-
-EVIDENCE: sync-hermes-context.sh:36 sets `LOG_FILE` directly from `HERMES_CTX_LOG`, and README.md “Safety guards” permits that override without checking it is outside DST. A user setting `HERMES_CTX_LOG` inside `/workspace/hermes-context/` causes the log to be within the tree that lines 162-163 recursively delete, violating A8’s requirement that logs are always outside DST.
+`README.md`, Install section: it states the script may be installed at either `~/.local/bin/sync-hermes-context.sh` or `/workspace/hdcs/bin/`, but `hermes-context.service`, `[Service]` `ExecStart=%h/.local/bin/sync-hermes-context.sh`, supports only the former location. Installing at the documented second location produces a user service that cannot start.
 
 ## Packet
 ```yaml
-reg: {domain: cs-programming/ops-tooling, canon: shell/systemd vocabulary — rsync flags, realpath, systemctl --user units, OnCalendar, idempotence, exit codes}
+reg: {domain: cs-devops-scripting, canon: shell/systemd/rsync vocabulary — rsync flags (--delete, --dry-run), systemctl --user unit directives (OnCalendar, WantedBy=default.target), POSIX test/realpath/tar, env-var defaults, exit codes}
 intent: >
-  Build artifact dir delivering standing fresh sync of Hermes context SRC -> DST:
-  sync-hermes-context.sh (rsync primary, cp-fallback, --dry-run pure, idempotent,
-  guarded per A11/A12/A13, one-line log per real run), hermes-context.service +
-  hermes-context.timer (systemd USER, 6h cadence), README.md (install, source change,
-  dry-run test, correct sync-strategy semantics). Both sync paths converge to exact
-  mirror per A9 class, recursive.
+  standing sync service keeping DST=$HERMES_CONTEXT_DST (default /workspace/hermes-context/)
+  an exact A9-class mirror of SRC=$HERMES_CONTEXT_SRC (default /opt/data/workspace/hermes-context/),
+  host->workspace one-way, via rsync_path (--delete) with cp_path fallback (recursive reconcile),
+  systemd USER timer every 6h, script standalone-capable, --dry-run zero-write,
+  self-verifying (nonzero exit on mismatch), guards A11/A12/A13 pre-destructive;
+  artifact := {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
 must_keep:
   - "source path is /opt/data/workspace/hermes-context/"
   - "dry-run mode that performs no writes"
   - "systemd user units, no root required"
 resolved:
-  - "Q1: canonical source path? -> A: /opt/data/workspace/hermes-context/ (A1, kb-confirmed)"
-  - "Q2: sync direction? -> A: host -> workspace one-way, no writeback (A2)"
-  - "Q3: systemd scope? -> A: user units via systemctl --user; script also standalone-runnable (A3)"
-  - "Q4: rsync unavailable? -> A: cp -a / tar-pipe fallback with identical mirror semantics (A4)"
-  - "Q5: stale file policy? -> A: exact mirror, stale DELETED both paths (A5, A7 recursive)"
-  - "Q6: dry-run logging? -> A: zero writes incl. logs; DST byte-identical post dry-run (A6)"
-  - "Q7: log/install placement? -> A: log outside DST always (~/.cache default); entrypoints outside mirrored tree (A8)"
-  - "Q8: mirror equivalence class? -> A: contents+structure+symlinks recursive only; metadata/hardlinks out-of-scope; verify fails nonzero on mismatch (A9)"
-  - "Q9: severity bar? -> A: fail on normal-operation defects only; exotic -> +open KNOWN_LIMITATIONS (A10)"
-  - "Q10: destructive misconfig? -> A: SRC==DST guarded; no rm -rf DST pre verified copy (A11)"
-  - "Q11: identity check form? -> A: realpath-based incl. ancestor/descendant + symlink-through-SRC, clean nonzero refusal (A12)"
-  - "Q12: verified copy definition? -> A: content-compared staging (A9 class) vs SRC; order stage->verify->touch DST (A13)"
+  - "Q1: canonical SRC/DST paths? -> A: SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/ (A1)"
+  - "Q2: sync direction? -> A: host->workspace one-way, no writeback (A2)"
+  - "Q3: scheduling mechanism? -> A: systemctl --user; script also works standalone without systemd (A3)"
+  - "Q4: behavior when rsync absent? -> A: fallback cp -a / tar-pipe with identical recursive-mirror semantics (A4)"
+  - "Q5: stale-file semantics? -> A: exact mirror, --delete equivalent, recursive subtree deletion both paths (A5/A7)"
+  - "Q6: dry-run scope? -> A: zero writes of any kind incl. logs; DST byte-identical after (A6)"
+  - "Q7: log/install placement? -> A: log outside DST always (default ~/.cache); installs outside mirrored tree (A8)"
+  - "Q8: mirror equivalence class? -> A: contents+structure+symlinks recursive only; metadata/timestamps/hardlinks excluded; verify fails nonzero (A9)"
+  - "Q9: severity bar? -> A: A10 normal-operation FAILs only; exotics -> KNOWN_LIMITATIONS"
+  - "Q10: destructive guards? -> A: SRC==DST + realpath identity/ancestor guards; stage->verify(A13)->touch DST order (A11/A12/A13)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
 handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
 constraints:
-  - "MUST_KEEP verbatim: source path is /opt/data/workspace/hermes-context/"
-  - "MUST_KEEP verbatim: dry-run mode that performs no writes"
-  - "MUST_KEEP verbatim: systemd user units, no root required"
-  - "A11/A12/A13 guards precede any destructive op; no_resurrect: unverified-copy-as-verified, accumulate-only-fallback, log-inside-DST"
-  - "A9 verify: nonzero exit on mismatch, never warn-exit-0"
+  - "mk units USER-level only (systemctl --user, WantedBy=default.target); no root"
+  - "rsync_path := rsync -a --delete with src/ trailing slash; cp_path reconciles recursively to identical end state (A5/A7)"
+  - "--dry-run: zero writes incl. HERMES_CONTEXT_LOG inside DST; gate = DST byte-identical post-run (A6)"
+  - "LOG path defaults ~/.cache/, never inside DST; installed entrypoints never inside mirrored tree (A8)"
+  - "A11/A12/A13 guards: realpath identity + ancestor/descendant check before ANY destructive op; stage->content-verify->touch DST; SRC survival outranks freshness"
+  - "self-verification exits nonzero on A9-class mismatch; never warn-and-exit-0"
+  - "no_resurrect: A5_mirror, A6_purity, A7_recursive, A9_class, A11_guard, A12_identity, A13_verified"
 paths:
-  - "/opt/data/workspace/hermes-context/ (SRC)"
-  - "/workspace/hermes-context/ (DST)"
-  - "~/.cache/hermes-context/ (log, A8)"
-  - "~/.local/bin or /workspace/hdcs/bin (install, A8)"
+  - "/workspace/hermes-context/ (DST, exists: INDEX.md, agents/, config/)"
+  - "/opt/data/workspace/hermes-context/ (SRC, canonical host mount)"
+  - "~/.cache/hermes-context-sync.log (default LOG, outside DST)"
+  - "~/.config/systemd/user/hermes-context.service, ~/.config/systemd/user/hermes-context.timer"
 budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
 ```
