@@ -1,70 +1,76 @@
 # hermes-context sync
 
-One-way host -> workspace mirror of the hermes context tree (A2): contents,
-recursive directory structure, and symlinks — no metadata/timestamps/hardlinks
-(MIRROR class). Stale entries in the destination are deleted at every depth
-(A5/A7).
-
-## Paths
-
-- SRC default: `/opt/data/workspace/hermes-context/`
-- DST default: `/workspace/hermes-context/`
-- Override via env (A17, mandated contract mechanism):
-  - `HERMES_CONTEXT_SRC=/custom/src sync-hermes-context.sh`
-  - `HERMES_CONTEXT_DST=/custom/dst sync-hermes-context.sh`
-
-Log file: `~/.cache/hermes-context/sync.log` (always outside DST, A8).
+Mirrors the host-mounted context tree into the workspace: contents, recursive
+directory structure, and symlinks (MIRROR class). Metadata such as timestamps
+and hardlinks is explicitly out of scope. Stale entries in the destination are
+deleted at every depth, so the destination always converges to an exact
+recursive mirror of the source.
 
 ## Install
 
-1. Copy the script outside the mirrored tree:
-   `install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh`
-2. Copy the units:
-   `mkdir -p ~/.config/systemd/user`
-   `cp hermes-context.service hermes-context.timer ~/.config/systemd/user/`
-3. Enable:
-   `systemctl --user daemon-reload`
-   `systemctl --user enable --now hermes-context.timer`
-4. Check: `systemctl --user list-timers hermes-context.timer`
+1. Copy the script outside the mirrored tree (A8):
 
-The service runs `ExecStart=%h/.local/bin/sync-hermes-context.sh` as a user
-unit (no root). The script also runs standalone under cron without systemd (A3).
+       install -m 0755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+
+2. Copy the user units:
+
+       install -m 0644 hermes-context.service hermes-context.timer ~/.config/systemd/user/
+
+3. Enable:
+
+       systemctl --user daemon-reload
+       systemctl --user enable --now hermes-context.timer
+
+The service runs `ExecStart=%h/.local/bin/sync-hermes-context.sh` (oneshot,
+user-level, no root). The timer fires every 6 hours
+(`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`).
+
+The script is standalone: it runs fine from cron or by hand without systemd.
+
+## Paths and overrides (A17)
+
+Defaults: SRC `/opt/data/workspace/hermes-context/`, DST
+`/workspace/hermes-context/`. Override via environment — this is the mandated
+contract mechanism:
+
+    HERMES_CONTEXT_SRC=/path/to/src HERMES_CONTEXT_DST=/path/to/dst \
+      ~/.local/bin/sync-hermes-context.sh
 
 ## Dry-run test (A6/A16)
 
-`sync-hermes-context.sh --dry-run`
+    HERMES_CONTEXT_SRC=... HERMES_CONTEXT_DST=... \
+      ~/.local/bin/sync-hermes-context.sh --dry-run
 
-Emits the plan to stdout only: no files or directories are created anywhere,
-no log write, DST byte-identical afterwards (a nonexistent DST stays
-nonexistent). After dry-run, confirm: `test ! -e "$HERMES_CONTEXT_DST"` if it
-did not exist before.
+Prints the plan to stdout only: no files or directories are created anywhere,
+nothing is logged, and a nonexistent DST stays nonexistent. Check afterwards
+that DST is untouched (byte-identical) or still absent.
 
-There is also a read-only check of an existing mirror:
-`sync-hermes-context.sh --verify` — exits nonzero if DST is absent or differs
-from SRC (A9 class).
+`--verify` compares an existing DST against SRC and exits nonzero on any
+mismatch (it fails if DST does not exist).
 
 ## Sync strategy
 
-- Primary: `rsync -a --delete SRC/ stage/` — contents of SRC into a
-  script-owned staging directory (never nested, never inside DST/SRC).
-- Fallback (no rsync): `tar -C SRC -cf - . | tar -C stage -xf -` followed by a
-  recursive reconcile that deletes stale entries at all depths (A7).
-- BOTH paths converge identically: the staged copy is content-verified
-  against SRC (files, dirs, symlink targets, recursive; A9). Only after the
-  verified copy exists is DST replaced (A11/A13). Verification failure exits
-  nonzero and leaves DST untouched.
-- Guards run before any write and refuse (nonzero, citing the A-number):
-  degenerate paths (A18), SRC==DST / ancestor / descendant / DST inside SRC by
-  realpath (A12), log/stage/entrypoint colliding with SRC or DST boundaries
-  (A14/A15). Source survival outranks freshness (A11).
-- A DST that is itself a symlink is permitted when its symlink-resolved target
-  passes all guards (A12/A14/A15/A18); the sync then REPLACES the symlink with
-  a real directory tree. A DST symlink resolving into SRC (directly or via a
-  symlinked ancestor) is refused under A12.
+- Primary: `rsync -a --delete` of the source contents into a script-owned
+  staging directory.
+- Fallback (no rsync): tar-pipe copy plus a prunelist reconciliation that
+  deletes stale entries recursively at all depths.
+- BOTH paths converge identically: the staged copy is content-verified against
+  SRC (files, directories, symlink targets — recursive) BEFORE the destination
+  is touched; only a verified copy replaces DST (`rm -rf DST`, then move the
+  staged tree). A verification failure exits nonzero and leaves DST untouched.
+- Guards run before any write and refuse (nonzero, citing the law number):
+  degenerate paths (A18), SRC==DST or ancestor/descendant relationships
+  resolved via realpath (A12), and owned paths (log dir, staging, entrypoint
+  dir) colliding with SRC/DST boundaries (A14/A15). A DST symlink resolving
+  outside SRC is accepted and replaced by the real tree (A18); a DST resolving
+  into SRC is refused (A12).
+
+Logs are appended to `~/.cache/hermes-context/sync.log` on real runs only and
+never live inside the mirrored tree (A8).
 
 ## KNOWN_LIMITATIONS
 
-- Exotic filenames (newline/control characters) are out of scope for the
-  losslessness guarantee (A21); rsync itself copies them fine.
-- Adversarial environment-variable combinations beyond the A14 guard
-  (log/stage/entrypoint vs SRC/DST boundary checks) are open.
+- Exotic filenames (newlines/control characters) are not guaranteed to round-
+  trip through the verification walk (A21); rsync itself copies them fine.
+- Adversarial environment-variable combinations beyond the A14 guard (e.g.
+  pointing auxiliary tool env vars at protected paths) are out of scope.

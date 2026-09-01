@@ -61,7 +61,7 @@ function report() {
 // --- S1 (checkpointed: cached while answers.md/task.md/prompts are unchanged) ---
 const s1User = task + (answers ? '\n\n=== OPERATOR ANSWERS ===\n' + answers : '');
 const promptAt = fs.readdirSync(path.join(HERE, 'prompts')).reduce((m, f) => Math.max(m, fileAt(path.join(HERE, 'prompts', f))), 0);
-const s1valid = state.s1_at && fileAt('answers.md') <= state.s1_at && fileAt('task.md') <= state.s1_at && promptAt <= state.s1_at && fs.existsSync('packet.yaml') && fs.existsSync('s1-out.txt');
+const s1valid = state.s1_at && fileAt('answers.md') <= state.s1_at && fileAt('task.md') <= state.s1_at && fileAt(path.join(HERE, 'prompts', 's1-system.txt')) <= state.s1_at && fs.existsSync('packet.yaml') && fs.existsSync('s1-out.txt');
 const s1replayed = !!s1valid;
 if (s1replayed) { outcomes.s1 = 'PASS'; log('s1: CACHED (inputs unchanged since last pass — zero spend)'); }
 else {
@@ -97,7 +97,7 @@ if (ctxM) { fs.writeFileSync('context.hcdl', ctxM[1].trim() + '\n'); log('contex
 const shared = fs.existsSync('context.hcdl') ? '=== SHARED CONTEXT (hcdl register of record) ===\n' + fs.readFileSync('context.hcdl', 'utf8') + '\n' : '';
 
 // --- S2 (checkpointed: cached while packet/prompts unchanged) ---
-const s2valid = s1replayed && state.s2_at && fileAt('brief.md') <= state.s2_at && promptAt <= state.s2_at && fs.existsSync('brief.md');
+const s2valid = s1replayed && state.s2_at && fileAt('brief.md') <= state.s2_at && fileAt(path.join(HERE, 'prompts', 's2-system.txt')) <= state.s2_at && fs.existsSync('brief.md');
 const s2Cached = !!s2valid;
 let brief;
 if (s2Cached) { brief = fs.readFileSync('brief.md', 'utf8'); outcomes.s2 = 'BRIEF cached'; log('s2: CACHED (packet unchanged — zero spend)'); }
@@ -112,7 +112,7 @@ outcomes.s2 = 'BRIEF ' + brief.length + ' chars';
 // --- S3 (worker + repair round; artifacts CACHED and re-verified against the CURRENT gate for free) ---
 let build = fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : null;
 let s3cached = false;
-if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && fs.existsSync('gate.sh') && state.gate_at >= fileAt('gate.sh') && state.gate_at >= promptAt) {
+if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && fs.existsSync('gate.sh') && state.gate_at >= fileAt('gate.sh') && state.gate_at >= fileAt(path.join(HERE, 'prompts', 's3-system.txt'))) {
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f));
   for (const [, name, body] of [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   let g = '', ok = true;

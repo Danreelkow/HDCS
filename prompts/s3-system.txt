@@ -6,3 +6,20 @@ No prose outside sections. Paths and references are relative to the artifact dir
 
 ## REASONING FREEDOM (operator ruling 2026-09-01)
 No thinking cap in prod. Think as long as the build demands — reason in the register, follow house rules and must_keep; the artifact sections are non-negotiable.
+
+## FIXTURE LEDGER — the gate tests ALL of these; trace YOUR script against EACH before answering
+1. env parameterization: HERMES_CONTEXT_SRC/DST required, namespaced; the contract applies to ALL instances (every reference renames together)
+2. dry-run: zero writes; DST must not even exist afterward
+3. real run: rsync-based; exact recursive mirror; idempotent second run
+4. timer: OnCalendar valid repeating cadence ('*-*-* 00/6:00:00' preferred; '00/6:00:00' shorthand accepted)
+5. type changes: SRC file x vs DST dir x AND the inverse — remove then copy, converge; stale extras removed
+6. DST-internal symlink swap: replaced by the real file; the outside link target UNTOUCHED
+7. trailing slashes on env values: canonicalize once, mutate only through canonical paths
+8. ANY log env var (HERMES_CTX_LOG, LOG_DIR, ...): value inside DST -> refuse nonzero, write nothing
+9. path identity (realpath, component tests — never string prefixes): DST==SRC, ancestor, descendant, symlink-into-SRC -> refuse
+10. degenerate paths: DST or SRC is '/', '', or '.' -> refuse
+11. symlinked DST ANCESTOR resolving into SRC -> refuse; DST symlink resolving OUTSIDE SRC -> ACCEPT, then REPLACE with the real tree (A18)
+12. --verify: FAILS when DST absent; OK only on exact mirror
+13. docs: README must contain the service ExecStart path VERBATIM (e.g. install to ~/.local/bin/ — '%h' expands to home)
+14. staging: stage path computed as a PURE string and validated BEFORE any creation; working files never collide with mirror names
+Refusals cite A-numbers. Adversarial env combinations beyond this ledger = KNOWN_LIMITATIONS (+open), not FAIL.
