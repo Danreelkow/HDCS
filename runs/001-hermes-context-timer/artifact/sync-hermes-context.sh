@@ -1,166 +1,166 @@
-#!/usr/bin/env bash
-# sync-hermes-context.sh — one-way exact mirror of SRC into DST.
-# A2: writes only to DST. A4: rsync -> fallback. A5/A7/A9: recursive exact
-# mirror of {contents, dir structure, symlinks}. A6: --dry-run writes nothing.
-# Fallback never copies through a pre-existing DST symlink; verification
-# never follows DST symlinks (type-conflict detection, A5/A9).
-set -u
-set -o pipefail
+#!/bin/sh
+# sync-hermes-context.sh — one-way exact mirror of SRC into DST (contents).
+# Standalone-capable (no systemd required). POSIX sh, no root.
+# Invariants: A2 one-way, A4 contents/fallback, A5 mirror+delete,
+#             A6 dry-run zero writes, A7 recursive stale deletion,
+#             A8 LOG/entrypoints outside mirrored tree, A9 self-verify.
+set -eu
 
 SRC="${HERMES_CONTEXT_SRC:-/opt/data/workspace/hermes-context/}"
 DST="${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
-DRYRUN=0
+LOG="${HERMES_CONTEXT_LOG:-$HOME/.cache/hermes-context/sync.log}"
 
-for arg in "$@"; do
-  case "$arg" in
-    --dry-run) DRYRUN=1 ;;
-    *) echo "unknown argument: $arg" >&2; exit 2 ;;
-  esac
-done
+DRY_RUN=0
+FORCE_MODE="${HERMES_CONTEXT_FORCE_MODE:-auto}"   # auto|rsync|fallback
 
-LOG_DIR="$HOME/.cache/hermes-context"
-LOG_FILE="$LOG_DIR/sync.log"
-COPIED=0
-DELETED=0
-MODE=rsync
-
-log_summary() {
-  # A6/A8: log append is a write — only on real runs, path outside DST.
-  [ "$DRYRUN" -eq 1 ] && return 0
-  mkdir -p "$LOG_DIR"
-  printf '%s mode=%s copied=%d deleted=%d exit=%d\n' \
-    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$COPIED" "$2" "$3" >> "$LOG_FILE"
+usage() {
+    echo "usage: sync-hermes-context.sh [--dry-run]" >&2
+    echo "  env: HERMES_CONTEXT_SRC, HERMES_CONTEXT_DST, HERMES_CONTEXT_LOG, HERMES_CONTEXT_FORCE_MODE" >&2
 }
 
-die() {
-  echo "sync-hermes-context: $*" >&2
-  log_summary "$MODE" 0 1
-  exit 1
+[ $# -le 1 ] || { usage; exit 2; }
+[ $# -eq 0 ] || {
+    case "$1" in
+        --dry-run) DRY_RUN=1 ;;
+        -h|--help) usage; exit 0 ;;
+        *) usage; exit 2 ;;
+    esac
 }
 
-[ -d "$SRC" ] || { MODE=n/a; die "source '$SRC' is not a directory"; }
+# --- sanity checks, ALL before any destructive operation ---
+SRC="${SRC%/}"
+DST="${DST%/}"
 
-# A8: never delete our own entrypoint; nothing inside DST may be an entrypoint.
-ENTRYPOINT="$(readlink -f "$0" 2>/dev/null || true)"
-DST_REAL="$(readlink -f "$DST" 2>/dev/null || true)"
-if [ -n "$ENTRYPOINT" ] && [ -n "$DST_REAL" ] && [ "${ENTRYPOINT#"$DST_REAL"/}" != "$ENTRYPOINT" ]; then
-  die "entrypoint inside DST violates A8"
+if [ ! -d "$SRC" ]; then
+    echo "FATAL: SRC does not exist or is not a directory: $SRC" >&2
+    exit 3
 fi
 
-dst_exists() { [ -e "$1" ] || [ -L "$1" ]; }
+case "$DST/" in
+    "$SRC"/*) echo "FATAL: DST inside SRC (would nest): $DST" >&2; exit 4 ;;
+esac
+case "$SRC/" in
+    "$DST"/*) echo "FATAL: SRC inside DST (refusing writeback target): $SRC" >&2; exit 4 ;;
+esac
 
-MODE=rsync
-if command -v rsync >/dev/null 2>&1; then
-  # contents-level sync: trailing slashes on both sides, no nesting (A4/Q4)
-  if [ "$DRYRUN" -eq 1 ]; then
-    if [ -d "$DST" ]; then
-      rsync -a --delete --dry-run "$SRC"/ "$DST"/ || die "rsync dry-run failed"
-    fi
-    # DST absent under dry-run: nothing to compare, zero writes, exit 0 (A6)
-  else
-    mkdir -p "$DST"
-    rsync -a --delete "$SRC"/ "$DST"/ || die "rsync failed"
-  fi
-else
-  # A4 fallback: recursive reconciliation at every depth, symlinks as-is.
-  # No bulk `cp -a "$SRC"/. "$DST"/`: a stale DST symlink-to-directory at a
-  # source dir path could be copied through (A2/A5 violation). Instead each
-  # SRC entry is reconciled individually: conflicting DST entries (wrong
-  # type, wrong symlink target, differing content) are removed BEFORE copy.
-  MODE=fallback
-  if [ "$DRYRUN" -ne 1 ]; then
-    mkdir -p "$DST"
-    # 1) delete stale DST entries absent from SRC, deepest first
-    while IFS= read -r rel; do
-      if ! dst_exists "$SRC/$rel"; then
-        rm -rf -- "$DST/$rel"
-      fi
-    done < <(cd "$DST" && find . -mindepth 1 -depth -print)
-    # 2) reconcile every SRC entry (parents before children)
-    while IFS= read -r rel; do
-      if dst_exists "$DST/$rel"; then
-        if [ -L "$SRC/$rel" ]; then
-          # symlink: must be a symlink with identical target
-          if ! { [ -L "$DST/$rel" ] && [ "$(readlink "$SRC/$rel")" = "$(readlink "$DST/$rel")" ]; }; then
-            rm -rf -- "$DST/$rel"
-          fi
-        elif [ -d "$SRC/$rel" ]; then
-          # dir: DST must be a real dir (not a symlink — never copy through)
-          if [ -L "$DST/$rel" ] || [ ! -d "$DST/$rel" ]; then
-            rm -rf -- "$DST/$rel"
-          fi
-        else
-          # regular file: DST must be a real file with identical contents
-          if [ -L "$DST/$rel" ] || [ ! -f "$DST/$rel" ] || ! cmp -s -- "$SRC/$rel" "$DST/$rel"; then
-            rm -rf -- "$DST/$rel"
-          fi
-        fi
-      fi
-      if ! dst_exists "$DST/$rel"; then
-        # parent dirs already exist (pre-order walk); cp -a never follows a
-        # DST symlink here because the destination path does not exist
-        cp -a -- "$SRC/$rel" "$DST/$rel" || die "cp failed: $rel"
-      fi
-    done < <(cd "$SRC" && find . -mindepth 1 -print)
-  fi
+# A8: LOG must be outside DST — checked BEFORE any sync/delete can touch it.
+case "$LOG/" in
+    "$DST"/*)
+        echo "FATAL: LOG ($LOG) inside DST ($DST); refusing (A8)" >&2
+        exit 5
+        ;;
+esac
+
+MODE=fallback
+if [ "$FORCE_MODE" = rsync ] || { [ "$FORCE_MODE" = auto ] && command -v rsync >/dev/null 2>&1; }; then
+    MODE=rsync
 fi
 
-if [ "$DRYRUN" -ne 1 ]; then
-  # count what a real run produced (post-state vs SRC)
-  TMP1="$(mktemp)"; TMP2="$(mktemp)"
-  ( cd "$SRC" && find . ) | sort > "$TMP1"
-  ( cd "$DST" && find . ) | sort > "$TMP2"
-  COPIED=$(comm -23 "$TMP1" "$TMP2" | wc -l)
-  DELETED=$(comm -13 "$TMP1" "$TMP2" | wc -l)
-  rm -f "$TMP1" "$TMP2"
-fi
-
-# self_verify: recursive mirror_class check {contents, dir structure, symlinks}.
-# Read-only; never follows DST symlinks — a source file/dir behind a DST
-# symlink is always a mismatch. Mismatch -> exit != 0 (never warn+0).
-# Skipped under dry-run (A6: exit 0, nothing written).
-VERIFY_STATUS=0
-verify() {
-  local rel
-  if [ ! -d "$DST" ]; then
-    return 1
-  fi
-  while IFS= read -r rel; do
-    if [ -L "$SRC/$rel" ]; then
-      if [ ! -L "$DST/$rel" ] || [ "$(readlink "$SRC/$rel")" != "$(readlink "$DST/$rel")" ]; then
-        echo "symlink mismatch: $rel" >&2; VERIFY_STATUS=1
-      fi
-    elif [ -d "$SRC/$rel" ]; then
-      if [ -L "$DST/$rel" ] || [ ! -d "$DST/$rel" ]; then
-        echo "dir mismatch: $rel" >&2; VERIFY_STATUS=1
-      fi
+# --- sync (status captured so a failure still yields exactly one LOG line) ---
+sync_status=0
+if [ "$MODE" = rsync ]; then
+    # -a: no -H/-A/-X (metadata/hardlinks/xattrs excluded per A9);
+    # trailing slash semantics = contents of SRC into DST (A4);
+    # --delete: exact mirror, stale removed (A5/A7).
+    if [ "$DRY_RUN" -eq 1 ]; then
+        rsync -a --delete --dry-run "$SRC/" "$DST/" || sync_status=$?
     else
-      if [ -L "$DST/$rel" ] || [ ! -f "$DST/$rel" ] || ! cmp -s -- "$SRC/$rel" "$DST/$rel"; then
-        echo "content mismatch: $rel" >&2; VERIFY_STATUS=1
-      fi
+        rsync -a --delete "$SRC/" "$DST/" || sync_status=$?
     fi
-  done < <(cd "$SRC" && find . -mindepth 1)
-  while IFS= read -r rel; do
-    if ! dst_exists "$SRC/$rel"; then
-      echo "stale in DST: $rel" >&2; VERIFY_STATUS=1
+else
+    # Fallback: reconcile recursively — remove stale subtrees at every depth
+    # first, then copy. Identical mirror semantics to rsync --delete (A5/A7).
+    if [ "$DRY_RUN" -eq 1 ]; then
+        echo "DRY-RUN (fallback): would reconcile '$DST' to '$SRC' (stale removed)"
+    else
+        mkdir -p "$DST"
+        ( cd "$DST" && rm -rf ./* ./.[!.]* ./..?* 2>/dev/null || true )
+        if command -v tar >/dev/null 2>&1; then
+            tar -C "$SRC" -cf - . | tar -C "$DST" -xf - || sync_status=$?
+        else
+            cp -a "$SRC"/. "$DST"/ || sync_status=$?
+        fi
     fi
-  done < <(cd "$DST" && find . -mindepth 1)
-  return "$VERIFY_STATUS"
+fi
+
+# --- self-verify (A9): {file contents, dir structure, symlink targets} ---
+verify() {
+    status=0
+    ( cd "$SRC" && find . -mindepth 1 \( -type d -o -type f -o -type l \) -print ) | sort > "$tmp_src_list"
+    ( cd "$DST" && find . -mindepth 1 \( -type d -o -type f -o -type l \) -print ) | sort > "$tmp_dst_list"
+    if ! cmp -s "$tmp_src_list" "$tmp_dst_list"; then
+        echo "VERIFY MISMATCH: directory/file/symlink structure differs (SRC vs DST):" >&2
+        diff "$tmp_src_list" "$tmp_dst_list" >&2 || true
+        status=1
+    else
+        while IFS= read -r p; do
+            s_type=$( [ -L "$SRC/$p" ] && echo link || { [ -d "$SRC/$p" ] && echo dir || echo file; } )
+            d_type=$( [ -L "$DST/$p" ] && echo link || { [ -d "$DST/$p" ] && echo dir || echo file; } )
+            if [ "$s_type" != "$d_type" ]; then
+                echo "VERIFY MISMATCH: type differs for '$p': SRC=$s_type DST=$d_type" >&2
+                status=1
+                continue
+            fi
+            case "$s_type" in
+                link)
+                    s_t=$(readlink "$SRC/$p")
+                    d_t=$(readlink "$DST/$p")
+                    if [ "$s_t" != "$d_t" ]; then
+                        echo "VERIFY MISMATCH: symlink target for '$p': SRC='$s_t' DST='$d_t'" >&2
+                        status=1
+                    fi
+                    ;;
+                file)
+                    if ! cmp -s "$SRC/$p" "$DST/$p"; then
+                        echo "VERIFY MISMATCH: file contents differ: '$p'" >&2
+                        diff "$SRC/$p" "$DST/$p" >&2 || true
+                        status=1
+                    fi
+                    ;;
+            esac
+        done < "$tmp_src_list"
+    fi
+    return $status
 }
 
-if [ "$DRYRUN" -eq 1 ]; then
-  # A6: dry run writes nothing; read-only report of would-be divergence.
-  if [ -d "$DST" ]; then
-    DIVERGENCE="$( ( cd "$SRC" && find . -mindepth 1 ); ( cd "$DST" && find . -mindepth 1 ) | sed 's#^#DST-ONLY #' )"
-    : # informational only; no writes, exit 0
-  fi
-  exit 0
+verify_status=0
+tmp_dir=""
+if [ "$DRY_RUN" -eq 0 ]; then
+    tmp_dir=$(mktemp -d)
+    tmp_src_list="$tmp_dir/src.list"
+    tmp_dst_list="$tmp_dir/dst.list"
+    if verify; then
+        verify_status=0
+    else
+        verify_status=1
+    fi
+    rm -rf "$tmp_dir"
 fi
 
-if ! verify; then
-  die "mirror_class verification failed"
+# --- logging (A6: skip ALL writes in dry-run) ---
+# Exactly one line per non-dry-run run, including sync/verify failures.
+if [ "$DRY_RUN" -eq 0 ]; then
+    log_dir=$(dirname "$LOG")
+    mkdir -p "$log_dir"
+    if [ "$sync_status" -ne 0 ]; then
+        result="SYNC_FAIL"
+    elif [ "$verify_status" -ne 0 ]; then
+        result="VERIFY_FAIL"
+    else
+        result="OK"
+    fi
+    echo "$(date '+%Y-%m-%dT%H:%M:%S%z') mode=$MODE dry_run=0 result=$result" >> "$LOG"
 fi
 
-log_summary "$MODE" 0 0
+if [ "$sync_status" -ne 0 ]; then
+    echo "FATAL: sync step failed (status $sync_status)" >&2
+    exit 7
+fi
+
+if [ "$verify_status" -ne 0 ]; then
+    echo "FATAL: self-verify failed; DST != mirror of SRC" >&2
+    exit 6
+fi
+
 exit 0
 

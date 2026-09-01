@@ -1,15 +1,19 @@
+reg: cs-programming, canon: rsync/systemd-user-unit/shell-scripting vocabulary (rsync flags, systemctl --user, OnCalendar, exit codes)
 defs:
   SRC := $HERMES_CONTEXT_SRC default /opt/data/workspace/hermes-context/
   DST := $HERMES_CONTEXT_DST default /workspace/hermes-context/
-  rsync_path := rsync -a --delete src/ -> dst/ (contents, no nesting)
-  fallback_path := cp -a + recursive reconciliation (delete stale subtrees ∀ depth)
-  mirror_class := {file contents, dir structure recursive, symlinks}; ¬{timestamps, metadata, hardlink topology} per A9
+  LOG := outside DST always, default ~/.cache/hermes-context/sync.log
 invariants:
-  A2_oneway: ∀ run -> writes only to DST; SRC read-only
-  A5_mirror: ∀ path ∈ {rsync_path, fallback_path} -> DST end state == SRC end state, recursive (A7)
-  A6_purity: --dry-run -> ∀ write == 0, incl. logs; DST byte-identical post-run
-  A8_placement: log ∈ ~/.cache (outside DST always); entrypoints ∈ ~/.local/bin | /workspace/hdcs/bin, never inside DST; sync never deletes own entrypoints
-  A3_standalone: script executable w/o systemd; units user-level (systemctl --user), no root
-  A4_detect: rsync absent -> fallback_path engaged
-  self_verify: verify mirror_class recursively; mismatch -> exit != 0 (never warn+0)
-open: none — all ambiguities resolved by A1-A9
+  A2_oneway: ∀ run -> SRC -> DST only, no writeback to host mount
+  A4_contents: sync CONTENTS of SRC into DST (src/ -> dst), never nest SRC inside DST
+  A4_fallback: ∃ no rsync -> cp -a/tar-pipe fallback with identical semantics
+  A5_mirror: ∀ path (rsync|fallback) -> DST end state == SRC end state; stale files DELETED (--delete / recursive reconcile); no accumulate-only mode
+  A6_dryrun_purity: --dry-run -> ZERO writes incl. logs; DST byte-identical post-run
+  A7_recursive: reconciliation deletes stale subtrees ∀ depth; README states this correctly
+  A8_placement: LOG ∉ DST ∧ install paths (~/.local/bin or /workspace/hdcs/bin) ∉ mirrored tree; sync never deletes own entrypoints
+  A9_equiv_class: mirror = {file contents, dir structure recursive, symlinks} only; metadata/timestamps/hardlinks excluded; self-verify enforces exactly this, mismatch -> nonzero exit, never warn-exit-0
+  A10_severity: FAIL only on normal-operation defects (default config, documented usage, plausible misconfig losing/corrupting data); exotic triggers -> KNOWN_LIMITATIONS in +open, non-blocking
+  units: systemd USER units (systemctl --user), timer OnCalendar every 6h, no root; script standalone-capable sans systemd
+open:
+  KNOWN_LIMITATIONS: exotic/adversarial inputs (newline-in-filename corpora, DST pointed at LOG dir) — repro notes recorded, non-blocking per A10
+===

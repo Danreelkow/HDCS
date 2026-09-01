@@ -28,3 +28,8 @@ A4: The runtime may lack rsync entirely — the script must detect that and fall
 - Mirror = levels 1-3 ONLY: file contents + directory structure (recursive, both sync paths) + symlinks. NOT included: file/root metadata, timestamps, hardlink topology.
 - The self-verification must enforce exactly this class: verify contents+structure+symlinks recursively, and FAIL (nonzero exit) on any mismatch — never warn-and-exit-0.
 - Judge scope: complaints about metadata/root-metadata/hardlinks are out-of-scope per this ruling.
+
+## A10 (2026-09-01, operator ruling): S4 severity bar / stopping criteria
+- FAIL only on defects reachable in NORMAL operation: default config, documented usage, plausible misconfiguration that loses or corrupts user data.
+- Exotic/adversarial triggers (newline-in-filename corpora, hostile env combinations like pointing DST at the log dir) go to the packet's +open section as KNOWN_LIMITATIONS with repro notes — they do not block delivery.
+- The judge still cites everything it finds; the bar classifies, it does not suppress.
