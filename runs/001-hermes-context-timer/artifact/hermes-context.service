@@ -1,7 +1,0 @@
-```ini
-[Unit]
-Description=Hermes context freshness sync (host -> workspace mirror)
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/sync-hermes-context.sh

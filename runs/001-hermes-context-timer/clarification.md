@@ -1,14 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: sync script syntax error
-sync-hermes-context.sh: line 1: unexpected EOF while looking for matching ``'
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-(none recorded)
+VERDICT: FAIL
+EVIDENCE: `sync-hermes-context.sh:13-14` sets unset SRC/DST to the literal string `default` (`"${HERMES_CONTEXT_SRC-default}"`, `"${HERMES_CONTEXT_DST-default}"`), not the mandated `/opt/data/workspace/hermes-context/` and `/workspace/hermes-context/` documented in `README.md:7-12` and required by A1; an invocation with the variables unset therefore fails realpath resolution instead of performing the specified sync. Additionally, `sync-hermes-context.sh:150-153` creates the stage via `mktemp -d` before the instantiated stage path is validated at `sync-hermes-context.sh:160-167`, violating A20’s explicit pure-string-compute/validate-then-create requirement and its prohibition on “mktemp-then-refuse.”
 
 ## Packet
 ```yaml

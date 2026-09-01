@@ -1,2 +1,2 @@
 GATE FAIL: sync script syntax error
-sync-hermes-context.sh: line 1: unexpected EOF while looking for matching ``'
+sync-hermes-context.sh: line 82: syntax error: unexpected end of file from `while' command on line 81
