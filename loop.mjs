@@ -120,6 +120,7 @@ outcomes.s2 = 'BRIEF ' + brief.length + ' chars';
 let build = fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : null;
 let s3cached = false;
 if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && fs.existsSync('gate.sh') && state.gate_at >= fileAt('gate.sh') && state.gate_at >= fileAt(path.join(HERE, 'prompts', 's3-system.txt'))) {
+  fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
   for (const [, name, body] of [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   let g = '', ok = true;
@@ -142,6 +143,7 @@ for (const attempt of s3attempts) {
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
   if (!build.trim()) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log(`${attempt}: empty response — previous artifacts left untouched on disk`); break; }
   fs.writeFileSync('artifact-build.txt', build);
+  fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
   const sections = [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)];
   for (const [, name, body] of sections) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
@@ -189,7 +191,8 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     const fb = seat('s3-feedback', seats.s3, 's3-system.txt', `${shared}ACCEPTANCE CONTRACT (gate.sh — every fix MUST keep satisfying this; env names, file names, behaviors):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nGATE OUTPUT:\n${gateOut}\n\nS4 JUDGE VERDICT (fix every finding EXCEPT where the verdict contradicts the gate contract or the A-law in SHARED CONTEXT — contract and law win over the verdict):\n${s4verdict}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed the gate — minimal diff, no placeholders, complete valid shell in every section):\n${fs.readFileSync('artifact-build.txt', 'utf8')}\n\nReturn corrected sections (same format: === <filename> ===).`, 32768);
     if (!fb.trim()) { log('s3-feedback: empty response — keeping gate-passing artifacts'); break; }
     fs.writeFileSync('artifact-build.txt', fb);
-    for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
+    fs.mkdirSync('artifact', { recursive: true });
+  for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
     for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
     if (fs.existsSync('gate.sh')) {
       let g = '', ok = true;
