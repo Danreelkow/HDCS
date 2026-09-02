@@ -21,7 +21,12 @@ Deliverable (all files in one artifact dir):
   explicitly
 - verify-rotation.sh — exits 0 only when the tree is consistent: config
   parses, no rotation pending, archive listing intact (intact = the newest
-  KEEP archived files are present and match their recorded listing)
+  KEEP archived files are present and match their recorded listing).
+  "Pending" means a STALE file (age >= AGE_DAYS); a fresh file matching
+  PATTERN is normal and must NOT fail verify. Implement the stale scan as a
+  flag accumulator (STALE_FOUND=0, set inside the find/while loop, tested
+  after it) — a bare `[ cond ] && exit 1` pipeline reports false pending via
+  bash subshell status when the last file is fresh
 - README.md — install, configure, test with a dry run, schedule
 
 MUST_KEEP: default mode is dry-run that performs no writes
