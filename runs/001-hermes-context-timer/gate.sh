@@ -105,6 +105,20 @@ FBO=$(env PATH="$FB" HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sy
 [ $? -eq 0 ] && [ "$(readlink "$DST/link")" = /etc/hostname ] || fail "fallback copy (no rsync) did not converge the symlink target (A5/A7: same type is not equal — compare readlink targets)"
 rm -rf "$FB"
 
+# A9 type fixture (run 053 S4 finding): DST symlink-to-dir must be replaced, never written through
+rm -rf "$SRC" "$DST" /tmp/hdcs-gate-victim
+mkdir -p "$SRC/sub" /tmp/hdcs-gate-victim/real "$DST"
+printf 's\n' > "$SRC/sub/f"
+ln -s /tmp/hdcs-gate-victim/real "$DST/sub"
+FB2=$(mktemp -d)
+for d in /usr/bin /bin; do [ -d "$d" ] && for f in "$d"/*; do b=$(basename "$f"); [ "$b" = rsync ] && continue; [ -e "$FB2/$b" ] || ln -s "$f" "$FB2/$b"; done; done
+F9=$(env PATH="$FB2" HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1)
+[ $? -eq 0 ] || fail "fallback run failed on symlink-to-dir convergence: $F9"
+[ -d "$DST/sub" ] && [ ! -L "$DST/sub" ] || fail "DST symlink-to-dir not replaced by the real dir (A5/A9: type equivalence is lstat-based)"
+[ -f "$DST/sub/f" ] || fail "fallback did not copy into the converged dir"
+[ -z "$(ls -A /tmp/hdcs-gate-victim/real)" ] || fail "fallback wrote THROUGH the DST symlink outside DST (A5/A9: replace the link first)"
+rm -rf "$FB2" /tmp/hdcs-gate-victim
+
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

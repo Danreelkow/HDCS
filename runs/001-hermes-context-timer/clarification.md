@@ -1,13 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: real run exited nonzero: A14: stage parent (/tmp) is inside DST or SRC; refusing to stage there
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-- Q9: severity bar? -> A: A10 normal-operation FAILs only; exotic -> +open"
+VERDICT: FAIL
+EVIDENCE: `sync-hermes-context.sh:81-83` defines `same_type()` so a source directory and a destination symlink-to-directory are treated as equal (`[ -d "$d" ]` succeeds without rejecting `[ -L "$d" ]`). In the fallback path (`fallback_copy`, approximately lines 178-201), that symlink is therefore neither removed nor replaced; subsequent copies can follow it, violating A5/A9 recursive structure-and-symlink equivalence and potentially writing outside DST. Additionally, `sync-hermes-context.sh:5` claims refusals cite only A12/A14/A15/A18/A22/A23, while `:20-21` emits A23 and `:59-61` emits A22; this conflicts with the packet’s A19 closed refusal law, which permits only A12, A14/A15, or A18 refusal citations.
 
 ## Packet
 ```yaml

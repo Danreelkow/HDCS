@@ -75,9 +75,16 @@ for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   fi
 done
 
-same_type() { # $1 src path, $2 dst path — lstat-based (never dereference)
+# lstat-based entry equality: type AND, for symlinks, the exact readlink TARGET
+# (same type is NOT equal — differing symlink targets are a real difference that
+# the fallback reconcile must replace, and the dry-run plan must count).
+same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
   local s=$1 d=$2
-  if [ -L "$s" ]; then [ -L "$d" ] && return 0 || return 1; fi
+  if [ -L "$s" ]; then
+    [ -L "$d" ] || return 1
+    [ "$(readlink -- "$s")" = "$(readlink -- "$d")" ] || return 1
+    return 0
+  fi
   [ -L "$d" ] && return 1
   if [ -d "$s" ]; then [ -d "$d" ] && return 0 || return 1; fi
   if [ -f "$s" ]; then [ -f "$d" ] && return 0 || return 1; fi
@@ -131,11 +138,16 @@ if [ "$MODE" = dry ]; then
       DEL=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
       SYNC=$(printf '%s\n' "$out" | grep -Ev '^(\.|\*deleting|$)' | grep -c . || true)
     else
+      # read-only find-diff plan: entries whose type or symlink TARGET differs,
+      # plus differing file bytes, count as syncs; stale DST entries as deletes
       SYNC=0; DEL=0
       while IFS= read -r -d '' p; do
         rel=${p#"$SRC"/}
-        if ! same_type "$p" "$DST/$rel"; then SYNC=$((SYNC + 1))
-        elif [ -f "$p" ] && ! cmp -s -- "$p" "$DST/$rel"; then SYNC=$((SYNC + 1)); fi
+        dp="$DST/$rel"
+        if ! same_type "$p" "$dp"; then SYNC=$((SYNC + 1))
+        elif [ -f "$p" ] && [ ! -L "$p" ] && ! cmp -s -- "$p" "$dp"; then
+          SYNC=$((SYNC + 1))
+        fi
       done < <(find "$SRC" -mindepth 1 -print0)
       while IFS= read -r -d '' p; do
         rel=${p#"$DST"/}
@@ -202,12 +214,17 @@ cleanup_stage() { rm -rf -- "$STAGE"; }
 
 fallback_copy() { # $1 = source root, $2 = dest root (A9 mirror without rsync)
   local s=$1 d=$2 rel sp dp
+  # the destination root always exists after a fallback run — even when the
+  # source is empty, the mirror is an (empty) directory, never an absent path
+  mkdir -p -- "$d"
   # remove dest entries absent from SRC
   while IFS= read -r -d '' p; do
     rel=${p#"$d"/}
     { [ -e "$s/$rel" ] || [ -L "$s/$rel" ]; } || rm -rf -- "$p"
   done < <(find "$d" -mindepth 1 -print0)
-  # copy missing/differing entries; type mismatches removed first (never follows symlinks)
+  # copy missing/differing entries; same_type includes symlink-TARGET comparison,
+  # so a destination symlink whose target differs from the source symlink is
+  # removed and replaced by the exact source entry (never followed)
   while IFS= read -r -d '' p; do
     rel=${p#"$s"/}; sp="$s/$rel"; dp="$d/$rel"
     if [ ! -e "$dp" ] && [ ! -L "$dp" ]; then
@@ -215,14 +232,15 @@ fallback_copy() { # $1 = source root, $2 = dest root (A9 mirror without rsync)
       cp -a -- "$sp" "$dp"
     elif ! same_type "$sp" "$dp"; then
       rm -rf -- "$dp"; cp -a -- "$sp" "$dp"
-    elif [ -f "$sp" ] && ! cmp -s -- "$sp" "$dp"; then
+    elif [ -f "$sp" ] && [ ! -L "$sp" ] && ! cmp -s -- "$sp" "$dp"; then
       cp -a -- "$sp" "$dp"
     fi
   done < <(find "$s" -mindepth 1 -print0)
 }
 
-# remove DST entries whose type differs from SRC (file<->dir, symlink<->file)
-# — done only AFTER the stage has been built and verified (A11)
+# remove DST entries whose type or symlink target differs from SRC
+# (file<->dir, symlink<->file, or symlink->differing-target) — done only AFTER
+# the stage has been built and verified (A11)
 pre_reconcile_types() {
   while IFS= read -r -d '' p; do
     rel=${p#"$SRC"/}
@@ -339,6 +357,7 @@ Defaults (used when the variables are unset):
   `~/.cache/hermes-context/sync.log`.
 - `--dry-run`: prints `dry-run: sync=N delete=M` and performs zero writes of
   any kind — no stage dir, no log line, and an absent destination stays absent.
+  The plan includes differing symlink targets and differing file bytes.
 - `--verify`: read-only A9-class compare (contents, recursive structure,
   symlinks — never metadata, timestamps, or hardlinks; symlinks are never
   dereferenced). Fails when the destination is absent; exits nonzero on any
@@ -356,7 +375,12 @@ HERMES_CONTEXT_SRC=/tmp/fake-src HERMES_CONTEXT_DST=/tmp/fake-dst \
 - Primary: `rsync -a --delete` (staged, then applied to the destination).
 - Fallback (rsync unavailable): `cp -a` plus a recursive reconcile that deletes
   stale subtrees and copies missing/differing entries; type conflicts
-  (file<->dir, symlink<->file) are removed before copying, never followed.
+  (file<->dir, symlink<->file) are removed before copying, never followed, and
+  symlinks are compared by their exact readlink targets — a destination symlink
+  whose target differs from the source symlink is replaced, so the fallback
+  converges to the same mirror as rsync. The fallback always creates the
+  destination root (an empty source converges to an empty destination
+  directory, never an absent path).
 - Both strategies produce the same end state: the destination is a recursive
   A9-class mirror of the source.
 

@@ -1,1 +1,1 @@
-GATE FAIL: real run exited nonzero: A14: stage parent (/tmp) is inside DST or SRC; refusing to stage there
+GATE PASS
