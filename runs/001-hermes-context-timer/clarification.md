@@ -2,7 +2,7 @@
 
 ## Gate output (after repair round)
 ```
-GATE FAIL: dry-run exited nonzero: refusing: A14/A15: stage parent (/tmp) is inside DST (/tmp/hdcs-gate-dst)
+GATE FAIL: verify accepted a regular file in place of a SRC symlink with identical bytes (A9: equivalence is lstat-based — never dereference in verify)
 
 ```
 
