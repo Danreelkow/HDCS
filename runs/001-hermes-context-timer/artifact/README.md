@@ -1,79 +1,81 @@
-# hermes-context
+# hermes-context sync
 
-One-way mirror of a host-side context directory into the workspace
-(`host -> workspace` only, never writeback). Runs as a systemd **user**
-unit every 6 hours, or standalone from the shell. No root required.
+One-way mirror (`A2`): copies `HERMES_CONTEXT_SRC` into `HERMES_CONTEXT_DST`
+(host -> workspace only; never writes back). End state is a recursive mirror of
+contents, directory structure, and symlinks (`A5`/`A9` class — metadata,
+timestamps, and hardlinks are not preserved).
 
 ## Install
 
-1. Copy the script to `~/.local/bin/sync-hermes-context.sh` and make it
-   executable (`chmod +x ~/.local/bin/sync-hermes-context.sh`).
-2. Copy `hermes-context.service` and `hermes-context.timer` to
+1. Script: copy `sync-hermes-context.sh` to `~/.local/bin/sync-hermes-context.sh`
+   and `chmod +x ~/.local/bin/sync-hermes-context.sh`.
+   (This matches the service unit's `ExecStart=%h/.local/bin/sync-hermes-context.sh`.)
+2. Units: copy `hermes-context.service` and `hermes-context.timer` to
    `~/.config/systemd/user/`.
-3. `systemctl --user daemon-reload && systemctl --user enable --now hermes-context.timer`
+3. Reload and enable:
 
-The service runs `~/.local/bin/sync-hermes-context.sh` (Type=oneshot),
-triggered by the timer (`OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`,
-`Unit=hermes-context.service`, installed under `default.target`).
+       systemctl --user daemon-reload
+       systemctl --user enable --now hermes-context.timer
 
-## Configuration (env overrides)
+The timer runs the service every 6 hours (`OnCalendar=*-*-* 00/6:00:00`,
+`Persistent=true` so missed runs are caught up). Both units install with
+`WantedBy=default.target`. systemd is optional — the script is a standalone
+executable and needs no root.
 
-- `HERMES_CONTEXT_SRC` — source directory. Unset → production default
-  `/opt/data/workspace/hermes-context`. Set-but-empty → refused (A23).
-- `HERMES_CONTEXT_DST` — destination directory. Unset → production default
-  `/workspace/hermes-context`. Set-but-empty → refused (A23).
-- `HERMES_CTX_LOG` — log file path (one line per real run). Default
-  `~/.cache/hermes-context/sync.log`. Its parent directory is an owned
-  path and must live outside DST (A14: DST inside it is refused).
+## Environment override
 
-Example:
+The script reads namespaced env vars; unset variables fall back to the
+mandated production defaults; set-but-empty refuses (`A23`).
 
-    HERMES_CONTEXT_SRC=/home/me/ctx HERMES_CONTEXT_DST=/tmp/ctx-dst \
-      ~/.local/bin/sync-hermes-context.sh
+    # production defaults:
+    #   HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context
+    #   HERMES_CONTEXT_DST=/workspace/hermes-context
 
-Trailing slashes on env values are canonicalized once; all mutations go
-through the canonical paths.
+    # override example:
+    HERMES_CONTEXT_SRC=/home/me/src \
+    HERMES_CONTEXT_DST=/home/me/dst \
+    ~/.local/bin/sync-hermes-context.sh
 
-## Test without writing anything
+Trailing slashes are canonicalized once; all mutations go through canonical
+paths.
+
+## Dry-run test procedure
 
     ~/.local/bin/sync-hermes-context.sh --dry-run
 
-`--dry-run` prints `dry-run: sync=N delete=M` (plus the itemized rsync
-plan when rsync is available) and performs **zero** writes: no stage
-dir, no log line, no DST creation — an absent DST stays absent.
+Prints a plan (`rsync -an --delete --itemize-changes`) and a
+`dry-run: sync=N delete=M` summary. Zero writes of any kind — no files, no
+stage dir, no log line, and an absent DST stays absent (`A6`/`A16`).
 
-Check an existing destination against the source (read-only, A9-class:
-contents + structure + symlink targets, never dereferencing symlinks):
+## Verify
 
     ~/.local/bin/sync-hermes-context.sh --verify
 
-Exits nonzero on any mismatch, including a regular file standing in for
-a source symlink, and when DST is absent.
+Fails (nonzero) when DST is absent or is not an exact mirror; symlink targets
+are compared by `lstat`, never dereferenced — a regular file holding a
+symlink's target bytes fails verification.
 
 ## Sync strategy
 
-- **Primary:** `rsync -a --delete SRC/ DST/` (recursive mirror; stale
-  subtrees deleted; file↔dir type changes reconciled; symlinks copied
-  as symlinks).
-- **Fallback (rsync unavailable):** `cp -a` plus a recursive reconcile
-  pass that deletes stale entries, replaces type mismatches, and
-  compares symlink *targets* (same type alone is not equality).
-- Both paths converge to the same end state: DST ≡ SRC recursively.
-  Order is always: guards → stage → content-verify → touch DST → final
-  self-verify (mismatch ⇒ exit nonzero, never warn-and-exit-0).
+- Primary: `rsync -a --delete` (exact recursive mirror).
+- Fallback (rsync unavailable): `cp -a` plus a recursive reconcile that
+  deletes stale subtrees, copies differing files, converts file<->dir type
+  changes, and converges symlink targets. Both paths produce the same end
+  state: DST ≡ SRC recursively.
 
-## Refusals
+Refusals cite A-numbers only: `A12` (SRC/DST identity, ancestor/descendant,
+realpath-based), `A14`/`A15` (collision with owned concrete paths: the
+instantiated stage dir, the log file's parent `~/.cache/hermes-context`, the
+entrypoint dir `~/.local/bin`), `A18` (degenerate paths `/`, ``, `.`),
+`A22` (DST itself is a symlink — refused, never replaced), `A23`
+(set-but-empty env override).
 
-Guards cite only: A12 (identity/ancestor/descendant/symlink-into-SRC),
-A14/A15 (overlap with owned concrete paths: instantiated stage dir, log
-file's parent, entrypoint dir), A18 (degenerate `/`, ``, `.`), A22 (DST
-itself resolves to a user-placed symlink — refused, never replaced),
-A23 (set-but-empty env values). Ancestor-path refusals are realpath-based,
-never lexical prefixes.
+Each successful real run appends one line to
+`~/.cache/hermes-context/sync.log`; the log and the entrypoint live outside
+DST and are never touched by sync (`A8`).
 
 ## KNOWN_LIMITATIONS
 
-- A21: exotic filenames containing newlines or control characters are
-  not handled (KNOWN_LIMITATIONS, open).
-- Adversarial env combinations beyond the A14 owned-path guard
-  (KNOWN_LIMITATIONS, open).
+- Exotic filenames (newlines/control characters) — not handled (+open, `A21`).
+- Adversarial environment combinations beyond the `A14` owned-path guard —
+  treated as open, not FAIL (`A10`/`A14`).

@@ -1,1 +1,1 @@
-gate.sh: line 113: syntax error: unexpected end of file from `for' command on line 95
+GATE FAIL: real run exited nonzero: A14: stage parent (/tmp) is inside DST or SRC; refusing to stage there

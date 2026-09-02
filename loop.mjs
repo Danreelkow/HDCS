@@ -125,7 +125,7 @@ if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && f
 if (!s3cached && !state.gate_pass) { if (build) log('s3: no recorded gate pass for these artifacts (cold state) — full rebuild'); build = null; }
 if (!s3cached) {
 checkBudget('s3');
-const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3-repair'] : ['s3', 's3-alt', 's3-repair'];
+const s3attempts = (build && s2Cached && state.gate_pass) ? ['s3', 's3-repair'] : ['s3', 's3-alt', 's3-repair'];
 const gateFails = [];
 const s4evidence = (!gateFails.length && fs.existsSync('s4-verdict.txt')) ? `\n\nS4 JUDGE VERDICT from the previous lap (fix its findings — the gate baseline is green, KEEP it green):\n${fs.readFileSync('s4-verdict.txt', 'utf8')}` : '';
 for (const attempt of s3attempts) {
