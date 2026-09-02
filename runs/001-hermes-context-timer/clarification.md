@@ -3,7 +3,7 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: In `sync-hermes-context.sh` lines 191–194, the instantiated staging path is checked only with `is_inside "$R_STAGE" "$R_DST"` and `is_inside "$R_STAGE" "$R_SRC"`. This detects stage-inside-DST/SRC, but not DST-inside-stage/SRC-inside-stage. A20/A14/A15 require component-boundary bidirectional overlap checks for the concrete instantiated stage directory. Thus an override such as `TMPDIR=/tmp` with `HERMES_CONTEXT_DST=/tmp/hermes-context-stage.ABC/subdir` can allow the owned stage directory to contain DST, violating the required refusal guard before destructive operations.
+EVIDENCE: `sync-hermes-context.sh` final application block (around lines 238–246) uses `rsync -a --delete "$STAGE/" "$DST/"` without `--checksum`, and only invokes `fallback_copy` when rsync itself exits nonzero. Since the staged file preserves the source size and mtime, an existing destination file whose bytes changed while retaining the same size/mtime can be skipped by rsync; the subsequent `verify_a9` (around lines 128–166 and 250–254) then exits nonzero instead of repairing the destination. This violates A5’s required converged end state for normal operation.
 
 ## Packet
 ```yaml

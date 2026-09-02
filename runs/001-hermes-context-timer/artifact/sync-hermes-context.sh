@@ -46,7 +46,7 @@ contains_bi() { # true if a==b, a inside b, or b inside a
   local a=$1 b=$2
   [ "$a" = "$b" ] || [ "${a#"$b"/}" != "$a" ] || [ "${b#"$a"/}" != "$b" ]
 }
-is_inside() { # true if child is child==parent or strictly inside parent
+is_inside() { # true if child==parent or strictly inside parent
   local child=$1 parent=$2
   [ "$child" = "$parent" ] || [ "${child#"$parent"/}" != "$child" ]
 }
@@ -152,7 +152,8 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
 if [ "$MODE" = dry ]; then
   if { [ -e "$DST" ] || [ -L "$DST" ]; } && [ -d "$DST" ]; then
     if command -v rsync >/dev/null 2>&1; then
-      out=$(rsync -an --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
+      # --checksum so the plan reflects byte-level changes, not just size/mtime
+      out=$(rsync -ancn --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
       DEL=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
       SYNC=$(printf '%s\n' "$out" | grep -Ev '^(\.|\*deleting|$)' | grep -c . || true)
     else
@@ -200,7 +201,8 @@ if [ -z "$PARENT" ]; then
   echo "A14: TMPDIR set but empty; no usable stage parent" >&2; exit 1
 fi
 R_PARENT=$(realpath -m -- "$PARENT")
-# stage parent must not be INSIDE DST/SRC/owned (reverse is normal: DST under /tmp is fine)
+# stage parent must not be INSIDE DST/SRC/owned (reverse is normal: DST under
+# /tmp is fine — /tmp is NOT inside DST, so this must sync, not refuse)
 if is_inside "$R_PARENT" "$R_DST"; then
   echo "A14: stage parent ($R_PARENT) is inside DST ($R_DST)" >&2; exit 1
 fi
@@ -214,16 +216,27 @@ for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   fi
 done
 STAGE=$(mktemp -d "$R_PARENT/hermes-context-stage.XXXXXX")
-# re-validate the INSTANTIATED stage path (A20/A14)
+# re-validate the INSTANTIATED stage path (A20/A14/A15): BIDIRECTIONAL
+# component-overlap — refuse if the stage is inside DST/SRC/owned OR if
+# DST/SRC is inside the stage (a stage containing DST would be destroyed by
+# stage cleanup, so overlap in either direction refuses)
 R_STAGE=$(realpath -- "$STAGE")
-if [ -L "$STAGE" ] || is_inside "$R_STAGE" "$R_DST" || is_inside "$R_STAGE" "$R_SRC"; then
-  echo "A14: instantiated stage path invalid ($R_STAGE)" >&2
+if [ -L "$STAGE" ]; then
+  echo "A14: instantiated stage path is a symlink ($R_STAGE)" >&2
+  rm -rf -- "$STAGE"; exit 1
+fi
+if contains_bi "$R_STAGE" "$R_DST"; then
+  echo "A14: instantiated stage ($R_STAGE) overlaps DST ($R_DST)" >&2
+  rm -rf -- "$STAGE"; exit 1
+fi
+if contains_bi "$R_STAGE" "$R_SRC"; then
+  echo "A14: instantiated stage ($R_STAGE) overlaps SRC ($R_SRC)" >&2
   rm -rf -- "$STAGE"; exit 1
 fi
 for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   R_OWNED=$(realpath -m -- "$OWNED")
-  if is_inside "$R_STAGE" "$R_OWNED"; then
-    echo "A14: instantiated stage inside owned path ($R_OWNED)" >&2
+  if contains_bi "$R_STAGE" "$R_OWNED"; then
+    echo "A14: instantiated stage ($R_STAGE) overlaps owned path ($R_OWNED)" >&2
     rm -rf -- "$STAGE"; exit 1
   fi
 done
@@ -273,7 +286,9 @@ pre_reconcile_types() {
 
 if command -v rsync >/dev/null 2>&1; then
   RSYNC=yes
-  if ! rsync -a --delete "$SRC/" "$STAGE/" ; then
+  # --checksum: size/mtime equality is NOT content equality (A5) — a DST file
+  # whose bytes changed while retaining size and mtime must still be re-copied
+  if ! rsync -a --checksum --delete "$SRC/" "$STAGE/" ; then
     fallback_copy "$SRC" "$STAGE"
     RSYNC=no
   fi
@@ -293,7 +308,9 @@ fi
 # --- touch DST ----------------------------------------------------------------
 pre_reconcile_types
 if [ "$RSYNC" = yes ]; then
-  if ! rsync -a --delete "$STAGE/" "$DST/" ; then
+  # --checksum here too: the same size/mtime-collision hazard applies when
+  # applying the verified stage onto an existing DST
+  if ! rsync -a --checksum --delete "$STAGE/" "$DST/" ; then
     fallback_copy "$STAGE" "$DST"
   fi
 else
@@ -312,4 +329,3 @@ printf '%s mode=sync rsync=%s src=%s dst=%s\n' \
 
 cleanup_stage
 exit 0
-
