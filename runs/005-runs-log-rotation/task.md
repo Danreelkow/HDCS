@@ -20,3 +20,4 @@ Deliverable (all files in one artifact dir):
 MUST_KEEP: default mode is dry-run that performs no writes
 MUST_KEEP: no root required and no logrotate dependency
 MUST_KEEP: archived originals land outside the runs directory
+MUST_KEEP: the config defines exactly the five keys RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP

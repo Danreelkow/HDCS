@@ -1,0 +1,45 @@
+# Clarification needed — 005-runs-log-rotation
+
+## Gate output (after repair round)
+```
+GATE FAIL: config missing key KEEP
+
+```
+
+## Open questions recorded by S1
+(none recorded)
+
+## Packet
+```yaml
+reg: {domain: cs-shell-ops, canon: "bash/coreutils nouns — find -mtime/-printf, realpath -m, cmp, cksum, env-over-conf precedence, idempotent move-once rotation"}
+intent: "deliver self-contained rotation pair for /workspace/hdcs/runs: conf + dry-run-default rotate script (--apply moves PATTERN files older AGE_DAYS to ARCHIVE preserving relative path, path-law refusals) + verifier + README; bash+coreutils only, no root, no logrotate"
+must_keep:
+  - "default mode is dry-run that performs no writes"
+  - "no root required and no logrotate dependency"
+  - "archived originals land outside the runs directory"
+resolved:
+  - "Q1: may dry-run create ARCHIVE_DIR or state? -> A: no — zero-write per A1"
+  - "Q2: allowed toolchain? -> A: bash+coreutils (find, cmp, realpath, cksum); logrotate absent per A2"
+  - "Q3: path refusal law? -> A: identity/containment/degenerate refuse with A-numbers, zero-write per A4"
+  - "Q4: idempotence contract? -> A: move-once, cmp-verified bytes, second --apply no-op per A5"
+  - "Q5: verify exit criteria? -> A: conf parses ∧ no pending rotation ∧ archive consistent per A6"
+  - "Q6: exotic filenames / races? -> A: KNOWN_LIMITATIONS, not FAIL per A7"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "A1 dry-run zero-write"
+  - "A2 no logrotate, no root"
+  - "A4 refuse identity + containment + degenerate, citing A-numbers"
+  - "A5 idempotent move-once with cmp-verified bytes + name-preserving suffix"
+  - "A6 verifier exit-0 criteria"
+  - "no_resurrect: logrotate invocation forbidden"
+  - "archived originals land outside RUNS_DIR"
+paths:
+  - "<artifact-dir>/hdcs-runs-rotation.conf"
+  - "<artifact-dir>/rotate-hdcs-runs.sh"
+  - "<artifact-dir>/verify-rotation.sh"
+  - "<artifact-dir>/README.md"
+  - "default RUNS_DIR: /workspace/hdcs/runs"
+  - "default ARCHIVE_DIR: /workspace/.hdcs-rotate/archive"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+```

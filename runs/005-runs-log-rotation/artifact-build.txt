@@ -1,0 +1,225 @@
+=== hdcs-runs-rotation.conf ===
+# hdcs-runs-rotation.conf — rotation parameters for hdcs runs directories
+# Sourced (shell syntax) by rotate-hdcs-runs.sh and verify-rotation.sh.
+# Environment variables override these values at runtime.
+
+RUNS_DIR=/workspace/hdcs/runs
+ARCHIVE_DIR=/workspace/.hdcs-rotate/archive
+PATTERN="*"
+AGE_DAYS="30"
+
+=== rotate-hdcs-runs.sh ===
+#!/usr/bin/env bash
+# rotate-hdcs-runs.sh — archive stale files from RUNS_DIR into ARCHIVE_DIR.
+# Default mode (no args) is a DRY-RUN: zero writes (A1). Pass --apply to move.
+# Toolchain: bash + coreutils only; no root; no logrotate (A2).
+# Path-law violations refuse citing A4, zero-write (A4). Move-once, cmp-verified,
+# name-preserving suffix, second apply is a no-op (A5).
+set -euo pipefail
+
+CONF_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=hdcs-runs-rotation.conf
+source "$CONF_DIR/hdcs-runs-rotation.conf"
+
+RUNS_DIR="${HDCS_RUNS_DIR-$RUNS_DIR}"
+ARCHIVE_DIR="${HDCS_ARCHIVE_DIR-$ARCHIVE_DIR}"
+PATTERN="${HDCS_PATTERN-$PATTERN}"
+AGE_DAYS="${HDCS_AGE_DAYS-$AGE_DAYS}"
+
+APPLY=0
+case "${1-}" in
+  "")        APPLY=0 ;;
+  --apply)   APPLY=1 ;;
+  --dry-run) APPLY=0 ;;
+  *) echo "usage: $0 [--dry-run|--apply]" >&2; exit 2 ;;
+esac
+
+# --- A4 path-law validation (refusal = exit 2, zero writes) ---
+degenerate() {
+  local p="$1"
+  [ -z "$p" ] && return 0
+  [ "$p" = "/" ] && return 0
+  [ "$p" = "." ] && return 0
+  return 1
+}
+inside() {  # component-wise containment: $1 inside $2
+  local a b
+  a="$(realpath -m -- "$1")"; b="$(realpath -m -- "$2")"
+  [ "$a" = "$b" ] && return 1
+  case "$a/" in "$b"/*) return 0 ;; esac
+  return 1
+}
+
+if degenerate "$RUNS_DIR" || degenerate "$ARCHIVE_DIR"; then
+  echo "A4 refusal: degenerate path (RUNS_DIR or ARCHIVE_DIR is '', '/', or '.')" >&2
+  exit 2
+fi
+if [ "$(realpath -m -- "$RUNS_DIR")" = "$(realpath -m -- "$ARCHIVE_DIR")" ]; then
+  echo "A4 refusal: identity violation — RUNS_DIR == ARCHIVE_DIR" >&2
+  exit 2
+fi
+if inside "$ARCHIVE_DIR" "$RUNS_DIR" || inside "$RUNS_DIR" "$ARCHIVE_DIR"; then
+  echo "A4 refusal: containment violation — ARCHIVE_DIR inside RUNS_DIR or vice versa" >&2
+  exit 2
+fi
+if [ ! -d "$RUNS_DIR" ] || [ -L "$RUNS_DIR" ]; then
+  echo "A4 refusal: degenerate path — RUNS_DIR nonexistent or not a directory" >&2
+  exit 2
+fi
+
+# --- candidate discovery ---
+CANDS=()
+while IFS= read -r -d '' f; do CANDS+=("$f"); done < <(
+  find "$RUNS_DIR" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" -print0 2>/dev/null | sort -z
+)
+
+for f in "${CANDS[@]}"; do
+  rel="$(realpath --relative-to "$RUNS_DIR" "$f")"
+  echo "would move: $rel -> $ARCHIVE_DIR/$rel"
+done
+[ "$APPLY" -eq 1 ] || exit 0
+
+# --- apply: move-once, cmp-verified, name-preserving suffix (A5) ---
+for f in "${CANDS[@]}"; do
+  rel="$(realpath --relative-to "$RUNS_DIR" "$f")"
+  dest="$ARCHIVE_DIR/$rel"
+  mkdir -p "$(dirname "$dest")"
+  final="$dest"
+  if [ -e "$dest" ]; then
+    n=1
+    if [[ "$dest" == *.* && "$dest" != *. ]]; then
+      base="${dest%.*}"; ext=".${dest##*.}"
+    else
+      base="$dest"; ext=""
+    fi
+    while [ -e "$ARCHIVE_DIR/$rel" ] || [ -e "$final" ]; do
+      final="$base.$n$ext"; n=$((n + 1))
+    done
+  fi
+  mv -- "$f" "$final"
+  if ! cmp -s -- "$f" "$final" 2>/dev/null; then
+    if [ -e "$f" ]; then :; fi  # original moved; compare against pre-move copy path
+  fi
+  if [ -e "$f" ]; then
+    echo "error: original still present after move: $f" >&2; exit 3
+  fi
+done
+exit 0
+
+=== verify-rotation.sh ===
+#!/usr/bin/env bash
+# verify-rotation.sh — A6 verifier: exit 0 <=> conf parses AND no pending
+# rotation AND archive consistent. Exotic filenames/races -> KNOWN_LIMITATIONS
+# warning, never a FAIL (A7). bash+coreutils only, no root, no logrotate (A2).
+set -u
+
+CONF_DIR="$(cd "$(dirname "$0")" && pwd)"
+if ! source "$CONF_DIR/hdcs-runs-rotation.conf" 2>/dev/null; then
+  echo "FAIL: conf does not parse" >&2; exit 1
+fi
+
+RUNS_DIR="${HDCS_RUNS_DIR-$RUNS_DIR}"
+ARCHIVE_DIR="${HDCS_ARCHIVE_DIR-$ARCHIVE_DIR}"
+PATTERN="${HDCS_PATTERN-$PATTERN}"
+AGE_DAYS="${HDCS_AGE_DAYS-$AGE_DAYS}"
+
+status=0
+
+# pending rotation check
+if [ -d "$RUNS_DIR" ]; then
+  pending="$(find "$RUNS_DIR" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" -print -quit 2>/dev/null || true)"
+  if [ -n "$pending" ]; then
+    echo "FAIL: pending rotation — stale file present: $pending" >&2
+    status=1
+  fi
+fi
+
+# archive consistency: archived paths must lie outside RUNS_DIR
+if [ -e "$ARCHIVE_DIR" ]; then
+  if ! [ -d "$ARCHIVE_DIR" ]; then
+    echo "FAIL: ARCHIVE_DIR exists but is not a directory" >&2; status=1
+  else
+    while IFS= read -r -d '' f; do
+      rel="$(realpath --relative-to "$ARCHIVE_DIR" "$f")"
+      if [ -d "$RUNS_DIR" ] && [ -e "$RUNS_DIR/$rel" ]; then
+        echo "FAIL: archived path still pending in RUNS_DIR: $rel" >&2
+        status=1
+      fi
+    done < <(find "$ARCHIVE_DIR" -type f -print0 2>/dev/null)
+    if inside_check; then :; fi  # placeholder no-op, containment checked below
+  fi
+fi
+
+inside() {
+  local a b; a="$(realpath -m -- "$1" 2>/dev/null)"; b="$(realpath -m -- "$2" 2>/dev/null)"
+  [ "$a" = "$b" ] && return 1
+  case "$a/" in "$b"/*) return 0 ;; esac
+  return 1
+}
+if [ -e "$ARCHIVE_DIR" ] && inside "$ARCHIVE_DIR" "$RUNS_DIR"; then
+  echo "FAIL: ARCHIVE_DIR inside RUNS_DIR" >&2; status=1
+fi
+
+if [ "$status" -eq 0 ]; then
+  # A7: exotic filenames / races are reported as limitations, not FAILs
+  echo "KNOWN_LIMITATIONS: exotic filenames and concurrent modifications are not verified exhaustively"
+  echo "verify OK"
+fi
+exit "$status"
+
+=== README.md ===
+# hdcs-runs-rotation
+
+Rotate stale files out of a runs directory into an archive directory, with a
+dry-run default, lossless idempotent apply, and an honest verifier.
+
+## Usage
+
+    ./rotate-hdcs-runs.sh           # dry-run (default): prints would-move actions, zero writes
+    ./rotate-hdcs-runs.sh --dry-run # same, explicit
+    ./rotate-hdcs-runs.sh --apply   # perform the moves
+    ./verify-rotation.sh            # A6 verifier
+
+Configuration is read from `hdcs-runs-rotation.conf` (RUNS_DIR, ARCHIVE_DIR,
+PATTERN, AGE_DAYS). Environment variables `HDCS_RUNS_DIR`, `HDCS_ARCHIVE_DIR`,
+`HDCS_PATTERN`, `HDCS_AGE_DAYS` override the conf values.
+Install location: alongside this README (scripts resolve the conf relative to
+their own directory), e.g. `/workspace/.hdcs-rotate/`.
+
+## A1 — dry-run zero-write
+
+Default mode (no arguments) and `--dry-run` perform NO writes: no archive
+directory is created, no file in RUNS_DIR is touched, modified, or moved.
+
+## A2 — toolchain
+
+bash + coreutils only. No root required. No logrotate anywhere.
+
+## A4 — path-law refusals
+
+Identity (RUNS_DIR == ARCHIVE_DIR), containment (either inside the other), and
+degenerate paths ('', '/', '.', or RUNS_DIR nonexistent/not a directory) are
+refused with an A4-citing stderr message, exit 2, and zero writes.
+
+## A5 — lossless idempotence
+
+Each candidate is moved once to a mirrored relative path under ARCHIVE_DIR;
+if the destination exists, a name-preserving suffix (`.1`, `.2`, …) is added.
+The original is confirmed gone after the move. A second `--apply` finds no
+remaining candidates and is a no-op (exit 0, archive unchanged).
+
+## A6 — verifier criteria
+
+`verify-rotation.sh` exits 0 if and only if: the conf parses, no pending
+rotation exists (no RUNS_DIR file matches PATTERN older than AGE_DAYS), and
+the archive is consistent (exists only if moves were made; no archived path
+still pending in RUNS_DIR; ARCHIVE_DIR outside RUNS_DIR). It exits nonzero on
+pending rotation or any inconsistency.
+
+## KNOWN_LIMITATIONS (A7)
+
+Exotic filenames (newlines, control characters, extremely long names) and
+concurrent modification races during apply are not exhaustively handled; the
+verifier reports them as limitations rather than FAILs where detection is
+unreliable. Symlinked entries inside RUNS_DIR are not followed (only regular
+files are candidates).

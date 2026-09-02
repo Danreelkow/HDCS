@@ -1,0 +1,7 @@
+A1: ∀ dry-run mode -> zero writes, ARCHIVE_DIR not created
+A2: toolchain := bash + coreutils only, no root, no logrotate
+A4: ∀ path-law violation (identity ∨ non-containment ∨ degenerate) -> refuse, cite A-number, zero-write
+A5: ∀ path -> DST end state == SRC bytes (cmp-verified), name-preserving suffix, move-once; second --apply no-op
+A6: verifier exit 0 ⇔ conf parses ∧ no pending rotation ∧ archive consistent
+A7: exotic filenames/races -> KNOWN_LIMITATIONS section, not verify FAIL
+open: none — operator answers folded, gate READY

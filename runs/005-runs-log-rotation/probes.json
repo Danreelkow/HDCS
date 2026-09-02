@@ -5,5 +5,6 @@
   "no-root": ["no root", "user-level", "unprivileged"],
   "archive-outside-runs": ["outside the runs directory", "outside RUNS_DIR"],
   "idempotent": ["idempotent", "second apply", "safe to run repeatedly"],
-  "env-override": ["HDCS_RUNS_DIR", "environment override"]
+  "env-override": ["HDCS_RUNS_DIR", "environment override"],
+  "five-config-keys": ["five keys", "RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP"]
 }
