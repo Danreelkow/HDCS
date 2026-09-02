@@ -3,38 +3,38 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: RUNBOOK.md §3, lines 58–62, runs `install` against bare filenames (`sync-hermes-context.sh`, `hermes-context.service`, `hermes-context.timer`) without changing into `runs/001-hermes-context-timer/artifact/` or otherwise giving source paths; as written, these commands fail from an arbitrary operator working directory, violating the zero-prior-context/run-as-written requirement. RUNBOOK.md §4, lines 78–80, invents behavior and configuration mechanisms not in the packet facts: trailing-slash canonicalization, a service environment file, and the claim that exporting variables in that file/configuration changes the timer service. RUNBOOK.md §8, lines 113–120, adds unsupported refusal-condition details (“same filesystem expectations,” staging paths “the tool owns,” and log/target paths inside DST) beyond the closed-world facts, and presents the last condition without an allowed citation.
+EVIDENCE: RUNBOOK.md, “Roll back a bad sync,” explicitly sets `HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/` for both re-sync commands. This overrides any configured non-default `HERMES_CONTEXT_SRC`, contradicting the required rollback in I7 to re-sync from the configured, known-good source. The rollback instructions therefore do not restore from the operator’s configured source when it differs from the production default.
 
 ## Packet
 ```yaml
-reg: {domain: cs-technical-writing, canon: systemd user units (systemctl --user, .service/.timer), rsync mirror semantics (delete, verify), exit codes/citations, env-var config HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST}
-intent: >
-  author := RUNBOOK.md, single-file operator runbook for TOOL runs/001-hermes-context-timer/artifact/sync-hermes-context.sh (+ units + README),
-  audience := new operator, zero prior context;
-  sections ordered: [what-the-tool-does, test-before-installing(--dry-run), install, configure(SRC/DST env overrides + defaults), schedule(systemd user timer, 6h), verify-a-sync(--verify), rollback(bad-sync concrete restore), troubleshooting(refusals + A-number citation meanings)];
-  closed_world := ∀ tool claim ∈ facts register only; document AS_DELIVERED (I1..I7 in context.hcdl).
+reg: {domain: cs-technical-writing, canon: runbook composition over closed-world bash/systemd CLI artifact; rsync one-way mirror semantics; citation register A9/A12/A13/A14/A18/A23}
+intent: := author RUNBOOK.md (single file) for new operators of run-001 sync-hermes-context.sh; 8 mandated sections in order (What this tool does; Test before installing --dry-run; Install; Configure; Schedule systemd user timer; Verify a sync; Roll back a bad sync; Troubleshooting A-number citations); every tool claim traceable to facts I1..I7 (context.hcdl) or artifact itself; every instruction block executable verbatim from arbitrary cwd; rollback = remove bad DST + re-sync from configured SRC
 must_keep:
-  - documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly
-  - includes a --dry-run test the operator can run before installing
-  - states the documented rollback for a bad sync
+  - "documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly"
+  - "includes a --dry-run test the operator can run before installing"
+  - "states the documented rollback for a bad sync"
 resolved:
-  - "Q1: scope of tool claims -> A: closed world per A1/A4/A5; facts block is the accuracy contract, no invented flags/env vars/paths, refusals documented as delivered"
-  - "Q2: register style -> A: plain imperative English per A3; hcdl register terms (A-number, packet, seat) explained or omitted from runbook body"
-  - "Q3: section completeness -> A: mandated order, every section non-empty, rollback names concrete restore (remove/re-sync HERMES_CONTEXT_DST from configured SRC), not 'reinstall' (A6)"
-  - "Q4: correctness bar -> A: S4 rubric per A7 — FAIL iff any runbook command fails as written against the run-001 artifact or any MUST_KEEP section missing/hollow"
-  - "Q5: citation coverage -> A: cite only {A23, A18, A12, A13, A14, A9}, only where true; uncited refusal conditions described without citation"
+  - "Q1: accuracy source for tool claims? -> A: task.md system-facts block + artifact (operator A1, A9 closed-world doctrine, Danreelkow 2026-09-02); unsupported claims DELETED not elaborated"
+  - "Q2: may runbook use hcdl register vocabulary? -> A: plain imperative English; A-number/packet/seat explained or omitted (A3)"
+  - "Q3: may new flags/paths/env vars be taught? -> A: no; closed world (A4, A5 as-delivered incl. refusals)"
+  - "Q4: executability bar for command blocks? -> A: literal `cd /workspace/hdcs/runs/001-hermes-context-timer/artifact` line or absolute paths in every instruction block; prose-only 'change directory' = defect (A7 instantiation, lap 1)"
+  - "Q5: are config examples with placeholders defects? -> A: no, iff `# example:`-marked AND section shows mechanism (export syntax, scoping); flagging marked examples as exec defects = false positive, gate becoming wall (A10, lap 2)"
+  - "Q6: rollback sufficiency? -> A: concrete data-restore (remove bad HERMES_CONTEXT_DST, re-sync from known-good configured SRC); disabling timer alone insufficient (A6)"
+  - "Q7: install assuming target dirs exist? -> A: forbidden; teach mkdir -p or install -D; arbitrary cwd correctness (A9)"
+  - "Q8: --checksum/--delete/--itemize-changes tool flags? -> A: no — rsync internal invocation flags; teaching them = invention"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
 handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
 constraints:
-  - "accuracy bar := system facts block verbatim (defaults, --dry-run zero writes, --verify nonzero on mismatch, log path, install paths, 6h timer, nonzero refusals citing A-numbers)"
-  - "closed-world register {A23,A18,A12,A13,A14,A9}; --checksum/--delete/--itemize-changes are rsync internals, NOT tool flags; unknown tool flag -> usage error exit 2"
-  - "install must teach mkdir -p / install -D (no preexisting-dir assumption)"
-  - "no_resurrect: any invented tool behavior/flag/env var fails S4 rubric (A7)"
+  - closed-world: ∀ claim -> traceable to I1..I7 (context.hcdl) or artifact; else delete
+  - instruction blocks executable verbatim from arbitrary cwd (emit cd line or absolute paths); `# example:`-marked config lines exempt
+  - section order + non-empty per A6; rollback names concrete restore action
+  - no_resurrect: suppressed unsupported mechanisms (env files, canonicalization behaviors, invented refusal details) stay suppressed
+  - closed-world flags: tool flags = --dry-run, --verify only; other flag => usage error exit 2
 paths:
-  - runs/001-hermes-context-timer/artifact/sync-hermes-context.sh
-  - runs/001-hermes-context-timer/artifact/hermes-context.service
-  - runs/001-hermes-context-timer/artifact/hermes-context.timer
-  - runs/001-hermes-context-timer/artifact/README.md
-  - RUNBOOK.md
-budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+  - /workspace/hdcs/runs/001-hermes-context-timer/artifact/sync-hermes-context.sh
+  - /workspace/hdcs/runs/001-hermes-context-timer/artifact/hermes-context.service
+  - /workspace/hdcs/runs/001-hermes-context-timer/artifact/hermes-context.timer
+  - /workspace/hdcs/runs/001-hermes-context-timer/artifact/README.md
+  - /workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md
+budgets: {tokens: 6000, lines: 60, fix_cycles: 2, questions: 2}
 ```

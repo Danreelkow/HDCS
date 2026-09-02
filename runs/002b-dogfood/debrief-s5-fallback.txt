@@ -1,19 +1,23 @@
-# Debrief: RUNBOOK.md for the hermes-context sync tool (run-001)
+**The task**
+Author RUNBOOK.md — one file — for brand-new operators of the run-001 script `sync-hermes-context.sh`, a bash/systemd CLI tool with rsync one-way mirror semantics. Eight sections, in this exact order, each non-empty: What this tool does; Test before installing --dry-run; Install; Configure; Schedule systemd user timer; Verify a sync; Roll back a bad sync; Troubleshooting with A-number citations (register: A9, A12, A13, A14, A18, A23).
 
-**What was asked.** Write a single-file operator runbook (RUNBOOK.md) for the hermes-context sync tool, aimed at a brand-new operator with no prior context. It must have eight sections in a fixed order, and every claim about the tool must come only from the supplied facts block. Every command in the runbook must actually work as written against the delivered artifact.
+**Three must-keeps**
+It documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly; it includes a --dry-run test the operator can run before installing; it states the documented rollback for a bad sync.
 
-**Environment variables.** The runbook documents HERMES_CONTEXT_SRC (the source-override) and HERMES_CONTEXT_DST (the destination-override) exactly as specified — no other env var names may be invented.
+**Closed world**
+∀ claim -> traceable to the system-facts I1..I7 in context.hcdl or to the artifact itself; anything unsupported is deleted, not elaborated. The accuracy source is the task.md system-facts block plus the artifact, per operator A1 and the A9 closed-world doctrine (Danreelkow 2026-09-02). The tool's flags are --dry-run and --verify only; any other flag -> usage error, exit 2. So --checksum, --delete, and --itemize-changes must not be taught: they are internal rsync invocation flags, and teaching them counts as invention. No new flags, paths, or env vars may be introduced beyond what shipped as-delivered, refusals included (A4, A5).
 
-**Dry run.** It includes a --dry-run test the operator can run before installing anything, so a bad sync can be previewed safely. The tool's only flags are --dry-run and --verify; rsync's own flags like --checksum, --delete, and --itemize-changes must not be taught as tool flags.
+**Executable commands, plain words**
+Plain imperative English only; register vocabulary (A-number, packet, seat) is either explained or omitted (A3). Every command block must run verbatim from an arbitrary working directory: it opens with the literal line `cd /workspace/hdcs/runs/001-hermes-context-timer/artifact` or uses absolute paths throughout; a prose-only "change directory" is a defect (A7, lap 1). Config lines marked `# example:` may keep placeholders as long as the section shows the mechanism (export syntax, scoping); flagging those as executability defects is a false positive — the gate must not become a wall (A10, lap 2).
 
-**Rollback.** The documented rollback for a bad sync is concrete data restoration: remove the bad destination directory and re-sync it from the configured HERMES_CONTEXT_SRC. Merely disabling the timer or reinstalling does not count as rollback.
+**Install and rollback**
+The install section may not assume target directories exist: teach mkdir -p or install -D, correct from any cwd (A9) — for example, create .local/bin before placing anything in it. The documented rollback is a concrete data restore: remove the bad HERMES_CONTEXT_DST and re-sync from the known-good configured source env var; disabling the user timer alone is insufficient (A6). The rollback section must name that restore action.
 
-**Refusals.** The runbook documents the tool as delivered, including its refusals, without softening or omitting them (the no_resurrect rule). Refusal citations are limited to the closed register A23, A18, A12, A13, A14, and A9 — a refusal cites an A-number only where it is actually true; otherwise the condition is described without a citation.
+**Nothing resurrected**
+Mechanisms that were examined and suppressed stay suppressed: no env files, no canonicalization behaviors, no invented refusal details.
 
-**Install path.** The install section teaches creating directories explicitly (mkdir -p / install -D) rather than assuming target directories exist; the .local/bin install-path is covered there. Example operator paths are allowed only if clearly marked as examples.
+**Process and budget**
+Phases: plan, scoped-build, verify, deliver. Builders are dynamic, the verifier is decorrelated, the gate is READY | NOT_READY, with at most 2 fix cycles. Handoff moves state S_0 + Delta -> S_1; the report carries +done, -resolved, +open, +validation. Budgets: 6000 tokens, 60 lines, 2 fix cycles, 2 questions.
 
-**Writing style.** Plain imperative English; internal register jargon is either explained or left out.
-
-**Validation.** The verifier (independent of the builder) checks every command succeeds as written against the artifact and that the required sections are substantive, not hollow. The workflow runs plan, scoped build, verify, deliver, with at most two fix cycles and a READY or NOT_READY gate at the end.
-
-**Artifacts covered.** The sync script, the systemd service and timer units (user-level-timer: systemctl --user / user units), the README, and the new RUNBOOK.md, all under runs/001-hermes-context-timer/.
+**Files**
+Read from the artifact directory: `sync-hermes-context.sh` plus the user units `hermes-context.service` and `hermes-context.timer`, and README.md. Write the finished runbook to `/workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md`.

@@ -2,5 +2,5 @@
   "task": "002b-dogfood",
   "budget": 0.05,
   "maxLaps": 2,
-  "laps": 0
+  "laps": 1
 }

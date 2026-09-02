@@ -1,1 +1,48 @@
-state: s0 := TOOL = runs/001-hermes-context-timer/artifact/{sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}; refusals = {A23 set-but-empty env, A18 degenerate paths, A12 same/ancestor/symlink-component, A13 staging verify fail, A14 staging path conflict incl. TMPDIR set-but-empty, A9 mirror mismatch}; tool flags = {--dry-run (plan only, zero writes), --verify (exit 0 iff exact mirror, else nonzero + A9)}; defaults SRC=/opt/data/workspace/hermes-context/, DST=/workspace/hermes-context/; install: mkdir -p + install -D, units → ~/.config/systemd/user/, script → ~/.local/bin/, timer 6h, logs ~/.cache/hermes-context/ (one line per real run); rollback = remove/re-sync DST from configured SRC (disabling timer alone FAILS, A6). Δ := 1) Read all four TOOL files; record exact defaults, flag behavior, refusal messages, log line format. Expected: notes with verbatim facts. 2) Draft RUNBOOK.md, sections in order: [what-the-tool-does, test-before-installing(--dry-run), install, configure(SRC/DST defaults + overrides), schedule(systemctl --user daemon-reload, enable --now hermes-context.timer, 6h), verify-a-sync(--verify), rollback(remove contents of configured HERMES_CONTEXT_DST, re-run script from configured SRC; state timer-disable-alone insufficient), troubleshooting(refusal table: A23 set-but-empty env (unset = default), A18 empty/'.'/resolves-to-'/'), A12 same path/ancestor/descendant/symlink component, A13 staging verify fail (DST untouched), A14 staging path conflict incl. TMPDIR set-but-empty, A9 mirror mismatch; unknown-flag exit 2; explain "A-number" inline as the tool's named refusal codes]. Expected: full draft. 3) Self-audit pass: every command runs as written; no invented flags/env/paths; every section non-empty; hcdl terms defined or absent; example paths marked as examples. Expected: audit checklist all-pass. 4) Write RUNBOOK.md. Expected: file present, 8 sections ordered. accept: [RUNBOOK.md exists; section list exactly the 8 mandated, in order, all non-empty; every tool claim traceable to TOOL facts (defaults SRC=/opt/data/workspace/hermes-context/ DST=/workspace/hermes-context/, --dry-run zero writes, --verify nonzero+A9 on mismatch, log path ~/.cache/hermes-context/, install paths per I5, 6h timer); rollback section gives concrete remove+re-sync of HERMES_CONTEXT_DST from configured SRC; refusal docs limited to {A23,A18,A12,A13,A14,A9} plus uncited conditions described; zero invented flags/env vars/paths; all hcdl register terms explained inline or absent; every runbook command copy-paste executable against artifact]. constraints: [closed world per I1; no --checksum/--delete/--itemize-changes as tool flags; mkdir -p/install -D taught, no preexisting-dir assumption; citations only where true; example operator paths marked as examples; ≤60 lines is not a hard cap for RUNBOOK but keep brief-focused; do not modify TOOL files]. deliverable: [RUNBOOK.md].
+# BUILD BRIEF → B1
+
+state: s0 := packet READY; artifact tree at /workspace/hdcs/runs/001-hermes-context-timer/artifact/ (sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md); facts I1–I7 in context.hcdl; target file RUNBOOK.md does not yet exist; no open questions.
+
+Δ :=
+
+1. Read all four artifact files at /workspace/hdcs/runs/001-hermes-context-timer/artifact/ to confirm facts I1–I4 (flags, env vars, paths, timer period, log location).
+   → expected: notes confirming --dry-run, --verify, exit 2 on other flags, HERMES_CONTEXT_SRC/DST defaults, 6h timer, ~/.cache/hermes-context/ log path.
+
+2. Create /workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md with exactly these 8 sections in order, each non-empty:
+   1. **What this tool does** — one-way recursive rsync mirror SRC→DST, removes stale DST extras, preserves types+symlink targets, re-verifies after sync (I3).
+   2. **Test before installing** — block starting with literal `cd /workspace/hdcs/runs/001-hermes-context-timer/artifact` then `./sync-hermes-context.sh --dry-run` (I3: plan only, zero writes).
+   3. **Install** — `mkdir -p ~/.local/bin ~/.config/systemd/user` then `install -D` (or cp) of script and both units; no assumption dirs exist (mkdir_rule).
+   4. **Configure** — document HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST verbatim with defaults /opt/data/workspace/hermes-context/ → /workspace/hermes-context/; show `export` mechanism; any override lines marked `# example:` (A1_mk1, Q5).
+   5. **Schedule** — `systemctl --user daemon-reload`, `systemctl --user enable --now hermes-context.timer`; state 6h period (I4).
+   6. **Verify a sync** — `./sync-hermes-context.sh --verify` after cd line; exit 0 = exact mirror, nonzero = mismatch (I3).
+   7. **Roll back a bad sync** — concrete: remove bad HERMES_CONTEXT_DST contents, re-sync from configured known-good HERMES_CONTEXT_SRC; state disabling timer alone is insufficient (I7).
+   8. **Troubleshooting** — table/list of A-number meanings: A9 mirror-mismatch findings; A12 same/ancestor/descendant/symlink-component path conflict; A13 staging verification failed (DST untouched); A14 staging conflicts incl. set-but-empty TMPDIR; A18 degenerate paths (empty/'.'); A23 set-but-empty env var (unset falls back to prod defaults); other refusals described without citation (I5).
+   → expected: RUNBOOK.md exists with 8 sections, exact order, all non-empty.
+
+3. Self-check pass against constraints before handoff:
+   - every instruction block begins with the literal cd line or uses absolute paths; only `# example:` lines exempt;
+   - no tool flags beyond --dry-run/--verify anywhere; no --checksum/--delete/--itemize-changes taught;
+   - no invented mechanisms (env files, canonicalization, invented refusal text);
+   - no hcdl vocabulary (packet/seat/register) unexplained in body — prefer omit;
+   - every claim traceable to I1–I7 or artifact; delete anything else.
+   → expected: checklist all-pass; any failing claim deleted, not reworded.
+
+accept:
+1. /workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md exists.
+2. grep -c '^## ' RUNBOOK.md == 8, headings match mandated order/names.
+3. Every fenced command block's first line is `cd /workspace/hdcs/runs/001-hermes-context-timer/artifact` or all commands use absolute paths; exception: lines starting `# example:`.
+4. `grep -E -- '--(checksum|delete|itemize-changes)' RUNBOOK.md` returns no matches outside rsync-internal disclaimer context (or zero matches).
+5. HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST each appear with verbatim defaults.
+6. Rollback section contains a concrete removal + re-sync action; phrase "disabling the timer" appears only as insufficient.
+7. Troubleshooting section defines A9, A12, A13, A14, A18, A23 in plain English.
+8. No occurrence of "packet", "seat", "hcdl" in body.
+
+constraints:
+- closed-world: every claim ∈ facts(I1–I7) ∨ artifact-verifiable; else DELETE.
+- tool flags = --dry-run, --verify only; any other flag = usage error exit 2 (document as such, never teach).
+- instruction blocks executable verbatim from arbitrary cwd.
+- `# example:`-marked config lines exempt from executability; section must still show export mechanism.
+- document refusals as delivered (A5); no idealized behavior.
+- single deliverable file; no other files created or modified.
+
+deliverable:
+- /workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md

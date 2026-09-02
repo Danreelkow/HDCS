@@ -18,3 +18,16 @@ re-derive + notes cross-check. The match decision itself comes from disk evidenc
 from the notes asserting it.
 Gate-testable: no — pure register law, S4-enforced (LOCK3-proven non-catchable class,
 12 recurrences). First loop-authored law (self-upgrade cycle, 2026-09-02).
+
+## A4 — canary-discriminating fixtures (2026-09-02, Danreelkow)
+Every proposed fixture lock MUST be canary-discriminating: the fixture is valid only if it
+FAILS on a defect-injected variant of the artifact and PASSES on the compliant artifact
+(∀ fixture F: F(compliant) ∧ ¬F(mutant)). Scope: governs LOCK rejections where the fixture
+passes the canary and cannot catch the defect class it claims to lock (wall, not gate).
+Satisfying form: before submitting a lock, mutate the artifact along the finding class
+(e.g., unscope the git query for A1, encode failure count in exit for A3) and show the
+fixture verdict flips; a lock that passes both is rejected as non-testable, and the class
+routes to S4 review instead. Extends A1/A3 by governing lock admissibility, not behavior.
+Refusal wording: `fail "A4: fixture lock not canary-discriminating — passes mutant, cannot gate this defect class"`.
+Gate-testable: yes — run the proposed lock against the artifact and one defect-injected
+variant per the cited A-number; lock admissible iff verdicts differ.

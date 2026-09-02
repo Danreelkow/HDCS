@@ -1,57 +1,66 @@
-## Operator Runbook for Hermes Context Sync Tool
+### RUNBOOK FOR RUN-001 SYNC HERMES CONTEXT
 
-This document details the Hermes Context Sync Tool, providing a single-file operator runbook for run-001. It's aimed at a new-operator audience with no prior context. The document follows a strict structure with eight mandated sections, each tied to specific claims and facts.
+This document provides a guide for new operators of the `sync-hermes-context.sh` tool. It includes eight sections to help you understand and use the tool effectively.
 
-### Key Features
+#### What this tool does
+The tool syncs the Hermes context source to a destination using rsync. It mirrors the source directory to the destination directory.
 
-- **Exact CLI Flags and Environment Variables**: The document specifies exact CLI flags, environment variable names, systemd unit paths, and exit codes.
-- **Dry-Run Test**: Includes a --dry-run test that operators can run before installation to ensure everything works as expected.
-- **Rollback Procedure**: Clearly states the rollback procedure for a bad sync, which involves removing the bad destination and re-syncing from the configured source.
+#### Test before installing --dry-run
+Before installing the tool, you can run a dry-run test to see what changes will be made without actually applying them. This helps ensure everything works as expected.
 
-### Document Structure
+#### Install
+Follow the instructions to install the tool.
 
-The document is structured to ensure all tool claims are bound to closed-world facts blocks and CLI/citation registers. Every command is executable as-written against the artifact.
+#### Configure
+Configure the tool settings as needed.
 
-### Requirements
+#### Schedule systemd user timer
+Set up a systemd user timer to automate the synchronization process.
 
-- **Document Hermes Context Source and Destination**: The document must accurately describe HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST.
-- **Include Dry-Run Test**: The document must include a --dry-run test for operators to run before installation.
-- **State Rollback Process**: The document must detail the rollback process, which involves removing the bad destination and re-syncing from the configured HERMES_CONTEXT_SRC.
+#### Verify a sync
+Verify that the synchronization has been performed correctly.
 
-### Technical Details
+#### Roll back a bad sync
+If a sync goes wrong, you can roll back to the previous state by removing the bad destination and re-syncing from the configured source.
 
-- **Closed-World Facts**: All tool claims are part of a closed world, relying on system facts and the CLI/citation register.
-- **Writing Register**: The document uses plain imperative English, with hcdl register terms explained or omitted.
-- **Refusal Treatment**: Refusals are documented as delivered, citing specific conditions where necessary.
-- **Rollback Content**: The rollback process involves concrete data restoration, removing the bad destination and re-syncing from the configured HERMES_CONTEXT_SRC.
-- **Validation Bar**: Every command must succeed as-written against the artifact, ensuring the MUST_KEEP sections are non-hollow.
+#### Troubleshooting A-number citations
+Refer to the provided citations for troubleshooting common issues.
 
-### Workflow
+#### Requirements and constraints
 
-The workflow includes four phases: plan, scoped-build, verify, and deliver. Builders are dynamic, and the verifier is decorrelated. The gate status is either READY or NOT_READY, with a maximum of two fix cycles allowed.
+- **Source override**: Use either `HERMES_CONTEXT_SRC` or the source environment variable.
+- **Destination override**: Use `HERMES_CONTEXT_DST`.
+- **Dry-run test**: Use `--dry-run` or `dry run` to test before installation.
+- **User-level timer**: Use `systemctl --user` or `user timer` for scheduling.
+- **Verify mode**: Use `--verify` to verify the sync.
+- **Rollback**: Use `rollback`, `roll back`, or `restore` to revert a bad sync.
+- **Refusal citations**: Use `A-number` or `refusal cites`.
+- **Install path**: Use `.local/bin`.
 
-### Constraints
+#### Workflow
 
-- **Closed-World Tool Claims**: All tool claims must be part of the closed-world facts block.
-- **Tool Flags**: Only --dry-run and --verify are taught as tool flags.
-- **Citation Register**: The citation register is closed, with specific citations used where applicable.
-- **Install Section**: The install section teaches mkdir -p and install -D, with target directories not assumed to exist.
-- **Section Order**: Sections must be in the mandated order, and all non-empty sections must be included.
-- **Example Operator Paths**: Example operator paths are allowed only if clearly marked as examples.
-- **Rollback Process**: The rollback process involves removing and re-syncing the destination from HERMES_CONTEXT_SRC, not just disabling.
-- **No Resurrect**: Run-001 delivered refusals are documented as-is.
+The workflow includes planning, building, verifying, and delivering the tool.
 
-### Paths
+#### Constraints
 
-- `runs/001-hermes-context-timer/artifact/sync-hermes-context.sh`
-- `runs/001-hermes-context-timer/artifact/hermes-context.service`
-- `runs/001-hermes-context-timer/artifact/hermes-context.timer`
-- `runs/001-hermes-context-timer/artifact/README.md`
-- `RUNBOOK.md`
+- Ensure all claims are traceable to facts I1 to I7 or the artifact itself.
+- Instructions must be executable from any current working directory, using absolute paths or a `cd` command.
+- Examples with placeholders are acceptable if they are clearly marked and the section explains the mechanism.
+- The rollback process must involve removing the bad destination and re-syncing from the configured source.
+- Do not assume target directories exist; use `mkdir -p` or `install -D`.
+- Do not use `--checksum`, `--delete`, or `--itemize-changes` flags.
 
-### Budgets
+#### Paths
 
-- **Tokens**: Estimate
-- **Lines**: 60
-- **Fix Cycles**: 2
-- **Questions**: 2
+- `/workspace/hdcs/runs/001-hermes-context-timer/artifact/sync-hermes-context.sh`
+- `/workspace/hdcs/runs/001-hermes-context-timer/artifact/hermes-context.service`
+- `/workspace/hdcs/runs/001-hermes-context-timer/artifact/hermes-context.timer`
+- `/workspace/hdcs/runs/001-hermes-context-timer/artifact/README.md`
+- `/workspace/hdcs/runs/001-hermes-context-timer/RUNBOOK.md`
+
+#### Budgets
+
+- 6000 tokens
+- 60 lines
+- 2 fix cycles
+- 2 questions

@@ -1,1 +1,3 @@
-EXHAUSTED — maxLaps reached while verdict was requeue: exit 1, finding class "a4 a7"
+DELIVERED (superseded note) — this task passed gate + S4 judge after further repair laps on
+2026-09-02 (state.json: gate_pass true, s4_pass true). The earlier EXHAUSTED note is obsolete.
+First loop-authored law (A8) came from this task and was approved by the operator.
