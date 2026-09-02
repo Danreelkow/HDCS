@@ -39,7 +39,7 @@ const resPath = path.join(ROOT, 'results', 'fixture_author.json');
 const authorCmd = process.env.HDCS_AUTHOR_CMD;
 const seatRun = authorCmd
   ? sh(authorCmd, { env: { ...process.env, PROMOTE_USERFILE: userFile, PROMOTE_OUT: resPath } })
-  : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" fixture_author "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).fixture_author}" "${path.join(ROOT, 'prompts', 'fixture-author-system.txt')}" "${userFile}"`, { cwd: ROOT });
+  : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" fixture_author "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).fixture_author}" "${path.join(ROOT, 'prompts', 'fixture-author-system.txt')}" "${userFile}" 32768 0.2 65536`, { cwd: ROOT });
 if (seatRun.status !== 0 || !fs.existsSync(resPath)) {
   out({ promote: false, reason: `author seat failed (exit ${seatRun.status}) — operator reviews finding manually` });
   process.exit(1);
@@ -65,7 +65,7 @@ if (v && !v.promote && (/LOCK[23]/.test(v.reason) || /block grammar/.test(v.reas
   const repRes = path.join(ROOT, 'results', 'fixture_author.json');
   const repRun = authorCmd
     ? sh(authorCmd, { env: { ...process.env, PROMOTE_USERFILE: repairUser, PROMOTE_OUT: repRes } })
-    : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" fixture_author "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).fixture_author}" "${path.join(ROOT, 'prompts', 'fixture-author-system.txt')}" "${repairUser}"`, { cwd: ROOT });
+    : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" fixture_author "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).fixture_author}" "${path.join(ROOT, 'prompts', 'fixture-author-system.txt')}" "${repairUser}" 32768 0.2 65536`, { cwd: ROOT });
   let repText = '';
   try { repText = JSON.parse(fs.readFileSync(repRes, 'utf8')).text || ''; } catch {}
   const rm2 = repText.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
@@ -90,7 +90,7 @@ if (!v || !v.promote) {
   fs.writeFileSync(lawUser, `FINDING (repeated ${reps}x; fixture locks rejected: ${v ? v.reason : 'unparseable'} — likely not mechanically testable):\n${finding}\n\n=== REGISTER (answers.md verbatim) ===\n${answers}\n`);
   const lawSeat = authorCmd
     ? sh(authorCmd, { env: { ...process.env, PROMOTE_USERFILE: lawUser, PROMOTE_OUT: lawRes } })
-    : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" law_drafter "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).law_drafter}" "${path.join(ROOT, 'prompts', 'law-drafter-system.txt')}" "${lawUser}"`, { cwd: ROOT });
+    : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" law_drafter "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).law_drafter}" "${path.join(ROOT, 'prompts', 'law-drafter-system.txt')}" "${lawUser}" 32768 0.2 65536`, { cwd: ROOT });
   let lawText = '';
   try { lawText = JSON.parse(fs.readFileSync(lawRes, 'utf8')).text || ''; } catch {}
   const lm = lawText.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);

@@ -1,1 +1,1 @@
-PROMOTED — finding class repeated 6x: "a6 a7" | promote-flow: locks rejected: baseline: snapshot gate fails its own artifact: GATE FAIL: verify failed on rotated tree (artifact dir was read-only — verify must not need write access) — repair the artifact before authoring fixtures against it; law fallback failed — operator reviews finding manually
+PROMOTED — finding class repeated 2x: "a4 a7" | promote-flow: locks rejected: LOCK3 FAIL: fixture passed the canary — it cannot catch the defect (wall, not gate); law fallback failed — operator reviews finding manually

@@ -3,7 +3,7 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: `verify-rotation.sh`, archive family check in the `while ... read ... FAMLIST` block under `# newest-KEEP present`, incorrectly requires each predecessor’s mtime to be greater than or equal to the numbered suffix’s mtime (`elif [ "$prevmt" -lt "$mt" ]; then ... "archive family mtime order violated"`). A valid rotation can have `base.txt` archived with mtime 2024-01-01 and a later stale replacement archived as `base.txt.1` with mtime 2024-01-10; with KEEP=50 and both files intact, this satisfies the packet, but verification falsely fails because the suffix is newer. The packet requires newest-KEEP retention and archive integrity, not an invented mtime-order constraint between rotation suffixes.
+EVIDENCE: `verify-rotation.sh`, `note_fail()` increments `FLAGS` without bound, while the final `exit "$FLAGS"` returns the shell exit status modulo 256. A verification run with exactly 256 failures (for example, 256 stale files detected in the stale-scan loop) therefore exits 0 despite violating the required “exit 0 iff” condition. The verifier must cap the accumulator or exit with a fixed nonzero status whenever `FLAGS -ne 0`.
 
 ## Packet
 ```yaml

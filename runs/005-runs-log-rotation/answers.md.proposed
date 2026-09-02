@@ -1,0 +1,11 @@
+A8 (2026-09-02, DRAFT — operator approval pending, A29): A verifier's verdict must be
+    derived by re-reading the artifact tree itself; state the same toolchain wrote earlier
+    may index but never attest.
+    Scope: extends A6 and the 2026-09-02 read-only-verifier ruling. Class (12 recurrences,
+    fixture locks rejected LOCK3 FAIL — canary passes ⇒ not mechanically catchable ⇒ law,
+    not fixture): verify passes by trusting its own recorded entries/accumulators instead of
+    recomputing from disk. Satisfies: each run recomputes cksum/size/mtime/KEEP/containment
+    from the tree; recorded state may only name paths to re-check. Amends nothing; A6(c)
+    "listed consistently" is amended to mean "re-derived from disk, then compared".
+    Refusal wording builders must emit: `fail "A8: verdict attested by self-written state, not artifact re-read"`.
+    Gate-testable: no — pure register law, S4-enforced (fixture class proven non-catchable by LOCK3 FAIL).

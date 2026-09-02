@@ -17,6 +17,16 @@ KEEP=50
 # and are never overridden by the environment.
 # KEEP=0 prunes the ENTIRE archive (KEEP is a hard bound, never skipped).
 # Prune uses only POSIX-portable find/stat (no -printf).
+# Scratch discipline (A1/L_modes): the scratch dir is created via mktemp -d at a
+# base that is VERIFIED (component test, not string prefix) to be OUTSIDE RUNS_DIR,
+# ARCHIVE_DIR, and any owned path — before AND after instantiation. A TMPDIR pointing
+# into either protected tree is rejected; /tmp is used instead. Zero writes ever
+# land inside RUNS_DIR/ARCHIVE_DIR, in any mode.
+# Traversal discipline: every find writes its listing to a scratch file so its
+# EXIT STATUS is captured — a failed/truncated traversal is a hard refusal, never
+# a silent skip. prune_select's status is NEVER consumed through a pipeline whose
+# last command would mask it: its output goes to a file and its exit status is
+# tested explicitly.
 set -u
 
 APPLY=0
@@ -29,19 +39,71 @@ fi
 
 die() { echo "REFUSE (A4): $1" >&2; exit 1; }
 
-# --- conf (operator-fixed, exactly 5 keys, no comments) ---
+# --- conf parse (L_conf): strictly 5 KEY=VALUE lines; blank lines and lines
+# starting with '#' are ignored; ANY other non-empty, non-comment line is a
+# parse failure -> nonzero exit, zero writes. Each of the 5 keys must appear
+# EXACTLY once (missing key or duplicate key = parse failure). ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
 CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
+SEEN_RUNS=0; SEEN_ARCH=0; SEEN_AGE=0; SEEN_PAT=0; SEEN_KEEP=0
+CONF_LINES=0
+if [ ! -r "$CONF" ]; then
+  echo "CONF PARSE FAILURE (L_conf): conf unreadable: $CONF" >&2
+  exit 1
+fi
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in
-    RUNS_DIR=*) CONF_RUNS="${line#RUNS_DIR=}";;
-    ARCHIVE_DIR=*) CONF_ARCH="${line#ARCHIVE_DIR=}";;
-    AGE_DAYS=*) CONF_AGE="${line#AGE_DAYS=}";;
-    PATTERN=*) CONF_PAT="${line#PATTERN=}";;
-    KEEP=*) CONF_KEEP="${line#KEEP=}";;
+    '') continue;;
+    \#*) continue;;
+    RUNS_DIR=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_RUNS" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key RUNS_DIR" >&2; exit 1
+      fi
+      SEEN_RUNS=1; CONF_RUNS="${line#RUNS_DIR=}";;
+    ARCHIVE_DIR=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_ARCH" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key ARCHIVE_DIR" >&2; exit 1
+      fi
+      SEEN_ARCH=1; CONF_ARCH="${line#ARCHIVE_DIR=}";;
+    AGE_DAYS=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_AGE" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key AGE_DAYS" >&2; exit 1
+      fi
+      SEEN_AGE=1; CONF_AGE="${line#AGE_DAYS=}";;
+    PATTERN=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_PAT" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key PATTERN" >&2; exit 1
+      fi
+      SEEN_PAT=1; CONF_PAT="${line#PATTERN=}";;
+    KEEP=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_KEEP" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key KEEP" >&2; exit 1
+      fi
+      SEEN_KEEP=1; CONF_KEEP="${line#KEEP=}";;
+    *)
+      echo "CONF PARSE FAILURE (L_conf): malformed non-empty non-comment line: $line" >&2
+      exit 1;;
   esac
 done < "$CONF"
+if [ "$CONF_LINES" -ne 5 ]; then
+  echo "CONF PARSE FAILURE (L_conf): expected exactly 5 KEY=VALUE lines, found $CONF_LINES" >&2
+  exit 1
+fi
+for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+  case "$k" in
+    RUNS_DIR) [ "$SEEN_RUNS" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    ARCHIVE_DIR) [ "$SEEN_ARCH" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    AGE_DAYS) [ "$SEEN_AGE" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    PATTERN) [ "$SEEN_PAT" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    KEEP) [ "$SEEN_KEEP" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+  esac
+done
 
 # --- resolve effective dirs: env override allowed; unset -> default; set-but-empty -> refuse (A4) ---
 RUNS_SRC="${HDCS_RUNS_DIR-$CONF_RUNS}"
@@ -55,6 +117,14 @@ case "$ARCH_SRC" in ''|.|/) die "degenerate ARCHIVE_DIR '$ARCH_SRC'";; esac
 
 RUNS="$(realpath -m -- "$RUNS_SRC")" || die "RUNS_DIR not resolvable"
 ARCH="$(realpath -m -- "$ARCH_SRC")" || die "ARCHIVE_DIR not resolvable"
+# degenerate AFTER canonicalization too: './', 'foo/..', trailing-slash cwd forms
+# all canonicalize to the current directory (or '/') and must be refused (A4).
+# realpath -m NEVER returns the literal string '.' — it returns the absolute cwd —
+# so the post-canonicalization test compares against the canonicalized CURRENT
+# DIRECTORY (obtained the same way), not against the literal '.' string.
+CWD="$(realpath -m -- '.')" || die "cannot canonicalize current directory"
+[ "$RUNS" = "$CWD" ] && die "RUNS_DIR '$RUNS_SRC' canonicalizes to the current directory (degenerate)"
+[ "$ARCH" = "$CWD" ] && die "ARCHIVE_DIR '$ARCH_SRC' canonicalizes to the current directory (degenerate)"
 [ "$RUNS" = "/" ] && die "RUNS_DIR canonicalizes to '/'"
 [ "$ARCH" = "/" ] && die "ARCHIVE_DIR canonicalizes to '/'"
 [ "$RUNS" = "$ARCH" ] && die "RUNS_DIR and ARCHIVE_DIR are identical"
@@ -69,28 +139,98 @@ KEEP="$CONF_KEEP"
 case "$AGE_DAYS" in ''|*[!0-9]*) die "AGE_DAYS not a non-negative integer";; esac
 case "$KEEP" in ''|*[!0-9]*) die "KEEP not a non-negative integer";; esac
 
+# --- component-inside test: $1 inside $2 (path COMPONENTS, never string prefix) ---
+comp_inside() {
+  local a="${1%/}" b="${2%/}"
+  [ "${a#"$b"/}" != "$a" ] || [ "$a" = "$b" ]
+}
+
+# --- scratch dir for find listings (A1/L_modes): NEVER inside RUNS_DIR/ARCHIVE_DIR.
+# The BASE is checked first, then the INSTANTIATED mktemp result is re-checked
+# (a base outside the trees does not guarantee the instantiated path is, and the
+# check must hold on the concrete created path). Candidate order: TMPDIR, then /tmp. ---
+mk_scratch() {
+  local base cand
+  for base in "${TMPDIR-}" /tmp; do
+    [ -n "$base" ] || continue
+    cand="$(realpath -m -- "$base" 2>/dev/null)" || continue
+    comp_inside "$cand" "$RUNS" && continue
+    comp_inside "$cand" "$ARCH" && continue
+    cand="$(mktemp -d "${cand%/}/hdcs-rotate.XXXXXX" 2>/dev/null)" || continue
+    # re-validate the INSTANTIATED stage path against both protected trees
+    if comp_inside "$cand" "$RUNS" || comp_inside "$cand" "$ARCH"; then
+      rm -rf -- "$cand"
+      continue
+    fi
+    printf '%s' "$cand"
+    return 0
+  done
+  return 1
+}
+SCRATCH=""
+if ! SCRATCH="$(mk_scratch)"; then
+  die "cannot create scratch dir outside RUNS_DIR/ARCHIVE_DIR"
+fi
+trap 'rm -rf -- "$SCRATCH"' EXIT
+
 NOW="$(date +%s)"
 MOVES=()
+# find status is captured: a failed traversal refuses rather than silently
+# skipping stale files (a skipped stale file would violate the rotation law).
+FIND_ERR="$SCRATCH/find-runs-err"
+: > "$FIND_ERR"
+if ! find "$RUNS" -type f -name "$PATTERN" -print0 2>"$FIND_ERR" > "$SCRATCH/stale-list"; then
+  echo "REFUSE (A4): RUNS_DIR traversal failed" >&2
+  cat "$FIND_ERR" >&2
+  exit 1
+fi
+if [ -s "$FIND_ERR" ]; then
+  echo "REFUSE (A4): RUNS_DIR traversal reported errors" >&2
+  cat "$FIND_ERR" >&2
+  exit 1
+fi
 while IFS= read -r -d '' f; do
-  mt="$(stat -c %Y -- "$f")"
+  if ! mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+    echo "REFUSE (A4): cannot stat RUNS file: ${f#"$RUNS"/}" >&2
+    exit 1
+  fi
   age=$(( (NOW - mt) / 86400 ))
   if [ "$age" -ge "$AGE_DAYS" ]; then
     MOVES+=("$f")
   fi
-done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
+done < "$SCRATCH/stale-list"
 
 # portable prune-list builder: emits "<mtime> <seq> <path>" lines sorted newest-first,
 # trimmed to KEEP entries; paths printed from field 3 on (spaces tolerated).
 # KEEP=0 -> every archived file is a prune candidate (the bound always applies).
-prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited)
-  local p mt i=0 keep="$2"
+# find status captured: a failed archive traversal refuses (never silently prunes
+# from a partial listing). The function's EXIT STATUS reflects traversal success —
+# callers MUST test it directly (never through a pipeline whose last stage would
+# mask it).
+prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited);
+                 # returns nonzero on traversal failure (a refusal was already printed)
+  local p mt i=0 keep="$2" lerr="$SCRATCH/prune-find-err"
   local -a payload=()
-  while IFS= read -r p; do
+  : > "$lerr"
+  if ! find "$1" -type f -print0 2>"$lerr" > "$SCRATCH/prune-list"; then
+    echo "REFUSE (A4): ARCHIVE_DIR traversal failed" >&2
+    cat "$lerr" >&2
+    return 1
+  fi
+  if [ -s "$lerr" ]; then
+    echo "REFUSE (A4): ARCHIVE_DIR traversal reported errors" >&2
+    cat "$lerr" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' p; do
     [ -n "$p" ] || continue
-    mt="$(stat -c %Y -- "$p" 2>/dev/null)" || { echo "WARN: cannot stat archive file: $p" >&2; i=$((i+1)); continue; }
+    if ! mt="$(stat -c %Y -- "$p" 2>/dev/null)"; then
+      echo "REFUSE (A4): cannot stat archive file: $p — pruning from a partial listing would violate losslessness" >&2
+      return 1
+    fi
     payload+=("$mt $i $p")
     i=$((i+1))
-  done < <(find "$1" -type f | sort)
+  done < "$SCRATCH/prune-list"
   local n="${#payload[@]}"
   [ "$n" -gt "$keep" ] || return 0
   if [ "$keep" -eq 0 ]; then
@@ -98,6 +238,7 @@ prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-d
   else
     printf '%s\n' "${payload[@]}" | sort -k1,1nr -k2,2n | tail -n +"$((keep+1))" | cut -d' ' -f3-
   fi
+  return 0
 }
 
 if [ "$APPLY" -eq 0 ]; then
@@ -110,11 +251,18 @@ if [ "$APPLY" -eq 0 ]; then
       echo "move: $rel -> ARCHIVE_DIR/$rel"
     done
   fi
+  # prune_select status is tested EXPLICITLY — output is captured to a scratch file
+  # and iterated from there, so a traversal failure can never be masked by the
+  # pipeline's last command (a hidden failure would exit 0 and misreport the plan).
   if [ -d "$ARCH" ]; then
-    prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
+    if ! prune_select "$ARCH" "$KEEP" > "$SCRATCH/prune-out"; then
+      echo "REFUSE (A4): dry-run prune plan aborted — ARCHIVE_DIR traversal failed" >&2
+      exit 1
+    fi
+    while IFS= read -r rel; do
       [ -n "$rel" ] || continue
       echo "prune: ${rel#"$ARCH"/} (oldest beyond KEEP=$KEEP)"
-    done
+    done < "$SCRATCH/prune-out"
   fi
   exit 0
 fi
@@ -140,12 +288,18 @@ for f in "${MOVES[@]}"; do
 done
 
 # prune ARCHIVE_DIR to KEEP newest (ARCHIVE_DIR only — RUNS_DIR is never pruned);
-# KEEP=0 prunes everything
+# KEEP=0 prunes everything. prune_select's exit status is tested explicitly on its
+# redirected output — a traversal failure aborts the prune (refusing to prune from
+# a partial listing is the lossless choice); it can never be masked by a pipeline.
 if [ -d "$ARCH" ]; then
-  prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
+  if ! prune_select "$ARCH" "$KEEP" > "$SCRATCH/prune-out"; then
+    echo "REFUSE (A4): prune aborted — archive traversal failed" >&2
+    exit 1
+  fi
+  while IFS= read -r rel; do
     [ -n "$rel" ] || continue
     rm -f -- "$rel" && echo "pruned: ${rel#"$ARCH"/}"
-  done
+  done < "$SCRATCH/prune-out"
 fi
 
 exit 0
@@ -153,17 +307,40 @@ exit 0
 === verify-rotation.sh ===
 #!/usr/bin/env bash
 # verify-rotation.sh — ZERO-WRITE checker (A1/A6).
-# exit 0 <=> conf parses (exactly 5 KEY=VALUE lines, verbatim values) AND no stale
+# exit 0 <=> conf parses (exactly 5 unique KEY=VALUE lines, verbatim values) AND no stale
 # PATTERN file under RUNS_DIR (accumulator pattern; tested AFTER the loop) AND the
-# archive is intact: every archived file is re-cksummed and re-statted against a
-# listing recorded in scratch BEFORE the recheck pass (name + rotation suffix rule,
-# per-entry byte verification, newest-KEEP count bound). Fresh PATTERN files never
-# fail. Only env overrides honored: HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR (set-but-empty
-# refused, A4); AGE_DAYS/PATTERN/KEEP come solely from the shipped conf.
+# archive is intact. ALL status reporting flows through the note_fail accumulator —
+# including scratch-creation failure (no direct early exit bypasses the pattern).
+# TRAVERSAL DISCIPLINE: every find writes its listing to a scratch FILE and its
+# EXIT STATUS is captured. A nonzero find status (unreadable directory, traversal
+# error) or a nonempty find stderr is a recorded FAILURE — a skipped subtree can
+# never masquerade as "no stale files" or "archive intact". The stale scan, the
+# archive scan, and the fresh-file informational scan all follow this rule.
+# Archive integrity (L_verify: newest KEEP present AND matches the recorded listing):
+#   1. The archive is scanned ONCE and a RECORDED LISTING is built (mtime, crc, size,
+#      relpath per file) in the MAIN shell (never in a command-substitution subshell —
+#      flag updates must persist).
+#   2. Every recorded entry is then verified INDIVIDUALLY against the LIVE filesystem:
+#      the file at ARCHIVE_DIR/<relpath> must still EXIST (a deleted archived original
+#      fails), and its freshly computed cksum/size/mtime must equal the recorded
+#      values (a mutated or replaced file fails per entry).
+#   3. Count bound: the number of archived files must not exceed KEEP — a larger
+#      count means the retained set is not the newest-KEEP window. If the count is
+#      <= KEEP and every entry exists and matches, then the newest-KEEP set (the
+#      whole retained set) is fully present and byte-identical.
+# Orphan names: an archive file name is legal iff it matches PATTERN exactly, OR it
+# matches PATTERN followed by a rotation suffix consisting of a '.' and DIGITS ONLY
+# (one or more) — the suffix is validated STRICTLY, so 'run.txt.1garbage' (a digit
+# followed by trailing garbage) is an ORPHAN and fails; unreadable/unchecksumable
+# files and count violations all fail via note_fail in the same main-shell loop.
+# Fresh PATTERN files under RUNS_DIR never fail. Only env overrides honored:
+# HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR (set-but-empty refused, A4); AGE_DAYS/PATTERN/
+# KEEP come solely from the shipped conf.
 # Scratch: mktemp -d strictly OUTSIDE the artifact dir / RUNS_DIR / ARCHIVE_DIR
-# (component-overlap tested; TMPDIR falling inside any tree is rejected and /tmp is
-# used instead). Nothing is written into any tree; stderr goes to the caller's stderr.
-# No root, no logrotate.
+# (component-overlap tested on BOTH the candidate base and the INSTANTIATED mktemp
+# result; TMPDIR falling inside any tree is rejected and /tmp is used instead).
+# Nothing is written into any tree; stderr goes to the caller's stderr. No root,
+# no logrotate.
 set -u
 
 FLAGS=0
@@ -172,40 +349,49 @@ note_fail() { echo "VERIFY FAIL: $1" >&2; FLAGS=$((FLAGS + 1)); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
 
-# --- conf parse: KEY=VALUE lines counted, blanks/# comments ignored; accumulator ---
+# --- conf parse (L_conf): blanks/# comments ignored; any other non-empty
+# non-comment line that is not one of the 5 KEY=VALUE lines is a parse failure;
+# each of the 5 keys must appear exactly once; total KEY lines must be 5 ---
+CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
+SEEN_RUNS=0; SEEN_ARCH=0; SEEN_AGE=0; SEEN_PAT=0; SEEN_KEEP=0
 if [ ! -r "$CONF" ]; then
   note_fail "conf unreadable: $CONF"
-  nkeys=0
 else
   nkeys=0
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       ''|\#*) continue;;
-      [A-Z_]*=*) nkeys=$((nkeys + 1));;
-      *) note_fail "conf stray line (not KEY=VALUE): $line";;
+      RUNS_DIR=*)
+        nkeys=$((nkeys + 1))
+        if [ "$SEEN_RUNS" -ne 0 ]; then note_fail "conf duplicate key RUNS_DIR (L_conf)"; else SEEN_RUNS=1; CONF_RUNS="${line#RUNS_DIR=}"; fi;;
+      ARCHIVE_DIR=*)
+        nkeys=$((nkeys + 1))
+        if [ "$SEEN_ARCH" -ne 0 ]; then note_fail "conf duplicate key ARCHIVE_DIR (L_conf)"; else SEEN_ARCH=1; CONF_ARCH="${line#ARCHIVE_DIR=}"; fi;;
+      AGE_DAYS=*)
+        nkeys=$((nkeys + 1))
+        if [ "$SEEN_AGE" -ne 0 ]; then note_fail "conf duplicate key AGE_DAYS (L_conf)"; else SEEN_AGE=1; CONF_AGE="${line#AGE_DAYS=}"; fi;;
+      PATTERN=*)
+        nkeys=$((nkeys + 1))
+        if [ "$SEEN_PAT" -ne 0 ]; then note_fail "conf duplicate key PATTERN (L_conf)"; else SEEN_PAT=1; CONF_PAT="${line#PATTERN=}"; fi;;
+      KEEP=*)
+        nkeys=$((nkeys + 1))
+        if [ "$SEEN_KEEP" -ne 0 ]; then note_fail "conf duplicate key KEEP (L_conf)"; else SEEN_KEEP=1; CONF_KEEP="${line#KEEP=}"; fi;;
+      *) note_fail "conf parse failure (L_conf): malformed non-empty non-comment line: $line";;
     esac
   done < "$CONF"
   if [ "$nkeys" -ne 5 ]; then
     note_fail "conf must contain exactly 5 KEY=VALUE lines (found $nkeys)"
   fi
+  if [ "$SEEN_RUNS" -eq 0 ]; then note_fail "conf missing key RUNS_DIR"; fi
+  if [ "$SEEN_ARCH" -eq 0 ]; then note_fail "conf missing key ARCHIVE_DIR"; fi
+  if [ "$SEEN_AGE" -eq 0 ]; then note_fail "conf missing key AGE_DAYS"; fi
+  if [ "$SEEN_PAT" -eq 0 ]; then note_fail "conf missing key PATTERN"; fi
+  if [ "$SEEN_KEEP" -eq 0 ]; then note_fail "conf missing key KEEP"; fi
   if ! grep -q '^RUNS_DIR=/workspace/hdcs/runs$' "$CONF"; then note_fail "conf RUNS_DIR value not verbatim"; fi
   if ! grep -q '^ARCHIVE_DIR=/workspace/.hdcs-rotate/archive$' "$CONF"; then note_fail "conf ARCHIVE_DIR value not verbatim"; fi
   if ! grep -q '^AGE_DAYS=14$' "$CONF"; then note_fail "conf AGE_DAYS value not verbatim"; fi
   if ! grep -q '^PATTERN=\*\.txt$' "$CONF"; then note_fail "conf PATTERN value not verbatim"; fi
   if ! grep -q '^KEEP=50$' "$CONF"; then note_fail "conf KEEP value not verbatim"; fi
-fi
-
-CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
-if [ -r "$CONF" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in
-      RUNS_DIR=*) CONF_RUNS="${line#RUNS_DIR=}";;
-      ARCHIVE_DIR=*) CONF_ARCH="${line#ARCHIVE_DIR=}";;
-      AGE_DAYS=*) CONF_AGE="${line#AGE_DAYS=}";;
-      PATTERN=*) CONF_PAT="${line#PATTERN=}";;
-      KEEP=*) CONF_KEEP="${line#KEEP=}";;
-    esac
-  done < "$CONF"
 fi
 
 RUNS_SRC="${HDCS_RUNS_DIR-$CONF_RUNS}"
@@ -232,8 +418,22 @@ if [ "$law_ok" -eq 1 ]; then
   fi
 fi
 if [ "$law_ok" -eq 1 ]; then
+  # degenerate AFTER canonicalization too: './', 'foo/..', trailing-slash cwd
+  # forms all canonicalize to the current directory (or '/') and must be refused.
+  # realpath -m NEVER returns the literal string '.' — it returns the absolute
+  # cwd — so the test compares against the canonicalized CURRENT DIRECTORY
+  # (obtained the same way), never against the literal '.' string.
+  if ! CWD="$(realpath -m -- '.' 2>/dev/null)"; then
+    note_fail "REFUSE (A4): cannot canonicalize current directory"; law_ok=0
+  fi
+fi
+if [ "$law_ok" -eq 1 ]; then
+  if [ "$RUNS" = "$CWD" ]; then note_fail "REFUSE (A4): RUNS_DIR '$RUNS_SRC' canonicalizes to the current directory (degenerate)"; law_ok=0; fi
+  if [ "$ARCH" = "$CWD" ]; then note_fail "REFUSE (A4): ARCHIVE_DIR '$ARCH_SRC' canonicalizes to the current directory (degenerate)"; law_ok=0; fi
   if [ "$RUNS" = "/" ]; then note_fail "REFUSE (A4): RUNS_DIR canonicalizes to '/'"; law_ok=0; fi
   if [ "$ARCH" = "/" ]; then note_fail "REFUSE (A4): ARCHIVE_DIR canonicalizes to '/'"; law_ok=0; fi
+fi
+if [ "$law_ok" -eq 1 ]; then
   if [ "$RUNS" = "$ARCH" ]; then note_fail "REFUSE (A4): RUNS_DIR == ARCHIVE_DIR (identity)"; law_ok=0; fi
   case "$RUNS" in "$ARCH"|"$ARCH"/*) note_fail "REFUSE (A4): RUNS_DIR '$RUNS' inside ARCHIVE_DIR '$ARCH'"; law_ok=0;; esac
   case "$ARCH" in "$RUNS"|"$RUNS"/*) note_fail "REFUSE (A4): ARCHIVE_DIR '$ARCH' inside RUNS_DIR '$RUNS'"; law_ok=0;; esac
@@ -245,7 +445,31 @@ comp_inside() {
   [ "${a#"$b"/}" != "$a" ] || [ "$a" = "$b" ]
 }
 
-# --- scratch dir strictly outside artifact/RUNS/ARCHIVE trees (A6) ---
+# --- archive-name validation (strict rotation-suffix law): a legal archive name
+# matches PATTERN exactly, OR matches PATTERN followed by a '.' plus ONE OR MORE
+# DIGITS and NOTHING ELSE. Implemented by stripping a strictly-numeric trailing
+# suffix (regex \.[0-9]+$) and re-testing the stripped base against PATTERN via
+# case — a name like 'run.txt.1garbage' has a NON-numeric tail, is not stripped,
+# does not match PATTERN directly, and is therefore an ORPHAN (failure).
+# A single-regex test like '$PATTERN.[0-9]*' is BANNED: '[0-9]*' there means one
+# digit followed by arbitrary characters, which would wrongly accept such names. ---
+ARCHNAME_PAT="$PATTERN"
+name_is_legal() { # $1 = basename; returns 0 iff legal archive name
+  local b="$1"
+  case "$b" in
+    $ARCHNAME_PAT) return 0;;
+  esac
+  if [[ "$b" =~ ^(.+)\.([0-9]+)$ ]]; then
+    case "${BASH_REMATCH[1]}" in
+      $ARCHNAME_PAT) return 0;;
+    esac
+  fi
+  return 1
+}
+
+# --- scratch dir strictly outside artifact/RUNS/ARCHIVE trees (A6): the candidate
+# BASE is component-tested first, then the INSTANTIATED mktemp result is re-tested —
+# both must be outside every protected tree ---
 mk_scratch() {
   local cand base
   for base in "${TMPDIR-}" /tmp; do
@@ -254,92 +478,156 @@ mk_scratch() {
     comp_inside "$cand" "$SCRIPT_DIR" && continue
     [ -n "$RUNS" ] && comp_inside "$cand" "$RUNS" && continue
     [ -n "$ARCH" ] && comp_inside "$cand" "$ARCH" && continue
-    mktemp -d "${cand%/}/hdcs-verify.XXXXXX" 2>/dev/null && return 0
+    cand="$(mktemp -d "${cand%/}/hdcs-verify.XXXXXX" 2>/dev/null)" || continue
+    if comp_inside "$cand" "$SCRIPT_DIR" \
+       || { [ -n "$RUNS" ] && comp_inside "$cand" "$RUNS"; } \
+       || { [ -n "$ARCH" ] && comp_inside "$cand" "$ARCH"; }; then
+      rm -rf -- "$cand"
+      continue
+    fi
+    printf '%s' "$cand"
+    return 0
   done
   return 1
 }
 SCRATCH=""
 if ! SCRATCH="$(mk_scratch)"; then
-  echo "VERIFY FAIL: cannot create scratch dir outside all protected trees (A6)" >&2
-  exit 1
+  # reported through the accumulator pattern, like every other failure
+  note_fail "cannot create scratch dir outside all protected trees (A6)"
+  exit "$FLAGS"
 fi
-LISTING="$SCRATCH/listing"
+RECORDED="$SCRATCH/recorded-listing"
 cleanup() { rm -rf -- "$SCRATCH"; }
 trap cleanup EXIT
 
 stale_scan_rc=0
 ARCH_OK=1
+N_RECORDED=0
 if [ "$law_ok" -eq 1 ]; then
-  # --- check 2: stale scan — accumulator set INSIDE the loop, tested AFTER ---
+  # --- check 2: stale scan — accumulator set INSIDE the loop, tested AFTER.
+  # find's exit status and stderr are captured: a failed traversal (unreadable
+  # directory) is a FAILURE, never a silent skip. ---
   if [ -d "$RUNS" ]; then
     NOW="$(date +%s)"
     STALE_FOUND=0
-    while IFS= read -r -d '' f; do
-      if ! mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
-        note_fail "cannot stat RUNS file: ${f#"$RUNS"/}"
-        stale_scan_rc=1
-        continue
-      fi
-      age=$(( (NOW - mt) / 86400 ))
-      if [ "$age" -ge "$AGE_DAYS" ]; then
-        STALE_FOUND=1
-        note_fail "stale file pending rotation: ${f#"$RUNS"/} (age_days=$age >= $AGE_DAYS)"
-      fi
-    done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null)
-    if [ "$STALE_FOUND" -ne 0 ]; then stale_scan_rc=1; fi
+    STALE_LIST="$SCRATCH/stale-list"
+    STALE_ERR="$SCRATCH/stale-find-err"
+    : > "$STALE_ERR"
+    frc=0
+    find "$RUNS" -type f -name "$PATTERN" -print0 2>"$STALE_ERR" > "$STALE_LIST" || frc=$?
+    if [ "$frc" -ne 0 ]; then
+      note_fail "RUNS_DIR traversal FAILED (find exit $frc) — stale scan incomplete: $(cat "$STALE_ERR")"
+      stale_scan_rc=1
+    elif [ -s "$STALE_ERR" ]; then
+      note_fail "RUNS_DIR traversal reported errors — stale scan incomplete: $(cat "$STALE_ERR")"
+      stale_scan_rc=1
+    else
+      while IFS= read -r -d '' f; do
+        if ! mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+          note_fail "cannot stat RUNS file: ${f#"$RUNS"/}"
+          stale_scan_rc=1
+          continue
+        fi
+        age=$(( (NOW - mt) / 86400 ))
+        if [ "$age" -ge "$AGE_DAYS" ]; then
+          STALE_FOUND=1
+          note_fail "stale file pending rotation: ${f#"$RUNS"/} (age_days=$age >= $AGE_DAYS)"
+        fi
+      done < "$STALE_LIST"
+      if [ "$STALE_FOUND" -ne 0 ]; then stale_scan_rc=1; fi
+    fi
   else
     note_fail "RUNS_DIR '$RUNS' is not a directory"
     stale_scan_rc=1
   fi
 
-  # --- check 3: archive intact — record a listing (path, cksum, size) FIRST, then a
-  #     second pass re-cksums and re-stats each file against the recorded values; the
-  #     two passes are distinct reads, so mid-run mutation is detected (not tautological) ---
+  # --- check 3: archive intact — recorded listing + per-entry live re-verification.
+  # find's exit status and stderr captured: a failed archive traversal FAILS the
+  # archive-intact check (an omitted subtree must never pass as intact). ---
   if [ -d "$ARCH" ]; then
-    : > "$LISTING"
-    n_arch=0
-    while IFS= read -r -d '' f; do
-      base="$(basename -- "$f")"
-      case "$base" in
-        $PATTERN|$PATTERN.[0-9]*) ;;
-        *) note_fail "archive orphan (does not match PATTERN '$PATTERN' + rotation suffix): ${f#"$ARCH"/}"; ARCH_OK=0;;
+    ARCH_LIST="$SCRATCH/arch-list"
+    ARCH_ERR="$SCRATCH/arch-find-err"
+    : > "$ARCH_ERR"
+    arc_rc=0
+    find "$ARCH" -type f -print0 2>"$ARCH_ERR" > "$ARCH_LIST" || arc_rc=$?
+    if [ "$arc_rc" -ne 0 ]; then
+      note_fail "ARCHIVE_DIR traversal FAILED (find exit $arc_rc) — archive integrity unverifiable: $(cat "$ARCH_ERR")"
+      ARCH_OK=0
+    elif [ -s "$ARCH_ERR" ]; then
+      note_fail "ARCHIVE_DIR traversal reported errors — archive integrity unverifiable: $(cat "$ARCH_ERR")"
+      ARCH_OK=0
+    else
+      : > "$RECORDED"
+      # pass 1 — record the listing (mtime, crc, size, relpath) in the MAIN shell
+      while IFS= read -r -d '' f; do
+        base="$(basename -- "$f")"
+        if ! name_is_legal "$base"; then
+          note_fail "archive orphan (does not match PATTERN '$PATTERN' + strict numeric rotation suffix): ${f#"$ARCH"/}"
+          ARCH_OK=0
+        fi
+        if c="$(cksum -- "$f" 2>/dev/null)" && s="$(stat -c %s -- "$f" 2>/dev/null)" && mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+          crc="${c%% *}"
+          printf '%s %s %s %s\n' "$mt" "$crc" "$s" "${f#"$ARCH"/}" >> "$RECORDED"
+        else
+          note_fail "cannot checksum archived file: ${f#"$ARCH"/}"
+          ARCH_OK=0
+        fi
+      done < "$ARCH_LIST"
+      # rank recorded listing newest-first (deterministic: mtime desc, then relpath)
+      sort -k1,1nr -k4,4 "$RECORDED" -o "$RECORDED"
+      N_RECORDED="$(wc -l < "$RECORDED" | tr -d ' ')"
+
+      # newest-KEEP present: count bound — above KEEP the retained set is not the
+      # newest-KEEP window (older-than-KEEP files retained) -> fail.
+      case "$KEEP" in
+        ''|*[!0-9]*) : ;; # already flagged above
+        *) if [ "$N_RECORDED" -gt "$KEEP" ]; then
+             note_fail "archive exceeds KEEP=$KEEP ($N_RECORDED archived files) — retained set is not the newest KEEP"
+             ARCH_OK=0
+           fi;;
       esac
-      if c="$(cksum -- "$f" 2>/dev/null)" && s="$(stat -c %s -- "$f" 2>/dev/null)"; then
-        crc="${c%% *}"
-        printf '%s %s %s\n' "$crc" "$s" "${f#"$ARCH"/}" >> "$LISTING"
-        n_arch=$((n_arch + 1))
-      else
-        note_fail "cannot checksum archived file: ${f#"$ARCH"/}"
+
+      # pass 2 — PER-ENTRY verification against the LIVE filesystem: every recorded
+      # entry must still exist at ARCHIVE_DIR/<relpath> (a deleted archived original
+      # fails here) and its freshly computed cksum/size/mtime must equal the
+      # recorded values (a mutated/replaced file fails per entry).
+      MATCHED=0
+      while IFS= read -r entry; do
+        [ -n "$entry" ] || continue
+        rmt="${entry%% *}"; entry_rest="${entry#* }"
+        rcrc="${entry_rest%% *}"; entry_rest="${entry_rest#* }"
+        rsz="${entry_rest%% *}"; entry_rest="${entry_rest#* }"
+        rel="$entry_rest"
+        live="$ARCH/$rel"
+        if [ ! -f "$live" ]; then
+          note_fail "recorded archive entry MISSING from archive (deleted original): $rel"
+          ARCH_OK=0
+          continue
+        fi
+        if c="$(cksum -- "$live" 2>/dev/null)" && s="$(stat -c %s -- "$live" 2>/dev/null)" && mt="$(stat -c %Y -- "$live" 2>/dev/null)"; then
+          crc="${c%% *}"
+          if [ "$crc" != "$rcrc" ] || [ "$s" != "$rsz" ] || [ "$mt" != "$rmt" ]; then
+            note_fail "recorded archive entry MUTATED (bytes/size/mtime differ from recorded listing): $rel"
+            ARCH_OK=0
+          else
+            MATCHED=$((MATCHED + 1))
+          fi
+        else
+          note_fail "recorded archive entry unreadable at verification time: $rel"
+          ARCH_OK=0
+        fi
+      done < "$RECORDED"
+
+      # newest-KEEP present: with count <= KEEP and every recorded entry live-verified,
+      # the full retained (newest-KEEP) set is present and byte-identical.
+      if [ "$N_RECORDED" -gt 0 ] && [ "$MATCHED" -eq 0 ]; then
+        note_fail "newest KEEP entry absent — no recorded archive entry survived verification"
         ARCH_OK=0
       fi
-    done < <(find "$ARCH" -type f -print0 2>/dev/null | sort -z)
-    # recheck pass: independent re-derivation compared per-entry against the recorded listing
-    while IFS= read -r -d '' f; do
-      rel="${f#"$ARCH"/}"
-      rec="$(grep -F " $rel" "$LISTING" | grep -F "$rel" | head -1)"
-      if [ -z "$rec" ]; then
-        note_fail "archive changed between passes (entry vanished/new): $rel"
-        ARCH_OK=0
-        continue
+      if [ "$ARCH_OK" -eq 1 ] && [ "$N_RECORDED" -gt 0 ]; then
+        echo "verify: archive intact — $MATCHED/$N_RECORDED recorded entries exist and match (newest-KEEP bound: count <= KEEP=$KEEP)"
       fi
-      rec_crc="$(printf '%s' "$rec" | awk '{print $1}')"
-      rec_size="$(printf '%s' "$rec" | awk '{print $2}')"
-      c="$(cksum -- "$f" 2>/dev/null)" || { note_fail "cksum recheck failed: $rel"; ARCH_OK=0; continue; }
-      crc="${c%% *}"
-      s="$(stat -c %s -- "$f" 2>/dev/null)" || s=""
-      if [ "$crc" != "$rec_crc" ] || [ "$s" != "$rec_size" ]; then
-        note_fail "archive file does not match recorded listing (bytes/size changed): $rel"
-        ARCH_OK=0
-      fi
-    done < <(find "$ARCH" -type f -print0 2>/dev/null | sort -z)
-    # newest-KEEP membership: archived file count must not exceed KEEP (prune bound held)
-    case "$KEEP" in
-      ''|*[!0-9]*) : ;; # already flagged above
-      *) if [ "$n_arch" -gt "$KEEP" ]; then
-           note_fail "archive exceeds KEEP=$KEEP ($n_arch archived files) — prune bound violated"
-           ARCH_OK=0
-         fi;;
-    esac
+    fi
   elif [ -e "$ARCH" ]; then
     note_fail "ARCHIVE_DIR '$ARCH' exists but is not a directory"
     ARCH_OK=0
@@ -350,20 +638,31 @@ if [ "$law_ok" -eq 1 ]; then
   fi
 fi
 
-# --- fresh PATTERN match in RUNS_DIR never fails (informational) ---
+# --- fresh PATTERN match in RUNS_DIR never fails (informational); traversal
+# status still captured — a failed fresh-scan traversal is recorded as a failure
+# (it would otherwise hide exactly the files the stale scan may have missed) ---
 if [ "$law_ok" -eq 1 ] && [ -d "$RUNS" ]; then
   NOW="$(date +%s)"
   fresh=0
-  while IFS= read -r -d '' f; do
-    if mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
-      age=$(( (NOW - mt) / 86400 ))
-      if [ "$age" -lt "$AGE_DAYS" ]; then
-        fresh=1
+  FRESH_LIST="$SCRATCH/fresh-list"
+  FRESH_ERR="$SCRATCH/fresh-find-err"
+  : > "$FRESH_ERR"
+  frc2=0
+  find "$RUNS" -type f -name "$PATTERN" -print0 2>"$FRESH_ERR" > "$FRESH_LIST" || frc2=$?
+  if [ "$frc2" -ne 0 ] || [ -s "$FRESH_ERR" ]; then
+    note_fail "RUNS_DIR fresh-scan traversal FAILED — scan incomplete: $(cat "$FRESH_ERR")"
+  else
+    while IFS= read -r -d '' f; do
+      if mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+        age=$(( (NOW - mt) / 86400 ))
+        if [ "$age" -lt "$AGE_DAYS" ]; then
+          fresh=1
+        fi
       fi
+    done < "$FRESH_LIST"
+    if [ "$fresh" -eq 1 ]; then
+      echo "verify: fresh PATTERN match present (not a failure)"
     fi
-  done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null)
-  if [ "$fresh" -eq 1 ]; then
-    echo "verify: fresh PATTERN match present (not a failure)"
   fi
 fi
 
@@ -412,12 +711,55 @@ the environment.
 | `PATTERN` | `*.txt` | `find -name` pattern selecting files |
 | `KEEP` | `50` | newest files kept in `ARCHIVE_DIR`; older ones pruned (`KEEP=0` prunes the entire archive) |
 
+### Conf grammar (L_conf)
+
+The shipped conf contains exactly 5 `KEY=VALUE` lines. Both scripts parse it
+with the same strict grammar: blank lines and lines beginning with `#` are
+ignored; **any other non-empty, non-comment line is a parse failure** (nonzero
+exit in `rotate-hdcs-runs.sh`, a recorded failure in `verify-rotation.sh`);
+each of the 5 keys must appear **exactly once** (a missing key or a duplicate
+key is a parse failure); a total count other than 5 is a parse failure. A parse
+failure never performs any write.
+
 ## Stale boundary
 
 A file is **stale** iff `floor((now − mtime) / 86400) >= AGE_DAYS`, computed with
 explicit epoch arithmetic (never bare `find -mtime +N`). A file with age exactly
 `AGE_DAYS − 1 day 23h` is **not** moved; a file aged exactly `AGE_DAYS` days
 **is** moved. Boundary files are rotated like any other stale file.
+
+## Scratch discipline (zero-write guarantee, A1/A6)
+
+Both scripts create their scratch directory via `mktemp -d` at a base that is
+**verified — with a path-component test, never a string prefix — to lie OUTSIDE
+`RUNS_DIR` and `ARCHIVE_DIR`** (verify also excludes the artifact dir). The check
+runs twice: once on the candidate **base** (`TMPDIR`, else `/tmp`) and again on the
+**instantiated** `mktemp` result — a base outside the trees does not by itself
+guarantee the concrete created path is. A `TMPDIR` pointing into either protected
+tree is therefore rejected and `/tmp` is used instead; if no safe base exists,
+the script refuses (verify records the failure through the accumulator; rotate
+exits nonzero with `REFUSE (A4)`). No scratch byte is ever written inside
+`RUNS_DIR`, `ARCHIVE_DIR`, or the artifact tree, in any mode.
+
+## Traversal discipline (find status is never discarded; pipeline masking banned)
+
+Every `find` in both scripts writes its listing to a scratch file so that
+`find`'s **exit status** is captured and its stderr is inspected:
+
+- `rotate-hdcs-runs.sh`: a failed or error-reporting `RUNS_DIR` traversal is a
+  hard refusal (zero writes) — a skipped stale file must never silently violate
+  the rotation law. `prune_select`'s exit status is **always tested explicitly**:
+  its output is redirected to a scratch file and iterated from there — never
+  consumed through a pipeline whose last stage (`while …`) would mask a traversal
+  failure with exit 0. A failed `ARCHIVE_DIR` traversal aborts the prune (and the
+  dry-run plan) with a nonzero exit; refusing to prune from a partial listing is
+  the lossless choice. A file that cannot be `stat`ed during prune selection is
+  likewise a hard refusal, not a warning-skip.
+- `verify-rotation.sh`: a failed or error-reporting traversal of `RUNS_DIR`
+  (stale scan or fresh scan) or of `ARCHIVE_DIR` (integrity scan) is recorded
+  through the `note_fail` accumulator — an unreadable subdirectory makes the
+  scan **incomplete**, and an incomplete scan can never yield exit 0. This
+  closes the "protected subdirectory hides stale files / archive entries" hole.
 
 ## Apply semantics
 
@@ -436,32 +778,70 @@ explicit epoch arithmetic (never bare `find -mtime +N`). A file with age exactly
 
 `verify-rotation.sh` is strictly read-only: its only writes go to a `mktemp -d`
 scratch dir **outside** the artifact dir, `RUNS_DIR`, and `ARCHIVE_DIR`
-(component-overlap tested; a `TMPDIR` falling inside any protected tree is
-rejected and `/tmp` is used instead), removed on exit; stderr goes only to the
-caller's stderr (A6). Every check uses the mandatory flag accumulator —
-`STALE_FOUND=0` is set inside the find/while loop and tested **after** the loop;
-the conf parse, archive listing, and every `cksum`/`cmp` status are accumulated
-via `note_fail`, never a bare `[ cond ] && exit 1`:
+(component-tested on both the base and the instantiated path; a `TMPDIR` falling
+inside any protected tree is rejected and `/tmp` is used instead), removed on
+exit; stderr goes only to the caller's stderr (A6). Even the scratch-creation
+failure is reported through the accumulator pattern (no direct early exit
+bypasses it). Every check uses the mandatory flag accumulator — `STALE_FOUND=0`
+is set inside the find/while loop and tested **after** the loop; the conf parse,
+archive listing, every `cksum`/`cmp` status, and every `find` traversal status
+are accumulated via `note_fail`, never a bare `[ cond ] && exit 1`. All
+archive-listing work (recording, per-entry re-verification, orphan detection,
+checksum collection) runs in the **main shell** — never inside a
+command-substitution subshell — so every `note_fail`/flag update persists to the
+final exit code:
 
-- conf parses: KEY=VALUE lines counted with blanks/`#` comments ignored; the shipped
-  conf must contain exactly 5 keys with verbatim values.
+- conf parses: strict L_conf grammar (see above) — KEY=VALUE lines counted with
+  blanks/`#` comments ignored, malformed lines rejected, each of the 5 keys
+  required exactly once with verbatim values.
 - stale scan: no stale file may remain under `RUNS_DIR` (a fresh PATTERN match is
-  normal and does **not** fail).
-- archive intact: a listing of every archived file (path, cksum, size) is recorded
-  into the scratch dir **first**; a second, independent pass re-cksums and
-  re-stats each file and compares per-entry against the recorded values — a file
-  whose bytes/size changed between the two passes, or an entry that appeared or
-  vanished, is a failure. Names must match the effective `PATTERN` + rotation
-  suffix (no orphans); the archived count must not exceed `KEEP`.
+  normal and does **not** fail). The scan's `find` exit status and stderr are
+  captured into the scratch dir; a nonzero status or any stderr output means the
+  scan was incomplete and is recorded as a failure — an unreadable subdirectory
+  cannot hide stale files behind an exit 0.
+- archive intact — **recorded listing + per-entry live verification**: the
+  archive is scanned once (with `find` status captured — a failed traversal fails
+  the integrity check outright) and a listing of every archived file
+  (`mtime cksum size relpath`, ranked newest-first) is recorded into the scratch
+  dir. Then **every recorded entry is verified individually against the live
+  filesystem**: the file at `ARCHIVE_DIR/<relpath>` must still exist (a deleted
+  archived original fails) and its freshly computed `cksum`/size/mtime must
+  equal the recorded values (a mutated or replaced file fails per entry). A
+  recorded entry that vanished, or a file whose bytes/size/mtime changed since
+  recording, is detected **per entry** — not merely as a whole-set diff. Orphan
+  names and unreadable/unchecksumable files fail in the same main-shell loop.
+- **archive-name law (strict rotation suffix):** an archive file name is legal
+  iff it matches `PATTERN` exactly, OR matches `PATTERN` followed by a `.` plus
+  **one or more digits and nothing else**. The suffix is validated strictly by
+  stripping a `\.[0-9]+$` tail and re-testing the stripped base against
+  `PATTERN` — so `run.txt.1` is legal, but `run.txt.1garbage` (a digit followed
+  by trailing characters) is an **orphan** and fails verification. The lax
+  glob form `PATTERN.[0-9]*` is deliberately avoided: in a `case` glob,
+  `[0-9]*` means "one digit followed by anything", which would wrongly accept
+  such garbage-suffixed names.
+- newest KEEP present: the archived count must not exceed `KEEP` — a count above
+  `KEEP` means the retained set is not the newest-`KEEP` window (older-than-KEEP
+  files were retained) and is a failure. When the count is `<= KEEP` and every
+  recorded entry exists and matches live, the full retained (newest-`KEEP`) set
+  is present and byte-identical — the two L_verify conditions (newest KEEP
+  present AND matches the recorded listing) both hold. The apply-side prune
+  retains exactly the newest `KEEP` entries and removes the rest, so a
+  conforming archive never exceeds `KEEP`.
 - an absent `ARCHIVE_DIR` with no stale pending is healthy (exit 0).
 
 Path-law violations are reported as refusals citing `A4`.
 
 ## Path law (A4)
 
-Degenerate paths (`''`, `.`, `/` — checked before and after `realpath`
-canonicalization), identity (`RUNS_DIR == ARCHIVE_DIR`), and containment in
-either direction are refused with an explicit `REFUSE (A4)` before any write.
+Degenerate paths are refused with an explicit `REFUSE (A4)` before any write,
+**both on the original string and after `realpath -m` canonicalization**:
+`''`, `.`, `/` literally, and any value that canonicalizes to the current
+directory (`./`, `foo/..`, trailing-slash cwd forms) or to `/` (`/tmp/../..`).
+The post-canonicalization test compares against the **canonicalized current
+directory** (`realpath -m '.'`), because `realpath -m` never returns the literal
+string `.` — comparing against `'.'` would silently accept `./` and `foo/..`.
+Identity (`RUNS_DIR == ARCHIVE_DIR`) and containment in either direction are
+likewise refused.
 
 ## KNOWN_LIMITATIONS
 
@@ -471,8 +851,9 @@ either direction are refused with an explicit `REFUSE (A4)` before any write.
 - Concurrent writers appending to `RUNS_DIR` during `--apply` may produce a
   `cmp` mismatch on a live file; the source is then kept and a warning emitted
   (lossless is preferred over partial rotation) → KNOWN_LIMITATIONS, not FAIL (A7).
-- Equal-mtime prune ties resolve deterministically per run (sequence tie-break).
-- The verify archive-intact check detects byte/size mutation between its two
-  passes and membership/count violations; it cannot detect out-of-band byte
-  changes that occur entirely before verification against a file whose recorded
-  provenance is unknown (no persistent state is kept — verify is zero-write).
+- Equal-mtime prune ties resolve deterministically per run (path tie-break).
+- Verify keeps no persistent state across runs (zero-write): its recorded
+  listing is taken at verification time, so a deletion/mutation is detected only
+  from the moment of recording onward (the per-entry live re-verification closes
+  the within-run window); a pruned-then-deleted file from a run before the
+  checker ever ran leaves no trace to verify against.

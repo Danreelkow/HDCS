@@ -1,1 +1,1 @@
-PARKED (agent, after 5 repair laps): artifact converging — read-only verify FIXED, conf blanks FIXED, flattening fixed then S4 raised next layer (verifier now over-accepts malformed conf — precise semantics ruling added to register). Resume: requeue TASK-005.json; machinery armed (38/38).
+EXHAUSTED — maxLaps reached while verdict was requeue: exit 1, finding class "a4 a7"

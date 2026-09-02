@@ -1,0 +1,67 @@
+### Reverse-Gate Contract
+
+This document outlines the key requirements and resolved answers for the rotation script and verification tool.
+
+#### Key Requirements
+
+- **Dry-Run Default**: The default mode is a dry run that performs no writes.
+- **No Root**: No root access is required.
+- **No Logrotate**: There is no dependency on logrotate.
+- **Archive Outside Runs**: Archived files are stored outside the runs directory.
+- **Five Config Keys**: The configuration specifies exactly five keys: RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, and KEEP.
+- **Config Values**: The configuration values are:
+  - RUNS_DIR: /workspace/hdcs/runs
+  - ARCHIVE_DIR: /workspace/.hdcs-rotate/archive
+  - AGE_DAYS: 14
+  - PATTERN: *.txt
+  - KEEP: 50
+
+#### Resolved Answers
+
+- **Dry-Run Zero-Write**: The dry-run mode truly performs no writes, including the creation of the ARCHIVE_DIR. The --apply flag is the only writing mode.
+- **Toolchain**: The script uses only pure bash and coreutils (find, cmp, realpath, cksum). There is no logrotate dependency, and no root access is used.
+- **Path Law**: The script refuses identity, containment, and degenerate paths with cited A-number, ensuring zero writes. Environment overrides are allowed, but setting an environment variable to empty is refused.
+- **Idempotence**: The script is idempotent. Running --apply a second time will be a no-op, verified by comparing bytes.
+- **Verify Criteria**: The verification script checks if the configuration parses correctly, there are no pending stale files, and the archive is intact. It exits with status 0 if all checks pass.
+- **Verify Write Policy**: The verification script strictly operates in read-only mode. It does not write to the artifact or rotated trees. Temporary scratch space is created elsewhere using mktemp -d.
+- **Conf Blank/Comment Lines**: Blank or comment lines in the configuration are ignored by the parser. Any additional lines result in parse failure.
+- **Stale Boundary**: Files are considered stale if their age in days is greater than or equal to AGE_DAYS. This is checked explicitly in epoch seconds, not using -mtime +N.
+- **Exotic Filenames / Concurrent Writes**: Known limitations are documented, but the script does not fail due to exotic filenames or concurrent writes.
+
+#### Workflow
+
+- **Phases**: The workflow includes plan, scoped-build, verify, and deliver phases.
+- **Builders**: Builders are dynamic.
+- **Verifier**: The verifier is decorrelated.
+- **Gate Status**: The gate is either READY or NOT_READY.
+- **Max Fix Cycles**: There are a maximum of 2 fix cycles allowed.
+
+#### Handoff
+
+- **State Transition**: The state transitions from S_0 to S_1.
+- **Report**: The report includes done, resolved, open, and validation statuses.
+
+#### Constraints
+
+- No root access; no logrotate dependency; only bash and coreutils are used.
+- The default mode is a dry run with no writes.
+- Files are considered stale if their age in days is greater than or equal to AGE_DAYS.
+- The script refuses identity, containment, and degenerate paths with cited A-number.
+- The script is idempotent; running --apply a second time will be a no-op.
+- The verification script operates in read-only mode.
+- The configuration must specify exactly five keys.
+- Known limitations are documented, not resulting in failure.
+
+#### Paths
+
+- hdcs-runs-rotation.conf
+- rotate-hdcs-runs.sh
+- verify-rotation.sh
+- README.md
+
+#### Budgets
+
+- Tokens: estimate
+- Lines: 60
+- Fix Cycles: 2
+- Questions: 2

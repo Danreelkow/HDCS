@@ -1,0 +1,17 @@
+# Debrief: hdcs runs-rotation toolset
+
+**What's being delivered.** A self-contained rotation kit for /workspace/hdcs/runs: a config file, a rotation script, a verification script, and a README. Everything uses only bash and coreutils (find, cmp, realpath, cksum) — no logrotate, no root, all user-level, runs unprivileged.
+
+**The config.** The conf defines exactly five keys: RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP — and ships exactly five KEY=VALUE lines. Values are fixed and builders never invent them: RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50. Blank and comment lines are ignored by the parser; anything else is a parse failure, but the shipped artifact contains exactly those five lines.
+
+**Dry run by default.** The rotation script defaults to dry run: no writes at all, including to the archive directory — the archive is only created in apply mode. It must be safe to run repeatedly.
+
+**Apply mode.** With --apply, files whose age in whole days is at least AGE_DAYS (that is, floor of the age >= 14) are moved to the archive, preserving their relative paths, so archived originals land outside the runs directory. The archive is pruned to the newest KEEP files. A stale file is moved exactly once: a second apply is a byte-identical no-op, verified with cmp, with rotation suffixes on names. The boundary is computed explicitly in epoch seconds — never with a bare -mtime +N check, which would leak the wrong threshold.
+
+**Path safety law.** The script refuses identity, containment, and degenerate path cases, citing the relevant A-numbers, and performs zero writes when refusing. The HDCS_RUNS_DIR environment override is honored; an environment variable set but empty is treated as a refusal.
+
+**Verification.** verify-rotation.sh is strictly read-only — an operator ruling — checking that the conf parses, that no stale files remain pending, and that the archive is intact and consistent. It exits 0 only when all three hold; fresh files are considered normal, not an error. It uses the accumulator status-check pattern throughout and only touches artifact and rotated trees read-only; any scratch work happens in a mktemp -d directory elsewhere.
+
+**Known limits.** Exotic filenames and concurrent writes are documented as KNOWN_LIMITATIONS (A7) — noted, not counted as FAIL.
+
+**Process notes.** The loop runs plan, scoped-build, verify, deliver phases with a READY|NOT_READY gate and at most two fix cycles; builders are dynamic, the verifier decorrelated. Handoff is state S_0 plus Delta to S_1, reported as done items, resolved answers, open items, and validation. Artifacts land at hdcs-runs-rotation.conf, rotate-hdcs-runs.sh, verify-rotation.sh, and README.md in the artifact directory. Budget: two fix cycles, two questions, about sixty lines.
