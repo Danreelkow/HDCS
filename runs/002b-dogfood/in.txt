@@ -1,0 +1,230 @@
+=== SHARED CONTEXT (hcdl register of record) ===
+defs:
+  TOOL := runs/001-hermes-context-timer/artifact/{sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
+  DELIV := RUNBOOK.md, single file, sections ordered: [what, dry-run-test, install, configure, schedule, verify, rollback, troubleshooting]
+  SRC := HERMES_CONTEXT_SRC (default /opt/data/workspace/hermes-context/); DST := HERMES_CONTEXT_DST (default /workspace/hermes-context/)
+invariants:
+  I1_closed_world: ∀ claim about TOOL in RUNBOOK -> claim ∈ facts_block; ∉ facts_block -> forbidden (flags: only --dry-run, --verify; exit2 on unknown flag)
+  I2_behavior: real sync := one-way mirror SRC->DST (recursive, removes stale DST extras, preserves entry types ∧ symlink targets, then re-verifies); --dry-run := plan only, zero writes; --verify := exit 0 iff DST == exact mirror, else nonzero + A9 citation
+  I3_refusal_register: citations ∈ {A23 set-but-empty env (unset falls back to defaults), A18 degenerate paths (empty/'.', resolves '/'), A12 same path/ancestor-descendant/symlink component, A13 staging verify fail (DST untouched), A14 staging path conflict incl. TMPDIR set-but-empty, A9 mirror mismatch}; unknown citation -> describe condition, no citation
+  I4_rollback: bad sync restore := remove/re-sync HERMES_CONTEXT_DST from configured HERMES_CONTEXT_SRC (known-good); disabling timer alone -> FAIL (A6)
+  I5_install: mkdir -p / install -D taught; target dirs not assumed preexisting; units -> ~/.config/systemd/user/, binary -> ~/.local/bin/; timer period := 6h; logs := ~/.cache/hermes-context/ (one line per real run)
+  I6_register_terms: ∀ hcdl register term (A-number, packet, seat) appearing in runbook body -> explained inline, else omitted (A3)
+  I7_examples: operator example paths (e.g. ~/src/hermes-context) allowed iff marked as examples; tool claims remain closed-world
+open: none — operator answers A1,A3-A7 resolve all ambiguities
+S_0 + Delta -> S_1
+
+hdcs/1 PACKET:
+reg: {domain: cs-technical-writing, canon: systemd user units (systemctl --user, .service/.timer), rsync mirror semantics (delete, verify), exit codes/citations, env-var config HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST}
+intent: >
+  author := RUNBOOK.md, single-file operator runbook for TOOL runs/001-hermes-context-timer/artifact/sync-hermes-context.sh (+ units + README),
+  audience := new operator, zero prior context;
+  sections ordered: [what-the-tool-does, test-before-installing(--dry-run), install, configure(SRC/DST env overrides + defaults), schedule(systemd user timer, 6h), verify-a-sync(--verify), rollback(bad-sync concrete restore), troubleshooting(refusals + A-number citation meanings)];
+  closed_world := ∀ tool claim ∈ facts register only; document AS_DELIVERED (I1..I7 in context.hcdl).
+must_keep:
+  - documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly
+  - includes a --dry-run test the operator can run before installing
+  - states the documented rollback for a bad sync
+resolved:
+  - "Q1: scope of tool claims -> A: closed world per A1/A4/A5; facts block is the accuracy contract, no invented flags/env vars/paths, refusals documented as delivered"
+  - "Q2: register style -> A: plain imperative English per A3; hcdl register terms (A-number, packet, seat) explained or omitted from runbook body"
+  - "Q3: section completeness -> A: mandated order, every section non-empty, rollback names concrete restore (remove/re-sync HERMES_CONTEXT_DST from configured SRC), not 'reinstall' (A6)"
+  - "Q4: correctness bar -> A: S4 rubric per A7 — FAIL iff any runbook command fails as written against the run-001 artifact or any MUST_KEEP section missing/hollow"
+  - "Q5: citation coverage -> A: cite only {A23, A18, A12, A13, A14, A9}, only where true; uncited refusal conditions described without citation"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "accuracy bar := system facts block verbatim (defaults, --dry-run zero writes, --verify nonzero on mismatch, log path, install paths, 6h timer, nonzero refusals citing A-numbers)"
+  - "closed-world register {A23,A18,A12,A13,A14,A9}; --checksum/--delete/--itemize-changes are rsync internals, NOT tool flags; unknown tool flag -> usage error exit 2"
+  - "install must teach mkdir -p / install -D (no preexisting-dir assumption)"
+  - "no_resurrect: any invented tool behavior/flag/env var fails S4 rubric (A7)"
+paths:
+  - runs/001-hermes-context-timer/artifact/sync-hermes-context.sh
+  - runs/001-hermes-context-timer/artifact/hermes-context.service
+  - runs/001-hermes-context-timer/artifact/hermes-context.timer
+  - runs/001-hermes-context-timer/artifact/README.md
+  - RUNBOOK.md
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+
+MECHANICAL GATE OUTPUT:
+(no mechanical gate ran)
+
+ARTIFACT FILES: RUNBOOK.md
+
+ARTIFACT CONTENTS:
+=== RUNBOOK.md ===
+# RUNBOOK — sync-hermes-context.sh
+
+This runbook documents the tool in `runs/001-hermes-context-timer/artifact/`:
+`sync-hermes-context.sh`, `hermes-context.service`, `hermes-context.timer`, `README.md`.
+
+Terms used here: an "A-number" is one of the tool's named refusal codes (e.g. A9), cited
+when the script refuses to run and states why. No other register-specific jargon appears
+in this document.
+
+---
+
+## 1. What the tool does
+
+`sync-hermes-context.sh` performs a one-way mirror from the source directory
+(`HERMES_CONTEXT_SRC`, default `/opt/data/workspace/hermes-context/`) to the destination
+directory (`HERMES_CONTEXT_DST`, default `/workspace/hermes-context/`):
+
+- recursive copy of the full tree,
+- stale files that exist only in DST are removed,
+- entry types and symlink targets are preserved exactly,
+- after syncing, the script re-verifies the result and fails (exit nonzero) if DST is not
+  an exact mirror of SRC.
+
+It supports exactly two flags:
+
+- `--dry-run` — prints the plan of what would be synced/removed; performs zero writes.
+- `--verify` — exits 0 only if DST is currently an exact mirror of SRC; otherwise exits
+  nonzero with citation A9 (mirror mismatch).
+
+Any unknown flag exits with status 2.
+
+Each real (non-dry-run, non-verify) run writes one log line under `~/.cache/hermes-context/`.
+
+---
+
+## 2. Test before installing (--dry-run)
+
+You can preview a sync without installing anything. In these examples, the operator paths
+`~/src/hermes-context` and `~/dst/hermes-context` are examples only — substitute your own.
+
+```sh
+HERMES_CONTEXT_SRC=~/src/hermes-context \
+HERMES_CONTEXT_DST=~/dst/hermes-context \
+  ./sync-hermes-context.sh --dry-run
+```
+
+Expected: a printed plan of copies/removals; nothing on disk changes.
+
+Behavior of the environment variables:
+
+- **Unset** — the production defaults are used: `HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/`, `HERMES_CONTEXT_DST=/workspace/hermes-context/`.
+- **Set but empty** — the script refuses with citation A23. Empty is not "default"; either unset the variable or give it a real value.
+
+Refusal conditions checked before any write: degenerate paths (A18), same path /
+ancestor–descendant / symlink-component overlap (A12), staging path conflicts (A14),
+staging verify failure (A13). See the troubleshooting table for details.
+
+---
+
+## 3. Install
+
+No directories are assumed to exist; create them and install with `install -D`:
+
+```sh
+mkdir -p ~/.local/bin ~/.config/systemd/user
+install -D -m 755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+install -D -m 644 hermes-context.service ~/.config/systemd/user/hermes-context.service
+install -D -m 644 hermes-context.timer  ~/.config/systemd/user/hermes-context.timer
+```
+
+The installed script lives at `~/.local/bin/sync-hermes-context.sh`; the systemd user
+units live at `~/.config/systemd/user/hermes-context.{service,timer}`.
+
+---
+
+## 4. Configure
+
+Configuration is via environment variables read by the script:
+
+- `HERMES_CONTEXT_SRC` — source directory (default `/opt/data/workspace/hermes-context/`)
+- `HERMES_CONTEXT_DST` — destination directory (default `/workspace/hermes-context/`)
+- `TMPDIR` — optional staging parent used by the script during real runs
+
+If a variable is unset, the default above applies. If it is set but empty, the script
+refuses (A23). Trailing slashes in the values are canonicalized by the script; either
+form works.
+
+The timer unit runs the script with the defaults; if you need different paths, override
+the service unit's environment (e.g. a user-level drop-in setting the two variables), or
+export them in your service environment file.
+
+---
+
+## 5. Schedule
+
+The timer syncs every 6 hours. Enable it for your user:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-context.timer
+```
+
+Check status:
+
+```sh
+systemctl --user status hermes-context.timer
+systemctl --user list-timers hermes-context.timer
+```
+
+Logs: each real run appends one line under `~/.cache/hermes-context/`.
+
+---
+
+## 6. Verify a sync
+
+```sh
+~/.local/bin/sync-hermes-context.sh --verify
+```
+
+- Exit 0: DST is an exact mirror of SRC (entry types, symlink targets, and file bytes).
+- Exit nonzero with citation A9: mirror mismatch — run a real sync to repair:
+
+```sh
+~/.local/bin/sync-hermes-context.sh
+```
+
+---
+
+## 7. Rollback
+
+If a sync went wrong, restore the destination from the known-good configured source.
+Set the two variables to the SAME values you configured in section 4 (the defaults are
+shown here; substitute your overrides if you use any). The removal uses `find` so that
+hidden (dot-prefixed) entries are removed too:
+
+```sh
+export HERMES_CONTEXT_SRC=/opt/data/workspace/hermes-context/
+export HERMES_CONTEXT_DST=/workspace/hermes-context/
+
+find "$HERMES_CONTEXT_DST" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+~/.local/bin/sync-hermes-context.sh
+```
+
+The script reads the exported `HERMES_CONTEXT_SRC`/`HERMES_CONTEXT_DST`, so it re-syncs
+the configured destination from the configured known-good source. (If you did not export
+them, unset variables fall back to the same defaults.)
+
+Important: merely disabling the timer (`systemctl --user disable hermes-context.timer`)
+is **not** a rollback — it stops future syncs but leaves the bad DST contents in place
+(A6). Remove and re-sync DST as shown above.
+
+---
+
+## 8. Troubleshooting
+
+The tool's refusal codes ("A-numbers") and what triggers them:
+
+| Code | Condition | What to do |
+|------|-----------|------------|
+| A23 | An env variable (`HERMES_CONTEXT_SRC`, `HERMES_CONTEXT_DST`, `TMPDIR`) is set but empty. Unset variables fall back to the mandated defaults. | Either `unset VAR` or set a real value. |
+| A18 | A degenerate path: SRC or DST is empty, `.`, or resolves to `/`. | Set SRC/DST to a real directory path. |
+| A12 | SRC and DST are the same path, one is an ancestor/descendant of the other, or a symlink component makes them overlap. | Choose two disjoint directories (mind symlinked parents). |
+| A13 | Staging verification failed before the sync; DST is untouched. | Inspect the error; ensure the staging area is writable and on the same filesystem expectations; retry. |
+| A14 | Staging path conflict, including `TMPDIR` set but empty or a staging area overlapping SRC/DST or paths the tool owns. | Point `TMPDIR` at a neutral directory (e.g. unset it or use `/tmp`); do not set `TMPDIR` inside SRC or DST. |
+| A9 | Mirror mismatch (from `--verify`, or post-sync re-verification failed). | Run a real sync to repair; if it recurs, check for concurrent writers to DST. |
+
+Conditions with no code (described, not cited):
+
+- **Unknown flag** — passing anything other than `--dry-run` or `--verify` exits with
+  status 2 and a usage message.
+- **Log/target path inside DST** — if a log or staging location would land inside DST,
+  the script refuses rather than sync into its own output.
+
+For anything else, run with `--dry-run` first and read the printed plan; it shows exactly
+what the tool intends to do before any change.

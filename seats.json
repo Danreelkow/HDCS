@@ -7,6 +7,8 @@
   "s4": "openai/gpt-5.6-luna",
   "s5": "amazon/nova-micro-v1",
   "s5_fallback": "z-ai/glm-5.3-flash",
+  "fixture_author": "openai/gpt-5.6-luna",
+  "law_drafter": "z-ai/glm-5.3-flash",
   "doctrine": "operator 2026-09-01 trial (guards off): glm BACK on first chair uncapped to isolate cause — caps/muzzling vs model. Cross-family: builder glm -> judge gpt.",
   "aux": {
     "titler": "nvidia/nemotron-3.5-lightning:free",

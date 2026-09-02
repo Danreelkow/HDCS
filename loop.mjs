@@ -11,7 +11,6 @@ import { createHash } from 'node:crypto';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname);
 const seats = JSON.parse(fs.readFileSync(path.join(HERE, 'seats.json'), 'utf8'));
-if (process.env.HDCS_SEATS) { try { Object.assign(seats, JSON.parse(process.env.HDCS_SEATS)); log(`seat override via HDCS_SEATS: ${process.env.HDCS_SEATS}`); } catch { log('HDCS_SEATS parse failed — using seats.json'); } }
 const taskDir = path.resolve(process.argv[2] ?? '.');
 const bi = process.argv.indexOf('--budget');
 const budget = Number(bi > -1 ? process.argv[bi + 1] : 0.25);
@@ -24,6 +23,7 @@ const answers = fs.existsSync('answers.md') ? fs.readFileSync('answers.md', 'utf
 const mustKeeps = [...task.matchAll(/MUST_KEEP:\s*(.+)/g)].map(m => m[1].trim());
 const costs = [];
 const log = m => console.log(`[loop] ${m}`);
+if (process.env.HDCS_SEATS) { try { Object.assign(seats, JSON.parse(process.env.HDCS_SEATS)); log(`seat override via HDCS_SEATS: ${process.env.HDCS_SEATS}`); } catch { log('HDCS_SEATS parse failed — using seats.json'); } }
 const outcomes = {};
 // --- resume checkpoints (operator directive: retry the part that failed, not the whole lap) ---
 const fresh = process.argv.includes('--fresh');

@@ -63,6 +63,15 @@ function tick() {
   if (v.verdict === 'delivered') {
     move(p, parked, `DELIVERED (exit 0) — ${v.reason || 'loop reported delivery'}`);
   } else if (v.verdict === 'promote') {
+    if (process.env.HDCS_PROMOTE !== '0') {
+      const pr = spawnSync('node', [new URL('./promote.mjs', import.meta.url).pathname, task], {
+        cwd: ROOT, encoding: 'utf8', env: { ...process.env, HDCS_ROOT: ROOT, HDCS_QUEUE_DIR: QUEUE, HDCS_RUNS_DIR: RUNS },
+      });
+      let pv = null; try { pv = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch {}
+      console.log(`[driver] promote flow: ${pv ? pv.reason : 'unparseable'}`);
+      move(p, promoted, `PROMOTED — ${v.reason} | promote-flow: ${pv ? pv.reason : 'failed'}`);
+      return { verdict: 'promote', reason: v.reason, promoteFlow: pv };
+    }
     move(p, promoted, `PROMOTED — ${v.reason}`);
   } else if (v.verdict === 'park') {
     move(p, parked, `PARKED — ${v.reason}`);

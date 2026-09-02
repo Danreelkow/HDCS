@@ -1,0 +1,14 @@
+state: s0 := validated hdcs/1 packet; 5-key conf fixed (RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50); toolset=bash+coreutils(find,cmp,realpath,cksum); no open questions; artifact_dir = /workspace/hdcs/artifacts. Δ := build 4 artifacts below, each step with expected output.
+accept:
+  1. conf file parses as KEY=VALUE; contains exactly keys RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP; values exactly as packet; `grep -c '=' artifact_dir/hdcs-runs-rotation.conf` == 5 and no other keys.
+  2. rotate-hdcs-runs.sh: default mode = dry-run; proves zero writes: run dry-run on fixture tree → `find fixture -newer marker` empty; no mkdir ARCHIVE_DIR; no state files.
+  3. Path law: identity/containment-either-way/''/'.'/'/' → nonzero exit, stderr cites "A4", zero writes; env HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR override conf; set-but-empty env → refuse citing A4.
+  4. STALE: floor(age_days) >= AGE_DAYS implemented explicitly (epoch math, e.g. `-mtime` forbidden bare; use find -printf '%T@\n' or stat epoch and compare via bash); fixture file aged exactly AGE_DAYS days → rotates; aged AGE_DAYS-1 → not.
+  5. --apply: moves STALE matches to ARCHIVE_DIR preserving relpath, name + suffix; `cmp archive_file original_before_move` ==0; second --apply → `cksum` of all ARCHIVE_DIR files byte-identical, no changes; prune keeps newest KEEP archived entries.
+  6. Archived originals exist outside RUNS_DIR (A5); verify-rotation.sh: exit0 iff conf parses ∧ no STALE match in RUNS_DIR ∧ INTACT (newest KEEP present, cksum matches recorded listing); fresh matching file → still exit0; verify performs zero writes (use mktemp -d outside tree or fd redirection); all status checks use flag accumulator (STALE_FOUND=0 … test after).
+  7. No logrotate anywhere; no root needed (`grep -ri logrotate artifact_dir` empty; no sudo/su calls).
+  8. README.md documents usage, modes, STALE boundary, env overrides, and lists exotic filenames + concurrent writes under KNOWN_LIMITATIONS (A7).
+  9. bash -n passes on both scripts; shellcheck clean or zero errors; shellcheck disabled_block none.
+  10. No bare `-mtime +` in either script (`grep -n 'mtime +'` empty or only in comments marked banned).
+constraints: [A1 zero-write dry-run, A2 no logrotate/no root, A4 refuse citing A-number with zero writes, A5 move-once + cmp-verified + idempotent, A6 flag-accumulator + verify writes nothing, A7 exotic/concurrency documented not failed, no root, bash+coreutils only, under 60-line brief]
+deliverable: [artifact_dir/hdcs-runs-rotation.conf, artifact_dir/rotate-hdcs-runs.sh, artifact_dir/verify-rotation.sh, artifact_dir/README.md]

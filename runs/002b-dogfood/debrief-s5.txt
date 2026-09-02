@@ -1,0 +1,57 @@
+## Operator Runbook for Hermes Context Sync Tool
+
+This document details the Hermes Context Sync Tool, providing a single-file operator runbook for run-001. It's aimed at a new-operator audience with no prior context. The document follows a strict structure with eight mandated sections, each tied to specific claims and facts.
+
+### Key Features
+
+- **Exact CLI Flags and Environment Variables**: The document specifies exact CLI flags, environment variable names, systemd unit paths, and exit codes.
+- **Dry-Run Test**: Includes a --dry-run test that operators can run before installation to ensure everything works as expected.
+- **Rollback Procedure**: Clearly states the rollback procedure for a bad sync, which involves removing the bad destination and re-syncing from the configured source.
+
+### Document Structure
+
+The document is structured to ensure all tool claims are bound to closed-world facts blocks and CLI/citation registers. Every command is executable as-written against the artifact.
+
+### Requirements
+
+- **Document Hermes Context Source and Destination**: The document must accurately describe HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST.
+- **Include Dry-Run Test**: The document must include a --dry-run test for operators to run before installation.
+- **State Rollback Process**: The document must detail the rollback process, which involves removing the bad destination and re-syncing from the configured HERMES_CONTEXT_SRC.
+
+### Technical Details
+
+- **Closed-World Facts**: All tool claims are part of a closed world, relying on system facts and the CLI/citation register.
+- **Writing Register**: The document uses plain imperative English, with hcdl register terms explained or omitted.
+- **Refusal Treatment**: Refusals are documented as delivered, citing specific conditions where necessary.
+- **Rollback Content**: The rollback process involves concrete data restoration, removing the bad destination and re-syncing from the configured HERMES_CONTEXT_SRC.
+- **Validation Bar**: Every command must succeed as-written against the artifact, ensuring the MUST_KEEP sections are non-hollow.
+
+### Workflow
+
+The workflow includes four phases: plan, scoped-build, verify, and deliver. Builders are dynamic, and the verifier is decorrelated. The gate status is either READY or NOT_READY, with a maximum of two fix cycles allowed.
+
+### Constraints
+
+- **Closed-World Tool Claims**: All tool claims must be part of the closed-world facts block.
+- **Tool Flags**: Only --dry-run and --verify are taught as tool flags.
+- **Citation Register**: The citation register is closed, with specific citations used where applicable.
+- **Install Section**: The install section teaches mkdir -p and install -D, with target directories not assumed to exist.
+- **Section Order**: Sections must be in the mandated order, and all non-empty sections must be included.
+- **Example Operator Paths**: Example operator paths are allowed only if clearly marked as examples.
+- **Rollback Process**: The rollback process involves removing and re-syncing the destination from HERMES_CONTEXT_SRC, not just disabling.
+- **No Resurrect**: Run-001 delivered refusals are documented as-is.
+
+### Paths
+
+- `runs/001-hermes-context-timer/artifact/sync-hermes-context.sh`
+- `runs/001-hermes-context-timer/artifact/hermes-context.service`
+- `runs/001-hermes-context-timer/artifact/hermes-context.timer`
+- `runs/001-hermes-context-timer/artifact/README.md`
+- `RUNBOOK.md`
+
+### Budgets
+
+- **Tokens**: Estimate
+- **Lines**: 60
+- **Fix Cycles**: 2
+- **Questions**: 2

@@ -1,0 +1,14 @@
+defs:
+  TOOL := runs/001-hermes-context-timer/artifact/{sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md}
+  DELIV := RUNBOOK.md, single file, sections ordered: [what, dry-run-test, install, configure, schedule, verify, rollback, troubleshooting]
+  SRC := HERMES_CONTEXT_SRC (default /opt/data/workspace/hermes-context/); DST := HERMES_CONTEXT_DST (default /workspace/hermes-context/)
+invariants:
+  I1_closed_world: ∀ claim about TOOL in RUNBOOK -> claim ∈ facts_block; ∉ facts_block -> forbidden (flags: only --dry-run, --verify; exit2 on unknown flag)
+  I2_behavior: real sync := one-way mirror SRC->DST (recursive, removes stale DST extras, preserves entry types ∧ symlink targets, then re-verifies); --dry-run := plan only, zero writes; --verify := exit 0 iff DST == exact mirror, else nonzero + A9 citation
+  I3_refusal_register: citations ∈ {A23 set-but-empty env (unset falls back to defaults), A18 degenerate paths (empty/'.', resolves '/'), A12 same path/ancestor-descendant/symlink component, A13 staging verify fail (DST untouched), A14 staging path conflict incl. TMPDIR set-but-empty, A9 mirror mismatch}; unknown citation -> describe condition, no citation
+  I4_rollback: bad sync restore := remove/re-sync HERMES_CONTEXT_DST from configured HERMES_CONTEXT_SRC (known-good); disabling timer alone -> FAIL (A6)
+  I5_install: mkdir -p / install -D taught; target dirs not assumed preexisting; units -> ~/.config/systemd/user/, binary -> ~/.local/bin/; timer period := 6h; logs := ~/.cache/hermes-context/ (one line per real run)
+  I6_register_terms: ∀ hcdl register term (A-number, packet, seat) appearing in runbook body -> explained inline, else omitted (A3)
+  I7_examples: operator example paths (e.g. ~/src/hermes-context) allowed iff marked as examples; tool claims remain closed-world
+open: none — operator answers A1,A3-A7 resolve all ambiguities
+S_0 + Delta -> S_1

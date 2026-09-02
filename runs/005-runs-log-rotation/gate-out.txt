@@ -1,1 +1,1 @@
-GATE FAIL: dry-run did not list the stale file
+GATE FAIL: dry-run nonzero: ERROR: malformed config /workspace/hdcs/runs/005-runs-log-rotation/artifact/hdcs-runs-rotation.conf (schema: exactly RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP; no comments)

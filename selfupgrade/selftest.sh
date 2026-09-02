@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# selftest.sh — 12-fixture sandboxed selftest for driver.mjs + classify.mjs.
+# selftest.sh — 15-fixture sandboxed selftest for driver.mjs + classify.mjs + promote-fixture.mjs.
 # All state under mktemp -d; never touches the real queue or runs dirs.
 set -u
 SB="$(mktemp -d)"
@@ -117,6 +117,76 @@ fresh
 make_stub 0; queue o1; sleep 1.1; queue o2; lap
 assert 12 "oldest queued task should run first" in_parked o1
 assert_not 12 "newer task must wait" in_parked o2
+
+# ---- promote-fixture.mjs locks (F13-F15) ----
+PROMOTE="$HERE/promote-fixture.mjs"
+mk_prom_run() { # minimal run dir: gate checks existence only; snapshot x.sh exits 0; canary exits $1
+  rm -rf "$SB/prom"; mkdir -p "$SB/prom/artifact"
+  cat > "$SB/prom/gate.sh" <<'EOF'
+#!/usr/bin/env bash
+set -u; cd "$(dirname "$0")" || exit 1
+fail() { echo "GATE FAIL: $1"; exit 1; }
+[ -f "artifact/x.sh" ] || fail "x.sh missing"
+echo "GATE PASS"
+EOF
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SB/prom/artifact/x.sh"
+  printf '=== x.sh ===\n```\n#!/usr/bin/env bash\nexit %s\n```\n' "${1:-0}" > "$SB/prom/artifact-build.txt"
+}
+promote_json() { # promote_json <canary-exit> <block-expr> -> emits the JSON verdict line
+  printf '%s\n' "$2" > "$SB/block.txt"
+  node "$PROMOTE" "$SB/prom" "$SB/block.txt" 2>/dev/null | tail -1
+}
+json_grep() { # json_grep <canary-exit> <block-expr> <pattern> — parent-shell helper (functions are not inherited by sh -c)
+  promote_json "$1" "$2" | grep -q "$3"
+}
+pf_field() { promote_json "$1" "$2" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{process.stdout.write(String(JSON.parse(d).$3))})"; }
+
+# F13: all three locks -> promote (GREEN passes snapshot; RED catches canary exit-1 x.sh)
+fresh
+mk_prom_run 1
+assert 13 "valid two-sided fixture promotes (locks 1+2+3)" test "$(pf_field 1 'bash artifact/x.sh >/dev/null 2>&1 || fail "A1: x.sh must exit 0"' promote)" = "true"
+assert 13 "promote verdict names the red-check catch" json_grep 1 'bash artifact/x.sh >/dev/null 2>&1 || fail "A1: x.sh must exit 0"' 'red-check caught canary'
+rm -f "$SB/block.txt"
+
+# F14: block without refusal capability -> grammar guard rejects
+mk_prom_run 0
+assert 14 "fail-less block must be rejected by grammar guard" test "$(pf_field 0 'true' promote)" = "false"
+rm -f "$SB/block.txt"
+
+# F15: canary identical to snapshot -> LOCK3 wall detection
+mk_prom_run 0
+assert 15 "fixture that cannot fail must fail LOCK3 (wall, not gate)" test "$(pf_field 0 '[ -f artifact/x.sh ] && fail \"A1: unreachable\"' lock3)" = "false"
+rm -f "$SB/block.txt"
+
+# ---- promote.mjs end-to-end (F16-F17) ----
+cat > "$SB/stub-ok.sh" <<'EOF'
+#!/usr/bin/env bash
+cat > "$PROMOTE_OUT" <<'JSON'
+{"text":"```\nbash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"\n```"}
+JSON
+EOF
+cat > "$SB/stub-fail.sh" <<'EOF'
+#!/usr/bin/env bash
+echo boom >&2
+exit 1
+EOF
+
+# F16: PROMOTE -> author stub -> 3 locks -> gate.sh.proposed (A29: live gate never touched)
+fresh
+mk_prom_run 1   # canary x.sh exits 1; snapshot exits 0
+mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
+printf 'VERDICT: FAIL\nEVIDENCE: x.sh exits nonzero on every lap.\n' > "$SB/runs/prom/s4-verdict.txt"
+assert 16 "author->locks->proposed flow exits 0" env HDCS_AUTHOR_CMD="bash $SB/stub-ok.sh" node "$HERE/promote.mjs" prom
+assert 16 "gate.sh.proposed landed" test -f "$SB/runs/prom/gate.sh.proposed"
+assert 16 "proposed carries the authored block" sh -c "grep -q 'A1: x.sh must exit 0' '$SB/runs/prom/gate.sh.proposed'"
+assert 16 "live gate.sh untouched (A29)" test "$(cat "$SB/runs/prom/gate.sh" | md5sum | cut -d' ' -f1)" = "$(printf '#!/usr/bin/env bash\nset -u; cd "$(dirname "$0")" || exit 1\nfail() { echo "GATE FAIL: $1"; exit 1; }\n[ -f "artifact/x.sh" ] || fail "x.sh missing"\necho "GATE PASS"\n' | md5sum | cut -d' ' -f1)"
+
+# F17: author seat failure -> clean negative, no proposal
+fresh
+mk_prom_run 1
+mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
+assert_not 17 "failed author seat exits nonzero" env HDCS_AUTHOR_CMD="bash $SB/stub-fail.sh" node "$HERE/promote.mjs" prom
+assert_not 17 "no gate.sh.proposed on author failure" test -f "$SB/runs/prom/gate.sh.proposed"
 
 echo "----"
 echo "selftest: $PASS passed, $FAIL failed"

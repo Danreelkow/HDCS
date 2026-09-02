@@ -1,9 +1,10 @@
-A1_dry: DRY -> zero writes ∀ path (no ARCHIVE_DIR/state creation); --apply sole writer
-A2_toolchain: pure bash + coreutils (find, cmp, realpath, cksum); logrotate ∉ deps
-A4_path_law: ∀ conf/env resolution -> refuse RUNS_DIR==ARCHIVE_DIR ∨ containment ∨ degenerate ('', '.', '/'); refusal cites A-numbers ∧ precedes ∀ write; env HDCS_RUNS_DIR/HDCS_ARCHIVE_DIR > conf; set-but-empty -> refuse
-A5_move_once: ∀ file age ≥ AGE_DAYS -> moved exactly once; 2nd --apply -> zero-action
-A5_bytes: ∀ path -> DST end state == SRC end state, recursive; verified via cmp; archived name := <name> + rotation suffix
-A6_verify: exit 0 iff conf parses ∧ ¬∃ stale-matching file under RUNS_DIR ∧ archived listing consistent; else exit ≥ 1
-A7_race: exotic names/races -> KNOWN_LIMITATIONS section, ¬ FAIL verdict
-conf_schema: exactly {RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP}
-open: ∅
+A1_dryrun: ∀ mode=dry-run -> zero writes (no ARCHIVE_DIR mkdir, no state files); --apply sole writing mode
+A2_toolchain: toolchain := bash ∧ coreutils(find,cmp,realpath,cksum); logrotate invocation ⇒ defect; no root
+A4_pathlaw: ∀ path ∈ {identity, containment(either direction), degenerate('', '.', '/')} -> refuse, cite A-number; env override allowed; set-but-empty -> refuse
+A5_mirror: ∀ --apply run -> second run byte-identical no-op; move-once via age threshold; cmp archived vs original; names preserved + rotation suffix
+A6_verify: exit 0 ⇔ conf parses ∧ ¬∃ stale file under RUNS_DIR ∧ archive listing intact; fresh PATTERN match ¬fail
+A6_boundary: stale ⇔ floor(age_days) >= AGE_DAYS; explicit computation, ¬ bare -mtime +N (excludes [N,N+1))
+A7_status: ∀ check in verify -> flag accumulator; bare pipeline status = defect
+A8_limits: exotic filenames / concurrent writes -> KNOWN_LIMITATIONS, ¬ FAIL
+conf_invariant: conf keys == {RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP} ∧ values operator-fixed verbatim
+open: none

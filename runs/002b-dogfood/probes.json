@@ -1,0 +1,10 @@
+{
+  "source-override": ["HERMES_CONTEXT_SRC", "source env var"],
+  "destination-override": ["HERMES_CONTEXT_DST"],
+  "dry-run-test": ["--dry-run", "dry run"],
+  "user-level-timer": ["systemctl --user", "user timer", "user units"],
+  "verify-mode": ["--verify"],
+  "rollback": ["rollback", "roll back", "restore"],
+  "refusal-citations": ["A-number", "cites an A", "refusal cites"],
+  "install-path": [".local/bin"]
+}

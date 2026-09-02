@@ -1,17 +1,20 @@
 === hdcs-runs-rotation.conf ===
 RUNS_DIR=/workspace/hdcs/runs
 ARCHIVE_DIR=/workspace/.hdcs-rotate/archive
-AGE_DAYS=7
-PATTERN=*
-KEEP=5
+AGE_DAYS=14
+PATTERN=*.txt
+KEEP=50
 
 === rotate-hdcs-runs.sh ===
 #!/usr/bin/env bash
 # rotate-hdcs-runs.sh — rotate stale files out of RUNS_DIR into ARCHIVE_DIR.
 # Pure bash + coreutils. --apply is the sole writer (A1); default mode is dry-run.
+# Staleness: explicit stat epoch math — age >= AGE_DAYS (boundary rotates, A5).
+# A5_mirror: every moved file preserves its recursive relative path, i.e.
+#   RUNS_DIR/<rel>  ->  ARCHIVE_DIR/<rel>   (collision suffix appended to the
+#   basename only, inside the mirrored directory — never flattened).
 # Usage: rotate-hdcs-runs.sh [--apply]
 # Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (set-but-empty refused, A4).
-# Exit codes: 0 success/zero-action; >=1 any refusal/failure.
 
 set -u
 
@@ -26,9 +29,12 @@ parse_conf() {
     [ -r "$f" ] || return 1
     while IFS= read -r line; do
         case "$line" in ''|'#'*) continue ;; esac
+        case "$line" in
+            [A-Z_]*=*) : ;;
+            *) return 1 ;;
+        esac
         key="${line%%=*}"
         val="${line#*=}"
-        [ "$key" = "$line" ] && return 1
         case "$key" in
             RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) CONF["$key"]="$val" ;;
             *) return 1 ;;
@@ -58,15 +64,17 @@ AGE_DAYS="${CONF[AGE_DAYS]}"
 PATTERN="${CONF[PATTERN]}"
 KEEP="${CONF[KEEP]}"
 
-# ---- A4 path law: refuses precede ANY write --------------------------------
+# ---- A4 path law: refusals precede ANY write --------------------------------
 for p in "$RUNS_DIR" "$ARCHIVE_DIR"; do
     case "$p" in
         ''|'.'|'/') die "A4: degenerate path '$p' refused" ;;
     esac
 done
-[ "$AGE_DAYS" -ge 0 ] 2>/dev/null || die "A4: AGE_DAYS must be a nonnegative integer"
+case "$AGE_DAYS" in
+    ''|*[!0-9]*) die "A4: AGE_DAYS must be a nonnegative integer" ;;
+esac
 case "$KEEP" in
-    ''|*[!0-9-]*) die "A4: KEEP must be an integer" ;;
+    ''|*[!0-9]*) die "A4: KEEP must be a nonnegative integer" ;;
 esac
 
 RUNS_R="$(realpath -m -- "$RUNS_DIR")"  || die "A4: cannot resolve RUNS_DIR '$RUNS_DIR'"
@@ -78,8 +86,45 @@ fi
 case "$ARCH_R/" in "$RUNS_R"/*) die "A4: ARCHIVE_DIR ($ARCH_R) is inside RUNS_DIR ($RUNS_R); refusing" ;; esac
 case "$RUNS_R/" in "$ARCH_R"/*) die "A4: RUNS_DIR ($RUNS_R) is inside ARCHIVE_DIR ($ARCH_R); refusing" ;; esac
 
-# ---- plan (read-only; safe in both modes) ----------------------------------
-mapfile -t STALE < <(find "$RUNS_R" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" | sort)
+# ---- stale plan via explicit epoch math (A5) --------------------------------
+# age = now_epoch - mtime_epoch; stale iff age >= AGE_DAYS * 86400.
+# find is used ONLY to enumerate candidate paths (no time predicate at all);
+# the staleness decision is applied per file from stat epochs, so a file whose
+# exact age equals AGE_DAYS is included (boundary per A5).
+THRESHOLD=$((AGE_DAYS * 86400))
+NOW_EPOCH="$(date +%s)" || die "cannot read clock"
+declare -a STALE=()
+while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    mtime="$(stat -c %Y -- "$f")" || die "cannot stat $f"
+    if [ "$((NOW_EPOCH - mtime))" -ge "$THRESHOLD" ]; then
+        STALE+=("$f")
+    fi
+done < <(find "$RUNS_R" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
+
+# ---- A5_mirror helper: mirrored destination for a source path ---------------
+rel_of() {
+    local src="$1"
+    if [ "$src" = "$RUNS_R" ]; then
+        printf '%s' "."
+    else
+        printf '%s' "${src#"$RUNS_R"/}"
+    fi
+}
+
+plan_dest() {
+    local src="$1" rel dir base dest n
+    rel="$(rel_of "$src")"
+    dir="$ARCH_R/$(dirname -- "$rel")"
+    base="$(basename -- "$rel")"
+    dest="$dir/$base"
+    n=1
+    while [ -e "$dest" ]; do
+        dest="$dir/$base.$n"
+        n=$((n + 1))
+    done
+    printf '%s' "$dest"
+}
 
 # ---- dry-run (default): print plan, create nothing (A1) --------------------
 if [ "${1-}" != "--apply" ]; then
@@ -88,8 +133,7 @@ if [ "${1-}" != "--apply" ]; then
         exit 0
     fi
     for src in "${STALE[@]}"; do
-        base="$(basename -- "$src")"
-        echo "$src -> $ARCHIVE_DIR/$base.1"
+        echo "$src -> $(plan_dest "$src")"
     done
     echo "dry-run: ${#STALE[@]} file(s) would be rotated (no changes made)"
     exit 0
@@ -100,14 +144,17 @@ mkdir -p -- "$ARCH_R" || die "cannot create ARCHIVE_DIR $ARCH_R"
 
 moved=0
 for src in "${STALE[@]}"; do
-    base="$(basename -- "$src")"
-    dest="$ARCH_R/$base.1"
+    rel="$(rel_of "$src")"
+    dir="$ARCH_R/$(dirname -- "$rel")"
+    base="$(basename -- "$rel")"
+    mkdir -p -- "$dir" || die "cannot create mirrored archive dir $dir"
+    dest="$dir/$base"
     n=1
     while [ -e "$dest" ]; do
+        dest="$dir/$base.$n"
         n=$((n + 1))
-        dest="$ARCH_R/$base.$n"
     done
-    # lossless check (A5_bytes): snapshot bytes, move, cmp-verify
+    # lossless check (A5): snapshot bytes, move, cmp-verify
     tmp="$(mktemp)" || die "mktemp failed"
     cp -- "$src" "$tmp" || { rm -f -- "$tmp"; die "snapshot failed for $src"; }
     if mv -- "$src" "$dest" && cmp -s -- "$tmp" "$dest"; then
@@ -115,22 +162,18 @@ for src in "${STALE[@]}"; do
         echo "rotated: $src -> $dest"
         moved=$((moved + 1))
     else
-        rc=$?
-        cmp -s -- "$tmp" "$src" && mv -- "$src" "$src" 2>/dev/null
         rm -f -- "$tmp"
         die "rotation of $src failed (bytes not verified); source left in place"
     fi
 done
 
 # ---- KEEP pruning: oldest archived entries beyond KEEP are removed ---------
-if [ "$KEEP" -ge 0 ]; then
-    while IFS= read -r old; do
-        [ -n "$old" ] || continue
-        rm -f -- "$old"
-        echo "pruned (KEEP=$KEEP): $old"
-    done < <(find "$ARCH_R" -maxdepth 1 -type f -name "$PATTERN.*" -printf '%T@ %p\n' 2>/dev/null \
-             | sort -rn | awk -v k="$KEEP" 'NR > k { $1=""; sub(/^ /,""); print }')
-fi
+while IFS= read -r old; do
+    [ -n "$old" ] || continue
+    rm -f -- "$old"
+    echo "pruned (KEEP=$KEEP): $old"
+done < <(find "$ARCH_R" -type f -printf '%T@ %p\n' 2>/dev/null \
+         | sort -rn | awk -v k="$KEEP" 'NR > k { $1=""; sub(/^ /,""); print }')
 
 if [ "$moved" -eq 0 ]; then
     echo "apply: zero-action (no files at or beyond AGE_DAYS=$AGE_DAYS)"
@@ -140,10 +183,12 @@ exit 0
 === verify-rotation.sh ===
 #!/usr/bin/env bash
 # verify-rotation.sh — read-only verifier for the rotation state (A6).
-# Exit 0 iff: conf parses; no stale-matching file under RUNS_DIR;
-# archived listing is consistent (valid rotation names, no duplicate
-# basename+suffix). Exit >=1 otherwise; exit 2 on malformed conf.
-# Never writes (A1 applies to rotate-hdcs-runs.sh only; this script is read-only).
+# Exit 0 iff: conf parses; no stale (age >= AGE_DAYS, explicit stat epoch math,
+# A5) PATTERN-matching file under RUNS_DIR; ARCHIVE_DIR exists and its file
+# listing is intact. Never writes into the artifact dir or the watched tree:
+# any scratch file lives in the system temp dir (mktemp outside the tree) and
+# is removed on exit. Every check feeds a flag accumulator (A7); a failed scan
+# (find error, unreadable stat) is a verify FAILURE, never a silent pass.
 
 set -u
 
@@ -157,9 +202,12 @@ parse_conf() {
     [ -r "$f" ] || return 1
     while IFS= read -r line; do
         case "$line" in ''|'#'*) continue ;; esac
+        case "$line" in
+            [A-Z_]*=*) : ;;
+            *) return 1 ;;
+        esac
         key="${line%%=*}"
         val="${line#*=}"
-        [ "$key" = "$line" ] && return 1
         case "$key" in
             RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) CONF["$key"]="$val" ;;
             *) return 1 ;;
@@ -202,33 +250,52 @@ fi
 case "$ARCH_R/" in "$RUNS_R"/*) die "A4: ARCHIVE_DIR inside RUNS_DIR; refusing" 1 ;; esac
 case "$RUNS_R/" in "$ARCH_R"/*) die "A4: RUNS_DIR inside ARCHIVE_DIR; refusing" 1 ;; esac
 
-# (b) no stale-matching file pending rotation
-stale="$(find "$RUNS_R" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" 2>/dev/null)"
-if [ -n "$stale" ]; then
-    echo "PENDING ROTATION:" >&2
-    echo "$stale" >&2
-    die "stale file(s) under RUNS_DIR not yet rotated" 1
-fi
+# Scratch files live OUTSIDE the artifact dir and the watched tree (system
+# temp via mktemp), and are always cleaned up — verify stays read-only.
+OUTTMP="$(mktemp)" || die "cannot create scratch file outside the tree" 1
+ERRTMP="$(mktemp)" || { rm -f -- "$OUTTMP"; die "cannot create scratch file outside the tree" 1; }
+cleanup() { rm -f -- "$OUTTMP" "$ERRTMP"; }
+trap cleanup EXIT
 
-# (c) archived listing consistent: <name>.<suffix>, no duplicate basename+suffix
-if [ -d "$ARCH_R" ]; then
-    declare -A SEEN=()
-    while IFS= read -r f; do
-        [ -n "$f" ] || continue
-        base="$(basename -- "$f")"
-        case "$base" in
-            *.*) name="${base%.*}"; sfx="${base##*.}" ;;
-            *) die "archive entry '$f' lacks rotation suffix" 1 ;;
-        esac
-        case "$sfx" in
-            ''|*[!0-9]*) die "archive entry '$f' has invalid rotation suffix" 1 ;;
-        esac
-        [ -n "$name" ] || die "archive entry '$f' has empty basename" 1
-        if [ -n "${SEEN[$base]+x}" ]; then
-            die "duplicate archived basename+suffix: $base" 1
-        fi
-        SEEN["$base"]=1
-    done < <(find "$ARCH_R" -type f | sort)
+# (b) no stale-matching file pending rotation — explicit epoch math (A5).
+# One find invocation writes candidates to a scratch file and its stderr to a
+# separate scratch file; find's OWN exit status is captured directly (no
+# pipeline, so no head/awk status masking — A7). The threshold is applied per
+# file via stat, so files whose exact age equals AGE_DAYS are flagged.
+THRESHOLD=$((AGE_DAYS * 86400))
+NOW_EPOCH="$(date +%s)" || die "cannot read clock" 1
+STALE_FOUND=0
+SCAN_FAILED=0
+if ! find "$RUNS_R" -type f -name "$PATTERN" -print0 >"$OUTTMP" 2>"$ERRTMP"; then
+    echo "SCAN FAILURE: find over $RUNS_R failed" >&2
+    SCAN_FAILED=1
+fi
+if [ -s "$ERRTMP" ]; then
+    echo "SCAN FAILURE: find over $RUNS_R reported errors:" >&2
+    cat "$ERRTMP" >&2
+    SCAN_FAILED=1
+fi
+while IFS= read -r -d '' f; do
+    [ -n "$f" ] || continue
+    if ! mtime="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+        echo "SCAN FAILURE: cannot stat $f" >&2
+        SCAN_FAILED=1
+        continue
+    fi
+    if [ "$((NOW_EPOCH - mtime))" -ge "$THRESHOLD" ]; then
+        echo "PENDING ROTATION: $f" >&2
+        STALE_FOUND=1
+    fi
+done <"$OUTTMP"
+[ "$SCAN_FAILED" -eq 0 ] || die "stale scan incomplete; refusing to report OK (A6)" 1
+[ "$STALE_FOUND" -eq 0 ] || die "stale file(s) under RUNS_DIR not yet rotated" 1
+
+# (c) archive intact: ARCHIVE_DIR exists and its recursive file listing succeeds
+if [ ! -d "$ARCH_R" ]; then
+    die "archive directory $ARCH_R missing" 1
+fi
+if ! find "$ARCH_R" -type f -print >/dev/null 2>&1; then
+    die "archive listing corrupt" 1
 fi
 
 echo "verify: OK"
@@ -238,7 +305,7 @@ exit 0
 # hdcs-runs-rotation
 
 Rotate stale files out of a runs directory into an archive directory.
-Pure bash + coreutils (`find`, `cmp`, `realpath`, `cksum`, `mv`, `sort`, `awk`).
+Pure bash + coreutils (`find`, `stat`, `cmp`, `realpath`, `mv`, `sort`, `awk`).
 No logrotate, no root required.
 
 ## Files
@@ -248,50 +315,98 @@ No logrotate, no root required.
 - `rotate-hdcs-runs.sh` — dry-run planner (default) and `--apply` writer.
 - `verify-rotation.sh` — read-only state verifier.
 
-## Usage
+## Install
 
-    ./rotate-hdcs-runs.sh            # dry-run: prints planned moves, writes nothing
-    ./rotate-hdcs-runs.sh --apply    # performs the rotation
-    ./verify-rotation.sh             # exit 0 iff state is consistent
+Copy the three files above into the same directory, e.g. `/usr/local/bin` or
+`~/bin`, and make the scripts executable:
 
-### Dry-run
+    cp hdcs-runs-rotation.conf rotate-hdcs-runs.sh verify-rotation.sh /destination/dir/
+    chmod +x /destination/dir/rotate-hdcs-runs.sh /destination/dir/verify-rotation.sh
+
+## Configure
+
+Edit `hdcs-runs-rotation.conf` (five `KEY=value` lines, no comments):
+
+    RUNS_DIR=/workspace/hdcs/runs
+    ARCHIVE_DIR=/workspace/.hdcs-rotate/archive
+    AGE_DAYS=14
+    PATTERN=*.txt
+    KEEP=50
+
+Environment overrides `HDCS_RUNS_DIR` and `HDCS_ARCHIVE_DIR` take precedence
+over the conf values. A variable that is set but empty is refused (A4). All
+path law refusals — equal paths, containment in either direction, degenerate
+(`''`, `.`, `/`), set-but-empty — exit ≥1 with a message citing `A4`, before
+any write. `KEEP=0` is valid: the archive is pruned to zero entries on apply.
+
+## Dry-run
+
+Run with no arguments:
+
+    ./rotate-hdcs-runs.sh
 
 Prints each planned move as `<src> -> <dst>` and creates nothing — no
-`ARCHIVE_DIR`, no state files. Exit 0.
+`ARCHIVE_DIR`, no state files. Exit 0. The dry-run plan applies the same
+collision-suffix logic as `--apply`, so the reported destination is exactly
+the one `--apply` would use.
 
-### Apply
+## Scheduling
+
+Example cron line (nightly apply at 03:00):
+
+    0 3 * * * /path/to/rotate-hdcs-runs.sh --apply
+
+## Apply behavior
 
 - Validates paths (A4) before any write.
 - `mkdir -p` on `ARCHIVE_DIR`.
-- Finds files matching `PATTERN` with age ≥ `AGE_DAYS` under `RUNS_DIR`.
-- Moves each to `ARCHIVE_DIR/<name>.<n>` (`.1`, incremented to `.2`, `.3`, …
-  if the destination already exists).
+- Finds files matching `PATTERN` under `RUNS_DIR` whose age, computed with
+  explicit stat epoch math (`now_epoch - mtime_epoch >= AGE_DAYS * 86400`),
+  is at or beyond `AGE_DAYS`. A file exactly `AGE_DAYS` old IS rotated.
+  `find` is used only to enumerate candidate paths; the staleness threshold
+  is decided per file from `stat -c %Y` against `date +%s`, never from any
+  day-rounded time predicate, which can exclude threshold-age files.
+- Mirrored relative paths (A5_mirror): each file `RUNS_DIR/<rel>` is archived
+  to `ARCHIVE_DIR/<rel>` — the full recursive relative path is preserved, so
+  `RUNS_DIR/001-old/gate-out.txt` lands at
+  `ARCHIVE_DIR/001-old/gate-out.txt`, never flattened to a top-level name.
+- On a name collision inside the mirrored directory, a numeric suffix is
+  appended to the basename: `gate-out.txt.1`, `gate-out.txt.2`, …
 - Byte-losslessness is verified with `cmp` against a snapshot; a failed
   verification leaves the source in place and exits ≥1.
-- KEEP pruning: after moves, the oldest archived matching entries beyond
-  `KEEP` are deleted. `KEEP >= 0` prunes; `KEEP < 0` = unlimited (no pruning).
+- KEEP pruning: after moves, the oldest archived entries beyond `KEEP`
+  (across the whole archive tree, newest kept) are deleted. This applies for
+  every `KEEP` value including `KEEP=0` (archive emptied).
 - A second consecutive `--apply` with nothing stale is zero-action: exit 0,
   no moves, no new state.
 
-## Environment overrides
+## Verify behavior
 
-`HDCS_RUNS_DIR` and `HDCS_ARCHIVE_DIR` override the corresponding conf values.
-A variable that is set but empty is refused (A4). All path law refusals —
-equal paths, containment in either direction, degenerate (`''`, `.`, `/`),
-set-but-empty — exit ≥1 with a message citing `A4`, before any write.
+`verify-rotation.sh` exits 0 only when the conf parses, the stale scan
+completes cleanly and finds nothing at or beyond `AGE_DAYS`, and the archive
+directory exists with an intact recursive file listing. A scan that cannot
+run (unreadable tree, failed `stat` on a candidate) is a verify FAILURE —
+the verifier never reports OK on an incomplete scan.
+
+Verify never writes: it creates no files in the artifact directory or the
+watched tree. Its only scratch files are `mktemp` files in the system temp
+directory (outside both), removed on exit; every check feeds a flag
+accumulator, and `find`'s own exit status is captured directly (never masked
+by a downstream pipeline stage).
 
 ## Exit codes
 
 - `rotate-hdcs-runs.sh`: `0` success or zero-action; `≥1` any refusal/failure.
 - `verify-rotation.sh`: `0` consistent (conf parses, no stale match under
-  RUNS_DIR, archive listing consistent); `2` malformed conf; `≥1` otherwise.
+  RUNS_DIR, archive listing intact); `2` malformed conf; `≥1` otherwise.
   Verify never writes.
 
 ## KNOWN_LIMITATIONS
 
-- Exotic filenames: names containing newlines, or beginning/ending with
-  whitespace, are not handled specially; the tooling may misreport them.
-  This is a documented limitation, not a tool failure (A7).
+- Exotic filenames: names containing newlines are handled via NUL-safe
+  traversal for scanning, but tooling output may misrender them; names
+  beginning/ending with whitespace may be misreported in messages.
+  Documented limitation, not a tool failure (A7).
 - Races: a file created or modified concurrently between the stale scan and
   the move may be rotated or skipped inconsistently; no locking is performed.
   Documented limitation (A7).

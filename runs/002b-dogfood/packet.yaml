@@ -1,0 +1,30 @@
+reg: {domain: cs-technical-writing, canon: systemd user units (systemctl --user, .service/.timer), rsync mirror semantics (delete, verify), exit codes/citations, env-var config HERMES_CONTEXT_SRC/HERMES_CONTEXT_DST}
+intent: >
+  author := RUNBOOK.md, single-file operator runbook for TOOL runs/001-hermes-context-timer/artifact/sync-hermes-context.sh (+ units + README),
+  audience := new operator, zero prior context;
+  sections ordered: [what-the-tool-does, test-before-installing(--dry-run), install, configure(SRC/DST env overrides + defaults), schedule(systemd user timer, 6h), verify-a-sync(--verify), rollback(bad-sync concrete restore), troubleshooting(refusals + A-number citation meanings)];
+  closed_world := ∀ tool claim ∈ facts register only; document AS_DELIVERED (I1..I7 in context.hcdl).
+must_keep:
+  - documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly
+  - includes a --dry-run test the operator can run before installing
+  - states the documented rollback for a bad sync
+resolved:
+  - "Q1: scope of tool claims -> A: closed world per A1/A4/A5; facts block is the accuracy contract, no invented flags/env vars/paths, refusals documented as delivered"
+  - "Q2: register style -> A: plain imperative English per A3; hcdl register terms (A-number, packet, seat) explained or omitted from runbook body"
+  - "Q3: section completeness -> A: mandated order, every section non-empty, rollback names concrete restore (remove/re-sync HERMES_CONTEXT_DST from configured SRC), not 'reinstall' (A6)"
+  - "Q4: correctness bar -> A: S4 rubric per A7 — FAIL iff any runbook command fails as written against the run-001 artifact or any MUST_KEEP section missing/hollow"
+  - "Q5: citation coverage -> A: cite only {A23, A18, A12, A13, A14, A9}, only where true; uncited refusal conditions described without citation"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "accuracy bar := system facts block verbatim (defaults, --dry-run zero writes, --verify nonzero on mismatch, log path, install paths, 6h timer, nonzero refusals citing A-numbers)"
+  - "closed-world register {A23,A18,A12,A13,A14,A9}; --checksum/--delete/--itemize-changes are rsync internals, NOT tool flags; unknown tool flag -> usage error exit 2"
+  - "install must teach mkdir -p / install -D (no preexisting-dir assumption)"
+  - "no_resurrect: any invented tool behavior/flag/env var fails S4 rubric (A7)"
+paths:
+  - runs/001-hermes-context-timer/artifact/sync-hermes-context.sh
+  - runs/001-hermes-context-timer/artifact/hermes-context.service
+  - runs/001-hermes-context-timer/artifact/hermes-context.timer
+  - runs/001-hermes-context-timer/artifact/README.md
+  - RUNBOOK.md
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}

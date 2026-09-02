@@ -34,6 +34,7 @@ HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh --app
 G=$(HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$R/archive" bash artifact/rotate-hdcs-runs.sh --apply 2>&1)
 [ $? -eq 0 ] && fail "archive inside RUNS_DIR accepted (A4)"
 [ -e "$R/archive" ] && fail "guard wrote before refusing (A4)"
+G=$(HDCS_RUNS_DIR="/tmp/../.." HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh 2>&1); [ $? -eq 0 ] && fail "A4: degenerate check must hold AFTER realpath canonicalization ('/tmp/../..' resolves to '/')"
 grep -qE '2?> *"\$\(\s*dirname|2?> *"\$\{?DIR' artifact/verify-rotation.sh && fail "verify redirects stderr INTO the artifact dir (read-only contract: mktemp outside the tree or fd indirection, never \$DIR/<tempfile>)"
 ART_BEFORE=$(find "$(cd artifact && pwd)" -type f | sort | xargs cksum 2>/dev/null)
 chmod -R a-w "$(cd artifact && pwd)" 2>/dev/null

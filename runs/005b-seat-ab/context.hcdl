@@ -1,0 +1,12 @@
+defs:
+  STALE(f) := floor(age_days(f)) >= AGE_DAYS          # boundary explicit; find -mtime +N excluded band [N,N+1) banned
+  PENDING := ∃ f ∈ RUNS_DIR: match(f,PATTERN) ∧ STALE(f)
+  INTACT := newest KEEP ∈ ARCHIVE_DIR present ∧ cksum/cmp match recorded listing
+invariants:
+  A1_dryrun: ∀ mode=dry-run -> zero writes (no ARCHIVE_DIR mkdir, no state files); --apply only writer
+  A2_tooling: toolset := {bash, find, cmp, realpath, cksum, coreutils}; logrotate ∃=false -> invocation = defect; no root
+  A4_pathlaw: refuse(RUNS_DIR==ARCHIVE_DIR ∨ RUNS_DIR⊂ARCHIVE_DIR ∨ ARCHIVE_DIR⊂RUNS_DIR ∨ path∈{'','.', '/'}) with cited A-number; zero writes on refusal; env override > conf; set-but-empty env -> refuse
+  A5_mirror: ∀ f: --apply -> move(f, ARCHIVE_DIR, relpath preserved, name+suffix); cmp(archive,orig pre-move)==0; 2nd --apply -> byte-identical ARCHIVE_DIR (no-op)
+  A6_verify: exit0 iff conf parses ∧ ¬PENDING ∧ INTACT; fresh∧match -> ¬fail
+  A7_known: exotic filenames ∧ concurrent writes := KNOWN_LIMITATIONS (¬FAIL)
+open: [] (no remaining operator questions; all ambiguities resolved by A1,A2,A4,A5,A6,A7)
