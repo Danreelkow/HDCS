@@ -128,7 +128,7 @@ let s3cached = false;
 if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && fs.existsSync('gate.sh') && state.gate_at >= fileAt('gate.sh') && state.gate_at >= fileAt(path.join(HERE, 'prompts', 's3-system.txt'))) {
   fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
-  for (const [, name, body] of extractSections(build)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+  for (const [name, body] of extractSections(build)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   let g = '', ok = true;
   try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
@@ -152,7 +152,7 @@ for (const attempt of s3attempts) {
   fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
   const sections = extractSections(build);
-  for (const [, name, body] of sections) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+  for (const [name, body] of sections) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   log(`extract[${attempt}]: ${sections.length} section(s) -> [${fs.readdirSync('artifact').join(', ') || 'EMPTY'}]`);
   log(`artifacts: ${sections.map(s => s[0]).join(', ') || 'NONE'}`);
   if (!fs.existsSync('gate.sh')) { outcomes.s3 = 'NO GATE (artifacts extracted)'; break; }
@@ -200,7 +200,7 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     fs.writeFileSync('artifact-build.txt', fb);
     fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
-    for (const [, name, body] of extractSections(fb)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+    for (const [name, body] of extractSections(fb)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
     log(`extract[feedback]: wrote [${fs.readdirSync('artifact').join(', ') || 'EMPTY'}]`);
     if (fs.existsSync('gate.sh')) {
       let g = '', ok = true;
