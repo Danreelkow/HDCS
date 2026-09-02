@@ -184,11 +184,9 @@ for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   fi
 done
 STAGE=$(mktemp -d "$R_PARENT/hermes-context-stage.XXXXXX")
-# re-validate the INSTANTIATED stage path (A20/A14/A15: bidirectional containment —
-# the stage must not sit inside DST/SRC/owned, and nothing owned may sit inside it)
+# re-validate the INSTANTIATED stage path (A20/A14)
 R_STAGE=$(realpath -- "$STAGE")
-if [ -L "$STAGE" ] || is_inside "$R_STAGE" "$R_DST" || is_inside "$R_STAGE" "$R_SRC" \
-   || is_inside "$R_DST" "$R_STAGE" || is_inside "$R_SRC" "$R_STAGE"; then
+if [ -L "$STAGE" ] || is_inside "$R_STAGE" "$R_DST" || is_inside "$R_STAGE" "$R_SRC"; then
   echo "A14: instantiated stage path invalid ($R_STAGE)" >&2
   rm -rf -- "$STAGE"; exit 1
 fi
@@ -369,12 +367,9 @@ HERMES_CONTEXT_SRC=/tmp/fake-src HERMES_CONTEXT_DST=/tmp/fake-dst \
 - `A22`: DST itself is a symlink — refused and left untouched; sync never
   replaces a user-placed symlink.
 - `A14/A15`: DST overlapping an owned concrete path (stage dir, log file
-  parent, entrypoint dir) is refused — bidirectionally (DST inside an owned
-  path, or an owned path inside DST); the log and entrypoint always live
+  parent, entrypoint dir) is refused; the log and entrypoint always live
   outside DST.
 - `A18`: degenerate values (`/`, empty, `.`) for either endpoint are refused.
-- `A23`: set-but-empty env overrides are refused; unset falls back to the
-  mandated production paths.
 
 ## KNOWN_LIMITATIONS
 
