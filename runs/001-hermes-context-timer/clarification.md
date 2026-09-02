@@ -1,13 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: sync-hermes-context.sh missing
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-- Q9: severity bar? -> A: A10 normal-operation FAILs only; exotic -> +open"
+VERDICT: FAIL
+EVIDENCE: `sync-hermes-context.sh:29` assigns `SRC=${HERMES_CONTEXT_SRC-default}` and `DST=${HERMES_CONTEXT_DST-default}`; when variables are unset, the script uses the literal path `default` instead of the required production defaults `/opt/data/workspace/hermes-context` and `/workspace/hermes-context`. This contradicts the required defaults and makes the normal unset-variable invocation incorrect. Additionally, `sync-hermes-context.sh:132-134` creates the stage directory with `mktemp -d` before validating its parent against DST and the owned paths; if `TMPDIR` is DST or an ancestor/descendant, the script writes into the protected path before refusing, violating A20 and the A11 “stage -> verify -> only then touch DST” ordering.
 
 ## Packet
 ```yaml

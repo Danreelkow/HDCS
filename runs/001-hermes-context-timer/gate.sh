@@ -83,6 +83,14 @@ for LV in HERMES_CTX_LOG LOG_DIR; do
     [ $? -eq 0 ] && fail "DST inside the custom log file's parent was accepted ($LV) — A14: the log file's PARENT is an owned path"
   fi
 done
+# A23 defaults fixture (run 043/044/046 S4 findings, 3x repeated): unset vars -> mandated production paths, never a placeholder word
+grep -q '/opt/data/workspace/hermes-context' sync-hermes-context.sh || fail "unset-var default for SRC is not the mandated production path (A1/A17/A23) — no placeholder word 'default'"
+grep -qE '\$\{HERMES_CONTEXT_(SRC|DST)-default\}' sync-hermes-context.sh && fail "placeholder word 'default' used as a path default (A23: unset -> the mandated production paths; set-but-empty -> refuse)"
+# A20 staging-order fixture (run 044/046 S4 findings): stage parent validated BEFORE mktemp — TMPDIR=DST probe
+rm -rf "$SRC" "$DST"; mkdir -p "$SRC/inner"; printf 'q\n' > "$SRC/inner/f"; mkdir -p "$DST/sub"; printf 'x\n' > "$DST/sub/g"
+TOCOUT=$(TMPDIR="$DST" HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1)
+[ $? -eq 0 ] && fail "run must refuse when TMPDIR is inside DST (A20/A11: stage parent is validated before mktemp)"
+[ -e "$DST"/tmp.* ] && fail "writes occurred into DST before refusal (A20: validate the stage PARENT before mktemp -d)"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

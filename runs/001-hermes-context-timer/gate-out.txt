@@ -1,1 +1,1 @@
-GATE FAIL: sync-hermes-context.sh missing
+GATE FAIL: service unit missing

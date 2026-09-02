@@ -1,4 +1,3 @@
-=== sync-hermes-context.sh ===
 #!/usr/bin/env bash
 # sync-hermes-context.sh — one-way host->workspace mirror of the hermes context.
 # A2 one-way; A5 recursive mirror (rsync primary, cp fallback); A6 dry-run zero-write;
@@ -30,8 +29,8 @@ fi
 if [ "${HERMES_CONTEXT_DST+set}" = "set" ] && [ -z "$HERMES_CONTEXT_DST" ]; then
   fail "A23: HERMES_CONTEXT_DST is set but empty — refusing"
 fi
-SRC=${HERMES_CONTEXT_SRC-default}
-DST=${HERMES_CONTEXT_DST-default}
+SRC=${HERMES_CONTEXT_SRC-/opt/data/workspace/hermes-context}
+DST=${HERMES_CONTEXT_DST-/workspace/hermes-context}
 
 # --- A18: degenerate paths (component test on raw values) ---
 for v in "$SRC" "$DST"; do
@@ -136,10 +135,22 @@ if [ "$USE_VERIFY" -eq 1 ]; then
   fail "verify failed: DST ($RDC) does not mirror SRC (A9-class mismatch)"
 fi
 
-# --- A20 stage: string-validate parent -> mktemp -d -> re-validate instantiated path ---
+# --- A20 stage: string-validate parent BEFORE mktemp -> re-validate instantiated path ---
 TMPROOT=${TMPDIR-/tmp}
 [ -n "$TMPROOT" ] || fail "A20: TMPDIR empty"
-STAGE=$(mktemp -d "${TMPROOT%/}/hermes-context-stage.XXXXXX")
+RTMP=$(realpath -m -- "${TMPROOT%/}")
+for v in "$RTMP"; do
+  if [ -z "$v" ] || [ "$v" = "/" ] || [ "$v" = "." ]; then
+    fail "A18: degenerate stage parent '$v' — refusing"
+  fi
+done
+# Pre-mktemp guard: refuse only when the stage would land inside DST (parent
+# string validation; the generic ancestor itself is never owned — A14/A15 scope
+# is the concrete instantiated stage path, re-validated below).
+if [ "$RTMP" = "$RDC" ] || inside "$RTMP" "$RDC"; then
+  fail "A14/A15: stage parent ($RTMP) lies inside DST ($RDC) — refusing"
+fi
+STAGE=$(mktemp -d "${RTMP%/}/hermes-context-stage.XXXXXX")
 RST=$(realpath -- "$STAGE")
 if [ "$RST" = "$RDC" ] || inside "$RST" "$RDC" || inside "$RDC" "$RST"; then
   fail "A14/A15: DST ($RDC) overlaps the owned stage dir ($RST) — refusing"
@@ -228,114 +239,3 @@ printf '%s sync=hermes-context src=%s dst=%s method=%s copied=%s deleted=%s\n' \
 
 echo "sync complete: $RSC -> $RDC"
 exit 0
-
-=== hermes-context.service ===
-[Unit]
-Description=Hermes context one-way sync (host -> workspace)
-
-[Service]
-Type=oneshot
-ExecStart=%h/.local/bin/sync-hermes-context.sh
-
-[Install]
-WantedBy=default.target
-
-=== hermes-context.timer ===
-[Unit]
-Description=Run hermes-context sync every 6 hours
-
-[Timer]
-OnCalendar=*-*-* 00/6:00:00
-Persistent=true
-Unit=hermes-context.service
-
-[Install]
-WantedBy=default.target
-
-=== README.md ===
-# hermes-context sync
-
-One-way (A2) mirror of the hermes context from the host workspace to the
-user workspace: `SRC -> DST`, host to workspace only — never written back.
-
-## Install
-
-1. Copy `sync-hermes-context.sh` to `~/.local/bin/sync-hermes-context.sh`
-   and make it executable:
-
-       install -m 755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
-
-2. Copy the user units to the systemd user directory:
-
-       mkdir -p ~/.config/systemd/user
-       cp hermes-context.service hermes-context.timer ~/.config/systemd/user/
-       systemctl --user daemon-reload
-       systemctl --user enable --now hermes-context.timer
-
-No root required; systemd is optional (the script is standalone and can be
-run directly or from cron).
-
-## Units
-
-- `hermes-context.service` — oneshot running
-  `~/.local/bin/sync-hermes-context.sh`
-- `hermes-context.timer` — `OnCalendar=*-*-* 00/6:00:00`, `Persistent=true`,
-  activating `hermes-context.service`, wanted by `default.target`.
-
-## Configuration (env overrides)
-
-- `HERMES_CONTEXT_SRC` — source dir (default `/opt/data/workspace/hermes-context`)
-- `HERMES_CONTEXT_DST` — destination dir (default `/workspace/hermes-context`)
-- `HERMES_CTX_LOG` (or `LOG_DIR`) — log file path
-  (default `~/.cache/hermes-context/sync.log`)
-
-Example:
-
-    HERMES_CONTEXT_SRC=/data/proj HERMES_CONTEXT_DST=/ws/proj-ctx \
-      ~/.local/bin/sync-hermes-context.sh
-
-Unset variables fall back to the production defaults; a set-but-empty value
-is refused (A23).
-
-## Test procedure (--dry-run)
-
-    ~/.local/bin/sync-hermes-context.sh --dry-run
-
-Prints `dry-run: sync=N delete=M` plus the planned itemized changes and
-performs zero writes of any kind — no stage dir, no log line, and an absent
-destination stays absent (A6/A16).
-
-    ~/.local/bin/sync-hermes-context.sh --verify
-
-Fails if DST is absent; reports OK only on an exact A9-class mirror
-(contents + recursive structure + symlinks; metadata/timestamps are not
-compared and symlinks are never dereferenced).
-
-## Sync strategy
-
-- Primary: `rsync -a --delete` — exact recursive mirror, stale subtrees
-  deleted, idempotent on rerun.
-- Fallback (rsync unavailable): `cp -a` plus a recursive reconcile that
-  deletes DST entries absent from SRC and copies missing/differing entries —
-  same recursive-mirror end state.
-- Every real run stages into a `mktemp -d` directory, A9-class-verifies the
-  stage against SRC, and only then touches DST (A11/A13), then re-verifies
-  SRC vs DST and appends exactly one UTC log line per run.
-
-The log file (`~/.cache/hermes-context/sync.log`) and the entrypoint
-(`~/.local/bin/sync-hermes-context.sh`) always live outside DST, so the
-mirror never deletes them (A8).
-
-## Refusals
-
-Refusals cite only: A12 (SRC/DST identity, ancestor/descendant, realpath
-based), A14/A15 (DST overlapping owned concrete paths: stage dir, log file
-parent, entrypoint dir), A18 (degenerate paths `/`, ``, `.`), A22 (DST is a
-symlink — refused, never replaced), A23 (set-but-empty env override).
-
-## KNOWN_LIMITATIONS
-
-- A21: exotic filenames (newlines / control characters) are not handled;
-  behavior is unspecified (open).
-- Adversarial environment combinations beyond the A14 owned-path guard are
-  out of scope (open; A10/A14).
