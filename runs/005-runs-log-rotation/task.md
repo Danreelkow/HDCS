@@ -26,7 +26,10 @@ Deliverable (all files in one artifact dir):
   PATTERN is normal and must NOT fail verify. Implement the stale scan as a
   flag accumulator (STALE_FOUND=0, set inside the find/while loop, tested
   after it) — a bare `[ cond ] && exit 1` pipeline reports false pending via
-  bash subshell status when the last file is fresh
+  bash subshell status when the last file is fresh. EVERY status check in
+  verify uses this pattern (never a bare command/pipeline status). Verify
+  writes NOTHING anywhere: no temp or state files in the artifact dir or
+  elsewhere — capture stderr via fd redirection or mktemp outside the tree
 - README.md — install, configure, test with a dry run, schedule
 
 MUST_KEEP: default mode is dry-run that performs no writes

@@ -34,7 +34,12 @@ HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh --app
 G=$(HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$R/archive" bash artifact/rotate-hdcs-runs.sh --apply 2>&1)
 [ $? -eq 0 ] && fail "archive inside RUNS_DIR accepted (A4)"
 [ -e "$R/archive" ] && fail "guard wrote before refusing (A4)"
-HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/verify-rotation.sh >/dev/null 2>&1 || fail "verify failed on rotated tree"
+grep -qE '2?> *"\$\(\s*dirname|2?> *"\$\{?DIR' artifact/verify-rotation.sh && fail "verify redirects stderr INTO the artifact dir (read-only contract: mktemp outside the tree or fd indirection, never \$DIR/<tempfile>)"
+ART_BEFORE=$(find "$(cd artifact && pwd)" -type f | sort | xargs cksum 2>/dev/null)
+chmod -R a-w "$(cd artifact && pwd)" 2>/dev/null
+HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/verify-rotation.sh >/dev/null 2>&1 || fail "verify failed on rotated tree (artifact dir was read-only — verify must not need write access)"
+chmod -R u+w "$(cd artifact && pwd)" 2>/dev/null
+[ "$ART_BEFORE" = "$(find "$(cd artifact && pwd)" -type f | sort | xargs cksum 2>/dev/null)" ] || fail "verify left new/changed files behind (verify is read-only)"
 R2=/tmp/hdcs-rot-bad; rm -rf "$R2"; mkdir -p "$R2/x"; printf 'old\n' > "$R2/x/gate-out.txt"; touch -d '30 days ago' "$R2/x/gate-out.txt"
 HDCS_RUNS_DIR="$R2" HDCS_ARCHIVE_DIR="$A" bash artifact/verify-rotation.sh >/dev/null 2>&1 && fail "verify missed pending rotation"
 echo "GATE PASS"
