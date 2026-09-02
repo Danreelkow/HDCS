@@ -1,0 +1,15 @@
+https://platform.deepseek.com/api-docs/	botwall
+https://docs.z.ai/	open
+https://platform.openai.com/docs/api-reference	open
+https://nodejs.org/docs/latest-v22.x/api/	open
+https://nodejs.org/api/esm.html	open
+https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html	open
+https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html	open
+https://man7.org/linux/man-pages/man1/find.1.html	open
+https://www.gnu.org/software/coreutils/manual/html_node/index.html	open
+https://www.gnu.org/software/bash/manual/bash.html	open
+https://git-scm.com/book/en/v2	open
+https://camoufox.com/	open
+https://github.com/BurntSushi/ripgrep	open
+https://sqlite.org/docs.html	open
+https://man7.org/linux/man-pages/man1/cmp.1.html	open

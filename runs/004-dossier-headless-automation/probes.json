@@ -1,0 +1,7 @@
+{
+  "route-model": ["route class", "route model", "Pyrocrawl", "Camoufox"],
+  "per-url-table": ["per-URL register", "one row per", "register table"],
+  "exact-commands": ["exact local command", "command that fetches"],
+  "botwall-documentation": ["bot-wall", "bot-walled", "403"],
+  "re-verify-procedure": ["re-verify", "maintenance", "add a URL"]
+}
