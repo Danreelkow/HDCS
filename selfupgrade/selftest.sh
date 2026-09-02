@@ -227,6 +227,30 @@ assert 21 "baseline failure must block fixture authoring with named reason" test
 assert 21 "baseline reason names the gate-artifact split" test "$(pf_field 0 'bash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"' reason)" != ""
 rm -f "$SB/block.txt"
 
+# F22: RR=1 author repair — first block fails LOCK3, repaired block promotes
+cat > "$SB/stub-repair.sh" <<'EOF'
+#!/usr/bin/env bash
+if [ -f "$PROMOTE_OUT.seen" ]; then
+  printf '{"text":"```bash\\nbash artifact/x.sh >/dev/null 2>&1 || fail \\"A1: x.sh must exit 0\\"\\n```"}' > "$PROMOTE_OUT"
+else
+  touch "$PROMOTE_OUT.seen"
+  printf '{"text":"```bash\\ntrue\\n```"}' > "$PROMOTE_OUT"
+fi
+EOF
+fresh
+mk_prom_run 1
+mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
+printf 'VERDICT: FAIL\nEVIDENCE: x.sh exits nonzero on every lap.\n' > "$SB/runs/prom/s4-verdict.txt"
+assert 22 "RR=1 repair: weak block -> lock feedback -> repaired block promotes" env HDCS_AUTHOR_CMD="bash $SB/stub-repair.sh" node "$HERE/promote.mjs" prom
+assert 22 "gate.sh.proposed landed after repair" test -f "$SB/runs/prom/gate.sh.proposed"
+
+# F23: exit-1 class comes from the gate failure, not a stale s4-verdict (live-found)
+fresh
+mkdir -p "$SB/runs/g23"
+printf 'GATE FAIL: archive flattened relative path (A5_mirror: RUNS_DIR/<rel> must archive to ARCHIVE_DIR/<rel>)\n' > "$SB/runs/g23/gate-out.txt"
+printf 'VERDICT: FAIL\nEVIDENCE: stale unrelated a7 wording.\n' > "$SB/runs/g23/s4-verdict.txt"
+assert 23 "gate-failed lap classes from gate-out.txt" sh -c "cd '$HERE' && node classify.mjs g23 1 | grep -q 'a5'"
+
 echo "----"
 echo "selftest: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

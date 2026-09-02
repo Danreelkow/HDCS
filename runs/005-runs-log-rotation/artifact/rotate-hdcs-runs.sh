@@ -2,11 +2,12 @@
 # rotate-hdcs-runs.sh — hdcs runs rotation.
 # Default (no args): DRY-RUN — prints planned moves/prunes, performs ZERO writes (A1).
 # --apply: sole writing mode. Toolchain: bash + coreutils only (A2). No root, no logrotate.
-# Stale law (A5/A6): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
+# Stale law (A5): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
 # arithmetic, never bare -mtime +N.
-# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (unset -> conf defaults; set-but-empty -> refuse, A4).
-# PATTERN/AGE_DAYS/KEEP overrides honored everywhere: HDCS_PATTERN, HDCS_AGE_DAYS, HDCS_KEEP.
-# KEEP=0 prunes the ENTIRE archive (A5: KEEP is a hard bound, never skipped).
+# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR ONLY (unset -> conf defaults;
+# set-but-empty -> refuse, A4). AGE_DAYS/PATTERN/KEEP are operator-fixed conf values
+# and are never overridden by the environment.
+# KEEP=0 prunes the ENTIRE archive (KEEP is a hard bound, never skipped).
 # Prune uses only POSIX-portable find/stat (no -printf).
 set -u
 
@@ -20,7 +21,7 @@ fi
 
 die() { echo "REFUSE (A4): $1" >&2; exit 1; }
 
-# --- conf defaults (operator-fixed, exactly 5 keys, no comments) ---
+# --- conf (operator-fixed, exactly 5 keys, no comments) ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
 CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
@@ -54,9 +55,9 @@ ARCH="$(realpath -m -- "$ARCH_SRC")" || die "ARCHIVE_DIR not resolvable"
 case "$RUNS" in "$ARCH"|"$ARCH"/*) die "RUNS_DIR '$RUNS' is inside ARCHIVE_DIR '$ARCH'";; esac
 case "$ARCH" in "$RUNS"|"$RUNS"/*) die "ARCHIVE_DIR '$ARCH' is inside RUNS_DIR '$RUNS'";; esac
 
-AGE_DAYS="${HDCS_AGE_DAYS-$CONF_AGE}"
-PATTERN="${HDCS_PATTERN-$CONF_PAT}"
-KEEP="${HDCS_KEEP-$CONF_KEEP}"
+AGE_DAYS="$CONF_AGE"
+PATTERN="$CONF_PAT"
+KEEP="$CONF_KEEP"
 case "$AGE_DAYS" in ''|*[!0-9]*) die "AGE_DAYS not a non-negative integer";; esac
 case "$KEEP" in ''|*[!0-9]*) die "KEEP not a non-negative integer";; esac
 
@@ -72,7 +73,7 @@ done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
 
 # portable prune-list builder: emits "<mtime> <seq> <path>" lines sorted newest-first,
 # trimmed to KEEP entries; paths printed from field 3 on (spaces tolerated).
-# KEEP=0 -> every archived file is a prune candidate (A5: the bound always applies).
+# KEEP=0 -> every archived file is a prune candidate (the bound always applies).
 prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited)
   local p mt i=0 keep="$2"
   local -a payload=()
@@ -131,7 +132,7 @@ for f in "${MOVES[@]}"; do
 done
 
 # prune ARCHIVE_DIR to KEEP newest (ARCHIVE_DIR only — RUNS_DIR is never pruned);
-# KEEP=0 prunes everything (A5)
+# KEEP=0 prunes everything
 if [ -d "$ARCH" ]; then
   prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
     [ -n "$rel" ] || continue

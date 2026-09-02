@@ -1,0 +1,1 @@
+OPERATOR RULING (2026-09-02): verify-rotation.sh must run with the artifact dir STRICTLY READ-ONLY on a rotated tree. Any scratch/state the verifier needs goes to a temp dir (mktemp), never the artifact dir. Rationale: a verifier must be non-destructive — it grades, never edits. Requeued for repair lap.

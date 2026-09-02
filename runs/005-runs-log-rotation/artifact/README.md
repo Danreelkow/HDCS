@@ -21,11 +21,11 @@ POSIX-portable (no `find -printf`), so the toolchain also works under BusyBox.
 ./verify-rotation.sh           # exit 0 <=> healthy state; writes nothing
 ```
 
-Both scripts honor env overrides `HDCS_RUNS_DIR` / `HDCS_ARCHIVE_DIR` (also
-`HDCS_AGE_DAYS` / `HDCS_PATTERN` / `HDCS_KEEP`). Unset vars fall back to the conf
-defaults; a var that is **set but empty** is refused (A4). The effective `PATTERN`
-override governs the stale scan in both scripts **and** the archive orphan check in
-`verify-rotation.sh` — it is never ignored in favor of a hardcoded glob.
+Both scripts honor env overrides `HDCS_RUNS_DIR` / `HDCS_ARCHIVE_DIR` **only** —
+these are the sole supported environment overrides. Unset vars fall back to the
+conf defaults; a var that is **set but empty** is refused (A4). `AGE_DAYS`,
+`PATTERN`, and `KEEP` are operator-fixed conf values and are never overridden by
+the environment.
 
 ## Configuration (`hdcs-runs-rotation.conf`)
 
@@ -54,22 +54,41 @@ explicit epoch arithmetic (never bare `find -mtime +N`). A file with age exactly
   candidates are ranked newest-first by mtime (deterministic tie-break) and
   trimmed to `KEEP` entries; `KEEP=0` prunes every archived file (the bound is
   never skipped).
-- **Idempotence:** a second `--apply` on an already-rotated tree moves nothing and
-  prunes nothing — byte-identical no-op.
+- **Idempotence (A5):** a second `--apply` on an already-rotated tree moves nothing
+  and prunes nothing — byte-identical no-op.
 
 ## Verify semantics
 
-`verify-rotation.sh` is strictly read-only and accumulates every check into a
-flag counter (A7) — the exit status of every `grep` and every `find` scan is
-accumulated too, never suppressed by a bare pipeline status or `2>/dev/null`.
-The conf check is a strict line-by-line parse: every line must be one of exactly
-the 5 `KEY=verbatim` lines; any malformed line (garbage, unknown key, wrong
-value, duplicate key, wrong line count) is a parse failure. Checks: conf parses
-with exactly the 5 keys and verbatim values; no stale file remains under
-`RUNS_DIR`; archive listing is intact (names preserved with rotation suffixes
-matched against the effective `PATTERN`, no orphans); a fresh `PATTERN` match
-present in `RUNS_DIR` does **not** fail. Exit 0 ⇔ all checks pass. Path-law
-violations are reported as refusals citing `A4`.
+`verify-rotation.sh` is strictly read-only: its only writes go to a `mktemp -d`
+scratch dir **outside** the artifact dir, `RUNS_DIR`, and `ARCHIVE_DIR`
+(component-overlap tested; a `TMPDIR` falling inside any protected tree is
+rejected and `/tmp` is used instead), removed on exit; stderr goes only to the
+caller's stderr (A6). Every check uses the mandatory flag accumulator —
+`STALE_FOUND=0` is set inside the find/while loop and tested **after** the loop;
+the conf parse, archive listing, and every `cksum`/`cmp` status are accumulated
+via `note_fail`, never a bare `[ cond ] && exit 1`:
+
+- conf parses: KEY=VALUE lines counted with blanks/`#` comments ignored; the shipped
+  conf must contain exactly 5 keys with verbatim values.
+- stale scan: no stale file may remain under `RUNS_DIR` (a fresh PATTERN match is
+  normal and does **not** fail).
+- archive intact ("newest KEEP present ∧ matches recorded listing"): a listing of
+  every archived file (**mtime**, cksum, size, path) is recorded into the scratch
+  dir **first**; a second, independent pass re-cksums, re-sizes, and re-stat-mtimes
+  each file and compares per-entry against the recorded values — a file whose
+  bytes/size/mtime changed between the two passes, or an entry that appeared or
+  vanished, is a failure. The newest-KEEP condition is then established by:
+  - **count bound:** the archived file count must not exceed `KEEP`; and
+  - **rotation-suffix family order:** for every archived `base.N`, the family's
+    newest copy (`base`, or `base.(N−1)` for intermediate suffixes) must be present
+    with mtime ≥ `base.N`'s — i.e. the newest generation of every archived stream
+    survives the prune. An arbitrarily old subset masquerading as the archive
+    (missing the newest copy of a family, or a suffix newer than its un-numbered
+    base) fails verification.
+  Names must match the effective `PATTERN` + rotation suffix (no orphans).
+- an absent `ARCHIVE_DIR` with no stale pending is healthy (exit 0).
+
+Path-law violations are reported as refusals citing `A4`.
 
 ## Path law (A4)
 
@@ -81,8 +100,13 @@ either direction are refused with an explicit `REFUSE (A4)` before any write.
 
 - Exotic filenames (newlines in names, control characters) are handled via
   NUL-delimited `find` where possible; archive prune ranking tolerates spaces
-  but not newlines in names → listed here, not a FAIL.
+  but not newlines in names → listed here, not a FAIL (A7).
 - Concurrent writers appending to `RUNS_DIR` during `--apply` may produce a
   `cmp` mismatch on a live file; the source is then kept and a warning emitted
-  (lossless is preferred over partial rotation) → KNOWN_LIMITATIONS, not FAIL.
+  (lossless is preferred over partial rotation) → KNOWN_LIMITATIONS, not FAIL (A7).
 - Equal-mtime prune ties resolve deterministically per run (sequence tie-break).
+- The verify archive-intact check detects byte/size/mtime mutation between its
+  two passes, count-bound violations, and missing/newest-copy violations within
+  rotation-suffix families; files pruned in earlier runs are no longer present,
+  so verify cannot prove that no *pruned* file was newer than a *kept* one
+  outside family structure (no persistent state is kept — verify is zero-write).

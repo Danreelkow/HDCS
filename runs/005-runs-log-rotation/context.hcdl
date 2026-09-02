@@ -1,10 +1,10 @@
-A1_dryrun: ∀ mode=dry-run -> zero writes (no ARCHIVE_DIR mkdir, no state files); --apply sole writing mode
-A2_toolchain: toolchain := bash ∧ coreutils(find,cmp,realpath,cksum); logrotate invocation ⇒ defect; no root
-A4_pathlaw: ∀ path ∈ {identity, containment(either direction), degenerate('', '.', '/')} -> refuse, cite A-number; env override allowed; set-but-empty -> refuse
-A5_mirror: ∀ --apply run -> second run byte-identical no-op; move-once via age threshold; cmp archived vs original; names preserved + rotation suffix
-A6_verify: exit 0 ⇔ conf parses ∧ ¬∃ stale file under RUNS_DIR ∧ archive listing intact; fresh PATTERN match ¬fail
-A6_boundary: stale ⇔ floor(age_days) >= AGE_DAYS; explicit computation, ¬ bare -mtime +N (excludes [N,N+1))
-A7_status: ∀ check in verify -> flag accumulator; bare pipeline status = defect
-A8_limits: exotic filenames / concurrent writes -> KNOWN_LIMITATIONS, ¬ FAIL
-conf_invariant: conf keys == {RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP} ∧ values operator-fixed verbatim
+L_rot: ∀ f ∈ RUNS_DIR ∧ match(f, PATTERN) ∧ floor(age_days(f)) >= AGE_DAYS -> f moved to ARCHIVE_DIR preserving relative path, once
+L_stale: stale(f) := floor(age_days(f)) >= AGE_DAYS; GNU find bare -mtime +N excludes [N, N+1) band -> implement boundary explicitly (e.g. epoch seconds: age = now - mtime; age >= AGE_DAYS*86400)
+L_modes: default = DRY-RUN, zero-write (∀ mode=dry ¬∃ write to ARCHIVE_DIR/RUNS_DIR/state); --apply sole writing mode
+L_paths: ∀ cfg -> refuse RUNS_DIR==ARCHIVE_DIR ∨ containment(either) ∨ degenerate('', '.', '/'); refusal cites A-number, zero writes; env HDCS_RUNS_DIR/HDCS_ARCHIVE_DIR override conf; set-but-empty env => refuse
+L_idem: ∀ n>=2 --apply -> no-op, ARCHIVE_DIR byte-identical (n=1 end state == n>1 end state); archived bytes == originals (cmp); names preserved + rotation suffix
+L_verify: exit 0 iff (a) conf parses, (b) ¬∃ stale f under RUNS_DIR, (c) archive intact (newest KEEP present ∧ match recorded listing); fresh PATTERN files ∉ fail; verify writes NOTHING (scratch via mktemp -d outside artifact/RUNS/ARCHIVE trees)
+L_status: ∀ status check in verify -> accumulator pattern (FLAG=0; set in find/while loop; test after) ; bare `[ cond ] && exit 1` banned (subshell false-pending defect)
+L_conf: conf artifact ships exactly 5 KEY=VALUE lines; verify parser ignores blanks/#comments; any other non-empty non-comment line => parse failure => nonzero
+KNOWN_LIMIT: exotic filenames, concurrent writes during apply ∉ FAIL
 open: none

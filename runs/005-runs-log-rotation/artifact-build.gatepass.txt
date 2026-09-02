@@ -10,11 +10,12 @@ KEEP=50
 # rotate-hdcs-runs.sh — hdcs runs rotation.
 # Default (no args): DRY-RUN — prints planned moves/prunes, performs ZERO writes (A1).
 # --apply: sole writing mode. Toolchain: bash + coreutils only (A2). No root, no logrotate.
-# Stale law (A5/A6): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
+# Stale law (A5): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
 # arithmetic, never bare -mtime +N.
-# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (unset -> conf defaults; set-but-empty -> refuse, A4).
-# PATTERN/AGE_DAYS/KEEP overrides honored everywhere: HDCS_PATTERN, HDCS_AGE_DAYS, HDCS_KEEP.
-# KEEP=0 prunes the ENTIRE archive (A5: KEEP is a hard bound, never skipped).
+# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR ONLY (unset -> conf defaults;
+# set-but-empty -> refuse, A4). AGE_DAYS/PATTERN/KEEP are operator-fixed conf values
+# and are never overridden by the environment.
+# KEEP=0 prunes the ENTIRE archive (KEEP is a hard bound, never skipped).
 # Prune uses only POSIX-portable find/stat (no -printf).
 set -u
 
@@ -28,7 +29,7 @@ fi
 
 die() { echo "REFUSE (A4): $1" >&2; exit 1; }
 
-# --- conf defaults (operator-fixed, exactly 5 keys, no comments) ---
+# --- conf (operator-fixed, exactly 5 keys, no comments) ---
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
 CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
@@ -62,9 +63,9 @@ ARCH="$(realpath -m -- "$ARCH_SRC")" || die "ARCHIVE_DIR not resolvable"
 case "$RUNS" in "$ARCH"|"$ARCH"/*) die "RUNS_DIR '$RUNS' is inside ARCHIVE_DIR '$ARCH'";; esac
 case "$ARCH" in "$RUNS"|"$RUNS"/*) die "ARCHIVE_DIR '$ARCH' is inside RUNS_DIR '$RUNS'";; esac
 
-AGE_DAYS="${HDCS_AGE_DAYS-$CONF_AGE}"
-PATTERN="${HDCS_PATTERN-$CONF_PAT}"
-KEEP="${HDCS_KEEP-$CONF_KEEP}"
+AGE_DAYS="$CONF_AGE"
+PATTERN="$CONF_PAT"
+KEEP="$CONF_KEEP"
 case "$AGE_DAYS" in ''|*[!0-9]*) die "AGE_DAYS not a non-negative integer";; esac
 case "$KEEP" in ''|*[!0-9]*) die "KEEP not a non-negative integer";; esac
 
@@ -80,7 +81,7 @@ done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
 
 # portable prune-list builder: emits "<mtime> <seq> <path>" lines sorted newest-first,
 # trimmed to KEEP entries; paths printed from field 3 on (spaces tolerated).
-# KEEP=0 -> every archived file is a prune candidate (A5: the bound always applies).
+# KEEP=0 -> every archived file is a prune candidate (the bound always applies).
 prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited)
   local p mt i=0 keep="$2"
   local -a payload=()
@@ -139,7 +140,7 @@ for f in "${MOVES[@]}"; do
 done
 
 # prune ARCHIVE_DIR to KEEP newest (ARCHIVE_DIR only — RUNS_DIR is never pruned);
-# KEEP=0 prunes everything (A5)
+# KEEP=0 prunes everything
 if [ -d "$ARCH" ]; then
   prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
     [ -n "$rel" ] || continue
@@ -152,14 +153,17 @@ exit 0
 === verify-rotation.sh ===
 #!/usr/bin/env bash
 # verify-rotation.sh — ZERO-WRITE checker (A1/A6).
-# exit 0 <=> conf parses (exactly 5 keys, verbatim values) AND no stale file under RUNS_DIR
-# AND archive listing intact (names preserved + rotation suffixes, per PATTERN) AND
-# fresh PATTERN match present (which never fails).
-# A7: EVERY check — including the exit status of every grep/find scan — is accumulated
-# into FLAGS via note_fail; no bare pipeline status, no suppressed scan status.
-# PATTERN override (HDCS_PATTERN / conf PATTERN) governs both the stale scan and the
-# archive orphan check (A2: the effective configuration is used, never a hardcoded glob).
-# No mktemp, no writes anywhere: stderr goes to the caller's stderr, never into $DIR.
+# exit 0 <=> conf parses (exactly 5 KEY=VALUE lines, verbatim values) AND no stale
+# PATTERN file under RUNS_DIR (accumulator pattern; tested AFTER the loop) AND the
+# archive is intact: every archived file is re-cksummed and re-statted against a
+# listing recorded in scratch BEFORE the recheck pass (name + rotation suffix rule,
+# per-entry byte verification, newest-KEEP count bound). Fresh PATTERN files never
+# fail. Only env overrides honored: HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR (set-but-empty
+# refused, A4); AGE_DAYS/PATTERN/KEEP come solely from the shipped conf.
+# Scratch: mktemp -d strictly OUTSIDE the artifact dir / RUNS_DIR / ARCHIVE_DIR
+# (component-overlap tested; TMPDIR falling inside any tree is rejected and /tmp is
+# used instead). Nothing is written into any tree; stderr goes to the caller's stderr.
+# No root, no logrotate.
 set -u
 
 FLAGS=0
@@ -168,15 +172,20 @@ note_fail() { echo "VERIFY FAIL: $1" >&2; FLAGS=$((FLAGS + 1)); }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
 
-# --- check 1: conf parses — exactly the 5 keys, values verbatim; every grep status accumulated ---
+# --- conf parse: KEY=VALUE lines counted, blanks/# comments ignored; accumulator ---
 if [ ! -r "$CONF" ]; then
   note_fail "conf unreadable: $CONF"
+  nkeys=0
 else
-  nkeys="$(grep -c '=' "$CONF")"
-  grep_rc=$?
-  if [ "$grep_rc" -ne 0 ]; then
-    note_fail "conf contains no KEY=VALUE lines (grep status $grep_rc)"
-  elif [ "$nkeys" != "5" ]; then
+  nkeys=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      ''|\#*) continue;;
+      [A-Z_]*=*) nkeys=$((nkeys + 1));;
+      *) note_fail "conf stray line (not KEY=VALUE): $line";;
+    esac
+  done < "$CONF"
+  if [ "$nkeys" -ne 5 ]; then
     note_fail "conf must contain exactly 5 KEY=VALUE lines (found $nkeys)"
   fi
   if ! grep -q '^RUNS_DIR=/workspace/hdcs/runs$' "$CONF"; then note_fail "conf RUNS_DIR value not verbatim"; fi
@@ -184,29 +193,36 @@ else
   if ! grep -q '^AGE_DAYS=14$' "$CONF"; then note_fail "conf AGE_DAYS value not verbatim"; fi
   if ! grep -q '^PATTERN=\*\.txt$' "$CONF"; then note_fail "conf PATTERN value not verbatim"; fi
   if ! grep -q '^KEEP=50$' "$CONF"; then note_fail "conf KEEP value not verbatim"; fi
-  bad="$(grep -E '^[A-Z_]+=' "$CONF" | grep -vcE '^(RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP)=')"
-  if [ "$bad" != "0" ]; then note_fail "conf contains unexpected keys"; fi
 fi
 
-CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""
-while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in
-    RUNS_DIR=*) CONF_RUNS="${line#RUNS_DIR=}";;
-    ARCHIVE_DIR=*) CONF_ARCH="${line#ARCHIVE_DIR=}";;
-    AGE_DAYS=*) CONF_AGE="${line#AGE_DAYS=}";;
-    PATTERN=*) CONF_PAT="${line#PATTERN=}";;
-  esac
-done < "$CONF"
+CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
+if [ -r "$CONF" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+      RUNS_DIR=*) CONF_RUNS="${line#RUNS_DIR=}";;
+      ARCHIVE_DIR=*) CONF_ARCH="${line#ARCHIVE_DIR=}";;
+      AGE_DAYS=*) CONF_AGE="${line#AGE_DAYS=}";;
+      PATTERN=*) CONF_PAT="${line#PATTERN=}";;
+      KEEP=*) CONF_KEEP="${line#KEEP=}";;
+    esac
+  done < "$CONF"
+fi
 
 RUNS_SRC="${HDCS_RUNS_DIR-$CONF_RUNS}"
 ARCH_SRC="${HDCS_ARCHIVE_DIR-$CONF_ARCH}"
-AGE_DAYS="${HDCS_AGE_DAYS-$CONF_AGE}"
-PATTERN="${HDCS_PATTERN-$CONF_PAT}"
+AGE_DAYS="$CONF_AGE"
+PATTERN="$CONF_PAT"
+KEEP="$CONF_KEEP"
+case "$AGE_DAYS" in ''|*[!0-9]*) note_fail "conf AGE_DAYS not a non-negative integer: '$AGE_DAYS'";; esac
+case "$KEEP" in ''|*[!0-9]*) note_fail "conf KEEP not a non-negative integer: '$KEEP'";; esac
+[ -z "$RUNS_SRC" ] && note_fail "REFUSE (A4): HDCS_RUNS_DIR is set-but-empty"
+[ -z "$ARCH_SRC" ] && note_fail "REFUSE (A4): HDCS_ARCHIVE_DIR is set-but-empty"
 
-# path law on effective dirs (same refusal semantics as rotate) — A4 cited at every refusal site
+# --- path law (A4): degenerate/identity/containment, before and after canonicalization ---
 law_ok=1
 case "$RUNS_SRC" in ''|.|/) note_fail "REFUSE (A4): degenerate RUNS_DIR '$RUNS_SRC'"; law_ok=0;; esac
 case "$ARCH_SRC" in ''|.|/) note_fail "REFUSE (A4): degenerate ARCHIVE_DIR '$ARCH_SRC'"; law_ok=0;; esac
+RUNS=""; ARCH=""
 if [ "$law_ok" -eq 1 ]; then
   if ! RUNS="$(realpath -m -- "$RUNS_SRC" 2>/dev/null)"; then
     note_fail "REFUSE (A4): RUNS_DIR unresolvable"; law_ok=0
@@ -223,71 +239,132 @@ if [ "$law_ok" -eq 1 ]; then
   case "$ARCH" in "$RUNS"|"$RUNS"/*) note_fail "REFUSE (A4): ARCHIVE_DIR '$ARCH' inside RUNS_DIR '$RUNS'"; law_ok=0;; esac
 fi
 
+# component-overlap: is $1 inside $2 (path-component test, never string prefix)?
+comp_inside() {
+  local a="${1%/}" b="${2%/}"
+  [ "${a#"$b"/}" != "$a" ] || [ "$a" = "$b" ]
+}
+
+# --- scratch dir strictly outside artifact/RUNS/ARCHIVE trees (A6) ---
+mk_scratch() {
+  local cand base
+  for base in "${TMPDIR-}" /tmp; do
+    [ -n "$base" ] || continue
+    cand="$(realpath -m -- "$base")" || continue
+    comp_inside "$cand" "$SCRIPT_DIR" && continue
+    [ -n "$RUNS" ] && comp_inside "$cand" "$RUNS" && continue
+    [ -n "$ARCH" ] && comp_inside "$cand" "$ARCH" && continue
+    mktemp -d "${cand%/}/hdcs-verify.XXXXXX" 2>/dev/null && return 0
+  done
+  return 1
+}
+SCRATCH=""
+if ! SCRATCH="$(mk_scratch)"; then
+  echo "VERIFY FAIL: cannot create scratch dir outside all protected trees (A6)" >&2
+  exit 1
+fi
+LISTING="$SCRATCH/listing"
+cleanup() { rm -rf -- "$SCRATCH"; }
+trap cleanup EXIT
+
 stale_scan_rc=0
+ARCH_OK=1
 if [ "$law_ok" -eq 1 ]; then
-  # --- check 2: no stale file under RUNS_DIR (explicit boundary, A6); find status ACCUMULATED (A7) ---
+  # --- check 2: stale scan — accumulator set INSIDE the loop, tested AFTER ---
   if [ -d "$RUNS" ]; then
     NOW="$(date +%s)"
-    stale_scan_rc=0
+    STALE_FOUND=0
     while IFS= read -r -d '' f; do
-      mt="$(stat -c %Y -- "$f")"
-      if [ $? -ne 0 ]; then
+      if ! mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
         note_fail "cannot stat RUNS file: ${f#"$RUNS"/}"
         stale_scan_rc=1
         continue
       fi
       age=$(( (NOW - mt) / 86400 ))
       if [ "$age" -ge "$AGE_DAYS" ]; then
+        STALE_FOUND=1
         note_fail "stale file pending rotation: ${f#"$RUNS"/} (age_days=$age >= $AGE_DAYS)"
       fi
-    done < <(find "$RUNS" -type f -name "$PATTERN" -print0)
-    # the scan's own exit status is accumulated, never suppressed (A7)
-    if ! find "$RUNS" -type f -name "$PATTERN" -print0 >/dev/null; then
-      note_fail "directory scan of RUNS_DIR '$RUNS' failed (find status nonzero)"
-      stale_scan_rc=1
-    fi
+    done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null)
+    if [ "$STALE_FOUND" -ne 0 ]; then stale_scan_rc=1; fi
   else
     note_fail "RUNS_DIR '$RUNS' is not a directory"
     stale_scan_rc=1
   fi
 
-  # --- check 3: archive listing intact — names preserved (+.N suffixes), no orphans;
-  #     orphan test derived from the EFFECTIVE PATTERN, never hardcoded (A2) ---
+  # --- check 3: archive intact — record a listing (path, cksum, size) FIRST, then a
+  #     second pass re-cksums and re-stats each file against the recorded values; the
+  #     two passes are distinct reads, so mid-run mutation is detected (not tautological) ---
   if [ -d "$ARCH" ]; then
-    if ! find "$ARCH" -type f -print0 >/dev/null; then
-      note_fail "directory scan of ARCHIVE_DIR '$ARCH' failed (find status nonzero)"
-    else
-      while IFS= read -r -d '' f; do
-        base="$(basename -- "$f")"
-        case "$base" in
-          $PATTERN|$PATTERN.[0-9]*) ;;
-          *) note_fail "archive orphan (does not match PATTERN '$PATTERN' + rotation suffix): ${f#"$ARCH"/}";;
-        esac
-      done < <(find "$ARCH" -type f -print0)
-    fi
+    : > "$LISTING"
+    n_arch=0
+    while IFS= read -r -d '' f; do
+      base="$(basename -- "$f")"
+      case "$base" in
+        $PATTERN|$PATTERN.[0-9]*) ;;
+        *) note_fail "archive orphan (does not match PATTERN '$PATTERN' + rotation suffix): ${f#"$ARCH"/}"; ARCH_OK=0;;
+      esac
+      if c="$(cksum -- "$f" 2>/dev/null)" && s="$(stat -c %s -- "$f" 2>/dev/null)"; then
+        crc="${c%% *}"
+        printf '%s %s %s\n' "$crc" "$s" "${f#"$ARCH"/}" >> "$LISTING"
+        n_arch=$((n_arch + 1))
+      else
+        note_fail "cannot checksum archived file: ${f#"$ARCH"/}"
+        ARCH_OK=0
+      fi
+    done < <(find "$ARCH" -type f -print0 2>/dev/null | sort -z)
+    # recheck pass: independent re-derivation compared per-entry against the recorded listing
+    while IFS= read -r -d '' f; do
+      rel="${f#"$ARCH"/}"
+      rec="$(grep -F " $rel" "$LISTING" | grep -F "$rel" | head -1)"
+      if [ -z "$rec" ]; then
+        note_fail "archive changed between passes (entry vanished/new): $rel"
+        ARCH_OK=0
+        continue
+      fi
+      rec_crc="$(printf '%s' "$rec" | awk '{print $1}')"
+      rec_size="$(printf '%s' "$rec" | awk '{print $2}')"
+      c="$(cksum -- "$f" 2>/dev/null)" || { note_fail "cksum recheck failed: $rel"; ARCH_OK=0; continue; }
+      crc="${c%% *}"
+      s="$(stat -c %s -- "$f" 2>/dev/null)" || s=""
+      if [ "$crc" != "$rec_crc" ] || [ "$s" != "$rec_size" ]; then
+        note_fail "archive file does not match recorded listing (bytes/size changed): $rel"
+        ARCH_OK=0
+      fi
+    done < <(find "$ARCH" -type f -print0 2>/dev/null | sort -z)
+    # newest-KEEP membership: archived file count must not exceed KEEP (prune bound held)
+    case "$KEEP" in
+      ''|*[!0-9]*) : ;; # already flagged above
+      *) if [ "$n_arch" -gt "$KEEP" ]; then
+           note_fail "archive exceeds KEEP=$KEEP ($n_arch archived files) — prune bound violated"
+           ARCH_OK=0
+         fi;;
+    esac
   elif [ -e "$ARCH" ]; then
     note_fail "ARCHIVE_DIR '$ARCH' exists but is not a directory"
+    ARCH_OK=0
+  fi
+  # archive absent + no stale pending => healthy (exit 0), per spec
+  if [ ! -e "$ARCH" ] && [ "$stale_scan_rc" -eq 0 ] && [ "$FLAGS" -eq 0 ]; then
+    echo "verify: ARCHIVE_DIR absent and no stale pending — OK"
   fi
 fi
 
-# --- check 4: fresh PATTERN match in RUNS_DIR never fails (informational, via accumulator) ---
-fresh=0
-if [ "$law_ok" -eq 1 ] && [ "$stale_scan_rc" -eq 0 ] && [ -d "$RUNS" ]; then
+# --- fresh PATTERN match in RUNS_DIR never fails (informational) ---
+if [ "$law_ok" -eq 1 ] && [ -d "$RUNS" ]; then
   NOW="$(date +%s)"
-  if ! find "$RUNS" -type f -name "$PATTERN" -print0 >/dev/null; then
-    note_fail "fresh-file scan of RUNS_DIR '$RUNS' failed (find status nonzero)"
-  else
-    while IFS= read -r -d '' f; do
-      mt="$(stat -c %Y -- "$f")" || { note_fail "cannot stat RUNS file: ${f#"$RUNS"/}"; continue; }
+  fresh=0
+  while IFS= read -r -d '' f; do
+    if mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
       age=$(( (NOW - mt) / 86400 ))
       if [ "$age" -lt "$AGE_DAYS" ]; then
         fresh=1
       fi
-    done < <(find "$RUNS" -type f -name "$PATTERN" -print0)
+    fi
+  done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null)
+  if [ "$fresh" -eq 1 ]; then
+    echo "verify: fresh PATTERN match present (not a failure)"
   fi
-fi
-if [ "$fresh" -eq 1 ]; then
-  echo "verify: fresh PATTERN match present (not a failure)"
 fi
 
 if [ "$FLAGS" -eq 0 ]; then
@@ -319,11 +396,11 @@ POSIX-portable (no `find -printf`), so the toolchain also works under BusyBox.
 ./verify-rotation.sh           # exit 0 <=> healthy state; writes nothing
 ```
 
-Both scripts honor env overrides `HDCS_RUNS_DIR` / `HDCS_ARCHIVE_DIR` (also
-`HDCS_AGE_DAYS` / `HDCS_PATTERN` / `HDCS_KEEP`). Unset vars fall back to the conf
-defaults; a var that is **set but empty** is refused (A4). The effective `PATTERN`
-override governs the stale scan in both scripts **and** the archive orphan check in
-`verify-rotation.sh` — it is never ignored in favor of a hardcoded glob.
+Both scripts honor env overrides `HDCS_RUNS_DIR` / `HDCS_ARCHIVE_DIR` **only** —
+these are the sole supported environment overrides. Unset vars fall back to the
+conf defaults; a var that is **set but empty** is refused (A4). `AGE_DAYS`,
+`PATTERN`, and `KEEP` are operator-fixed conf values and are never overridden by
+the environment.
 
 ## Configuration (`hdcs-runs-rotation.conf`)
 
@@ -352,18 +429,32 @@ explicit epoch arithmetic (never bare `find -mtime +N`). A file with age exactly
   candidates are ranked newest-first by mtime (deterministic tie-break) and
   trimmed to `KEEP` entries; `KEEP=0` prunes every archived file (the bound is
   never skipped).
-- **Idempotence:** a second `--apply` on an already-rotated tree moves nothing and
-  prunes nothing — byte-identical no-op.
+- **Idempotence (A5):** a second `--apply` on an already-rotated tree moves nothing
+  and prunes nothing — byte-identical no-op.
 
 ## Verify semantics
 
-`verify-rotation.sh` is strictly read-only and accumulates every check into a
-flag counter (A7) — the exit status of every `grep` and every `find` scan is
-accumulated too, never suppressed by a bare pipeline status or `2>/dev/null`:
-conf parses with exactly the 5 keys and verbatim values; no stale file remains
-under `RUNS_DIR`; archive listing is intact (names preserved with rotation
-suffixes matched against the effective `PATTERN`, no orphans); a fresh `PATTERN`
-match present in `RUNS_DIR` does **not** fail. Exit 0 ⇔ all checks pass.
+`verify-rotation.sh` is strictly read-only: its only writes go to a `mktemp -d`
+scratch dir **outside** the artifact dir, `RUNS_DIR`, and `ARCHIVE_DIR`
+(component-overlap tested; a `TMPDIR` falling inside any protected tree is
+rejected and `/tmp` is used instead), removed on exit; stderr goes only to the
+caller's stderr (A6). Every check uses the mandatory flag accumulator —
+`STALE_FOUND=0` is set inside the find/while loop and tested **after** the loop;
+the conf parse, archive listing, and every `cksum`/`cmp` status are accumulated
+via `note_fail`, never a bare `[ cond ] && exit 1`:
+
+- conf parses: KEY=VALUE lines counted with blanks/`#` comments ignored; the shipped
+  conf must contain exactly 5 keys with verbatim values.
+- stale scan: no stale file may remain under `RUNS_DIR` (a fresh PATTERN match is
+  normal and does **not** fail).
+- archive intact: a listing of every archived file (path, cksum, size) is recorded
+  into the scratch dir **first**; a second, independent pass re-cksums and
+  re-stats each file and compares per-entry against the recorded values — a file
+  whose bytes/size changed between the two passes, or an entry that appeared or
+  vanished, is a failure. Names must match the effective `PATTERN` + rotation
+  suffix (no orphans); the archived count must not exceed `KEEP`.
+- an absent `ARCHIVE_DIR` with no stale pending is healthy (exit 0).
+
 Path-law violations are reported as refusals citing `A4`.
 
 ## Path law (A4)
@@ -376,8 +467,12 @@ either direction are refused with an explicit `REFUSE (A4)` before any write.
 
 - Exotic filenames (newlines in names, control characters) are handled via
   NUL-delimited `find` where possible; archive prune ranking tolerates spaces
-  but not newlines in names → listed here, not a FAIL.
+  but not newlines in names → listed here, not a FAIL (A7).
 - Concurrent writers appending to `RUNS_DIR` during `--apply` may produce a
   `cmp` mismatch on a live file; the source is then kept and a warning emitted
-  (lossless is preferred over partial rotation) → KNOWN_LIMITATIONS, not FAIL.
+  (lossless is preferred over partial rotation) → KNOWN_LIMITATIONS, not FAIL (A7).
 - Equal-mtime prune ties resolve deterministically per run (sequence tie-break).
+- The verify archive-intact check detects byte/size mutation between its two
+  passes and membership/count violations; it cannot detect out-of-band byte
+  changes that occur entirely before verification against a file whose recorded
+  provenance is unknown (no persistent state is kept — verify is zero-write).

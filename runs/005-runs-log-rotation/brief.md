@@ -1,23 +1,46 @@
-state: s0 := {artifact_dir := <operator-supplied artifact dir>; conf := hdcs-runs-rotation.conf with exactly 5 keys, values verbatim RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50, no comments; rotate := rotate-hdcs-runs.sh (dry-run default, --apply sole writing mode); verify := verify-rotation.sh (zero-write); README.md; toolchain := bash ∧ coreutils(find,cmp,realpath,cksum); no root, no logrotate; stale ⇔ floor(age_days) >= AGE_DAYS; verify exit 0 ⇔ conf parses ∧ ¬∃ stale under RUNS_DIR ∧ archive listing intact; fresh PATTERN match ¬fail; idempotence: second --apply byte-identical no-op; prune touches ARCHIVE_DIR only; exotic filenames/concurrency → KNOWN_LIMITATIONS}
+build brief — worker B1
 
-Δ:
-1. Write hdcs-runs-rotation.conf — expect: file with exactly the 5 KEY=VALUE lines above, no comments, no extra keys, byte-exact values.
-2. Write rotate-hdcs-runs.sh — expect: bash script; default (no args) = dry-run printing planned moves/prunes, zero writes (no ARCHIVE_DIR mkdir, no state files); `--apply` sole writing mode: mkdir -p ARCHIVE_DIR, move stale files (stale test computed explicitly, e.g. epoch arithmetic floor((now-mtime)/86400) >= AGE_DAYS, never bare `-mtime +N`) from RUNS_DIR to ARCHIVE_DIR, names preserved + rotation suffix (e.g. `.1` on collision), cmp archived vs original before removing source, prune ARCHIVE_DIR to KEEP newest (never RUNS_DIR); path law A4 enforced on RUNS_DIR/ARCHIVE_DIR (identity, containment either direction, degenerate '', '.', '/' → refuse citing A-number; env override allowed; set-but-empty → refuse); second --apply run byte-identical no-op.
-3. Write verify-rotation.sh — expect: zero-write checker; every check via flag accumulator (never bare pipeline status); checks: conf parses with exactly 5 keys + verbatim values; no stale file under RUNS_DIR (same explicit boundary); archive listing intact (names preserved + suffixes, no orphans); fresh PATTERN match does NOT fail; mktemp only outside artifact dir and tree or fd redirection only; exit 0 iff all pass.
-4. Write README.md — expect: usage (dry-run default, --apply), conf keys table, stale boundary explanation, idempotence note, KNOWN_LIMITATIONS section (exotic filenames, concurrent writes → not FAIL).
-5. chmod +x both scripts — expect: executable bits set.
-6. Self-check dry-run — expect: running rotate-hdcs-runs.sh (no args) produces zero writes anywhere; exit 0.
+state: s0 := artifact_dir contains nothing yet; conf values fixed by packet (RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50); laws L_rot/L_stale/L_modes/L_paths/L_idem/L_verify/L_status/L_conf in shared context; open: none.
+
+Δ := 
+1. Write hdcs-runs-rotation.conf — exactly 5 KEY=VALUE lines, no blanks/comments:
+   expected output: file with lines RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50; `grep -c '=' conf` = 5; `wc -l` = 5.
+2. Write rotate-hdcs-runs.sh (bash, set -euo pipefail):
+   a. parse conf: read KEY=VALUE lines; ignore blank/# lines; any other non-empty non-comment line → exit nonzero (L_conf).
+   b. env overrides HDCS_RUNS_DIR/HDCS_ARCHIVE_DIR; set-but-empty env → refuse citing A4, exit nonzero, zero writes.
+   c. path law: refuse RUNS_DIR==ARCHIVE_DIR, containment either direction (realpath -m), degenerate '', '.', '/' — cite A-number in message, zero writes.
+   d. default (no --apply): dry-run — list would-archive files (epoch check: age=$(( $(date +%s) - $(stat -c %Y f) )); age >= AGE_DAYS*86400), print plan, write nothing anywhere.
+   e. --apply: mkdir -p ARCHIVE_DIR; for each stale f (same epoch boundary, PATTERN match under RUNS_DIR): move to ARCHIVE_DIR preserving relative path, on name collision append rotation suffix (name.1, name.2, …); then prune ARCHIVE_DIR per PATTERN to newest KEEP entries.
+   f. expected outputs: `bash -n` clean; dry-run on fixture leaves RUNS_DIR and ARCHIVE_DIR mtimes/contents untouched (`find ARCHIVE_DIR | wc -l` unchanged, no new dirs); --apply moves a 15-day-old fixture file, keeps a 13-day-old file; second --apply produces byte-identical ARCHIVE_DIR (`cksum` listing diff empty); archived bytes match originals via cmp.
+3. Write verify-rotation.sh (read-only grader):
+   a. parse conf same rules (L_conf); scratch only via mktemp -d outside RUNS_DIR/ARCHIVE_DIR/artifact trees.
+   b. checks: conf parses; no stale f under RUNS_DIR (epoch boundary, accumulator FLAG=0; set inside find/while; test after loop — no bare `[ cond ] && exit 1`); archive intact: newest KEEP present and matches recorded listing (cksum).
+   c. exit 0 iff all pass; fresh PATTERN files never fail; verify writes nothing to RUNS_DIR/ARCHIVE_DIR/artifact.
+   d. expected outputs: `bash -n` clean; on post-apply fixture exit 0; on fixture with a fresh stale-planted file exit nonzero; `find RUNS_DIR ARCHIVE_DIR -newer <marker>` empty after verify run.
+4. Write README.md: usage, modes, path law, idempotence, boundary semantics, KNOWN_LIMITATIONS (exotic filenames, concurrent writes — A7).
+   expected output: README mentions dry-run default, --apply, A4 refusal, A7 limitations.
 
 accept:
-- conf: `grep -c '=' conf` = 5; each line matches operator-fixed values verbatim; no comment lines.
-- dry-run: before/after `find /workspace -newer /tmp/marker` empty; no ARCHIVE_DIR created.
-- --apply: stale file moved to ARCHIVE_DIR with cmp equal; name preserved + suffix; RUNS_DIR pruned never; second --apply run output byte-identical (`diff run1.log run2.log` empty) and no further changes.
-- stale boundary: file with age exactly AGE_DAYS-1 day 23h NOT moved; age >= AGE_DAYS moved (explicit computation, no bare `-mtime +N` in scripts: `grep -n 'mtime +[0-9]'` empty).
-- verify: exit 0 on clean state; exit ≠0 when stale file planted; fresh PATTERN match present → still exit 0; verify creates no files (`strace`-free check: run with `TMPDIR` outside tree, tree mtime unchanged); all checks via flag accumulator (`grep -nE '\|\| *(exit|false)' verify-rotation.sh` shows no bare-status reliance).
-- path law: RUNS_DIR=ARCHIVE_DIR, one containing the other, '', '.', '/' → refuse with A4 cited; set-but-empty env override → refuse.
-- no logrotate, no sudo/root anywhere: `grep -inE 'logrotate|sudo' *.sh README.md` empty.
-- KNOWN_LIMITATIONS present in README.md.
+- [ ] conf: exactly 5 lines, exact values per must_keep; parser rejects a 6th junk line (test: append junk → nonzero).
+- [ ] dry-run default: zero writes to RUNS_DIR, ARCHIVE_DIR, state (snapshot before/after identical).
+- [ ] --apply: stale file (floor(age)>=14) moved, path preserved, bytes cmp-identical, suffix on collision; fresh file untouched.
+- [ ] second --apply: ARCHIVE_DIR cksum-listing byte-identical to first (idempotence, A5).
+- [ ] path law: RUNS_DIR==ARCHIVE_DIR, containment, '', '.', '/' each refused citing A-number, zero writes; set-but-empty env refused.
+- [ ] verify: exit 0 on clean post-apply state; nonzero on planted stale or broken conf; accumulator pattern used (no bare `[ ] && exit 1`); verify leaves trees untouched.
+- [ ] no root, no logrotate anywhere (`grep -ri logrotate *.sh` empty); bash+coreutils only.
+- [ ] all four deliverables exist, `bash -n` clean on both scripts.
 
-constraints: [A1 zero writes in dry-run and verify; A2 bash+coreutils only, logrotate ⇒ defect, no root; A4 path refusal law with cited A-number; A5 move-once idempotence; A6 exit semantics + explicit stale boundary; A7 flag accumulator for every verify check; conf exactly 5 keys, operator-fixed values, no comments; prune touches ARCHIVE_DIR only; verify mktemp outside artifact dir/tree or fd redirection only; exotic filenames/concurrency → KNOWN_LIMITATIONS not FAIL]
+constraints:
+- bash+coreutils only (find, cmp, realpath, cksum, mktemp, stat, date); no root; no logrotate (A2)
+- dry-run default zero-write (A1); --apply sole writing mode
+- stale boundary: explicit epoch seconds, age >= AGE_DAYS*86400; no bare -mtime +N (L_stale)
+- path refusals cite A-number, zero writes (A4)
+- verify strictly read-only vs artifact/RUNS/ARCHIVE trees; scratch via mktemp -d elsewhere (A6)
+- conf ships exactly 5 KEY=VALUE lines; builders never invent conf values
+- exotic filenames / concurrent writes documented as KNOWN_LIMITATIONS, not FAIL (A7)
 
-deliverable: [hdcs-runs-rotation.conf, rotate-hdcs-runs.sh, verify-rotation.sh, README.md]
+deliverable:
+- hdcs-runs-rotation.conf
+- rotate-hdcs-runs.sh
+- verify-rotation.sh
+- README.md

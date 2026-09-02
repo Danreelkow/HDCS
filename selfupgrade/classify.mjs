@@ -23,13 +23,26 @@ if (code !== 1 && code !== 2) { out({ verdict: 'park', reason: `unknown exit cod
 // exit 1 = FAIL, exit 2 = S4-hold (NEEDS-CLARIFICATION): both carry judge evidence worth
 // tracking — a class that repeats across laps is the promote signal regardless of which
 // exit code carried it (live-found defect: S4-hold objections rode exit 2 and were invisible).
-const verdictPath = path.join(RUNS, task, 's4-verdict.txt');
-let vtxt = '';
-try { vtxt = fs.readFileSync(verdictPath, 'utf8'); } catch {
-  out({ verdict: code === 2 ? 'park' : 'requeue', reason: code === 2 ? 'needs-clarification (human seam); no s4-verdict.txt to class' : `exit 1 with no s4-verdict.txt`, repetitions: 1 });
-  process.exit(0);
+// exit 1 has TWO sources: gate failure (S3 build fails gate.sh) or S4 FAIL. The evidence
+// must come from the actual cause — live-found: a gate-failed lap left a STALE s4-verdict
+// and the class described the wrong defect (author blocks then could never red the canary).
+const gateOutPath = path.join(RUNS, task, 'gate-out.txt');
+let gateFailLine = '';
+try {
+  gateFailLine = (fs.readFileSync(gateOutPath, 'utf8').split('\n').find(l => /GATE FAIL/.test(l)) || '').trim();
+} catch {}
+let evLine = '';
+if (code === 1 && gateFailLine) {
+  evLine = gateFailLine;
+} else {
+  const verdictPath = path.join(RUNS, task, 's4-verdict.txt');
+  let vtxt = '';
+  try { vtxt = fs.readFileSync(verdictPath, 'utf8'); } catch {
+    out({ verdict: code === 2 ? 'park' : 'requeue', reason: code === 2 ? 'needs-clarification (human seam); no s4-verdict.txt to class' : 'exit 1 with no gate failure and no s4-verdict.txt', repetitions: 1 });
+    process.exit(0);
+  }
+  evLine = (vtxt.split('\n').find(l => /^EVIDENCE:/i.test(l)) || vtxt.split('\n').find(l => /^VERDICT:/i.test(l)) || vtxt.split('\n').find(l => l.trim()) || '').trim();
 }
-const evLine = (vtxt.split('\n').find(l => /^EVIDENCE:/i.test(l)) || vtxt.split('\n').find(l => /^VERDICT:/i.test(l)) || vtxt.split('\n').find(l => l.trim()) || '').trim();
 // finding class v2: cited A-numbers are the stable signature (S4 rephrases every lap but
 // cites the same laws); word-prefix fallback only when the evidence cites nothing.
 const anums = [...new Set((evLine.toLowerCase().match(/a\d+/g) || []))].sort();
