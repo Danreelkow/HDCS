@@ -1,0 +1,100 @@
+=== RUNBOOK.md ===
+# RUNBOOK — sync-hermes-context.sh (run-001 hermes-context)
+
+## Facts block (all guaranteed behavior of this tool)
+
+- The tool is a one-way mirror of `HERMES_CONTEXT_SRC` into `HERMES_CONTEXT_DST`.
+- A real sync is recursive: the destination is made to match the source exactly, including symlinks (their targets are preserved), and stale extras that exist only in the destination are removed.
+- Before any real sync, the tool stages and verifies the work; if that verification fails, the destination is left untouched (reported as A13).
+- `--dry-run` performs zero writes and creates nothing at the destination.
+- `--verify` exits 0 if and only if the destination is an exact mirror of the source; otherwise it exits nonzero and reports a mirror mismatch (A9).
+- The only tool flags are `--dry-run` and `--verify`. Any other argument is refused with a usage error and exit code 2.
+- Environment: `HERMES_CONTEXT_SRC` (production default `/opt/data/workspace/hermes-context/`) and `HERMES_CONTEXT_DST` (production default `/workspace/hermes-context/`). Unset variables use these production defaults. A variable set to an empty value is refused (A23).
+- Degenerate paths (`/`, empty, `.`) are refused (A18). Paths that are the same, inside one another, or resolve through symlinks into the protected tree are refused (A12). A staging path conflict, including `TMPDIR` set to an empty value or pointing into the destination, is refused (A14).
+
+Everything else the tool may print or do is not documented here and is not relied on in this runbook.
+
+## 1. What this tool does
+
+The tool mirrors `HERMES_CONTEXT_SRC` into `HERMES_CONTEXT_DST` in one direction. After a real sync, the destination matches the source exactly: files, directories, and symlinks (with their targets preserved) are copied, and stale extras that exist only in the destination are removed.
+
+The tool accepts exactly two flags: `--dry-run` and `--verify`. Any other flag or argument is refused with a usage error and exit code 2.
+
+## 2. Test before installing (--dry-run)
+
+From the artifact directory, run:
+
+```
+./sync-hermes-context.sh --dry-run
+```
+
+This performs zero writes: nothing is created or changed at `HERMES_CONTEXT_DST`. Run it before installing to confirm the tool accepts your configuration.
+
+The source and destination are read from `HERMES_CONTEXT_SRC` and `HERMES_CONTEXT_DST` if you have exported them; otherwise the production defaults `/opt/data/workspace/hermes-context/` and `/workspace/hermes-context/` are used.
+
+## 3. Install
+
+Create the destination directory (do not assume it exists):
+
+```
+mkdir -p "${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
+```
+
+Install the script and units with `install -D`:
+
+```
+install -D -m 755 sync-hermes-context.sh ~/.local/bin/sync-hermes-context.sh
+install -D -m 644 hermes-context.service ~/.config/systemd/user/hermes-context.service
+install -D -m 644 hermes-context.timer ~/.config/systemd/user/hermes-context.timer
+```
+
+## 4. Configure
+
+Export the variables before running a sync, if you do not want the production defaults (these paths are examples — replace with your own):
+
+```
+export HERMES_CONTEXT_SRC=/example/source/hermes-context/
+export HERMES_CONTEXT_DST=/example/dest/hermes-context/
+```
+
+If both variables are unset, the tool uses the production defaults `/opt/data/workspace/hermes-context/` (source) and `/workspace/hermes-context/` (destination). If either variable is set but empty, the tool refuses to run (A23).
+
+## 5. Schedule
+
+Load and enable the user timer (period: every 6 hours):
+
+```
+systemctl --user daemon-reload
+systemctl --user enable --now hermes-context.timer
+```
+
+## 6. Verify a sync
+
+```
+~/.local/bin/sync-hermes-context.sh --verify
+```
+
+Exit code 0 means the destination is an exact mirror of `HERMES_CONTEXT_SRC`. A nonzero exit code means the destination is not an exact mirror; the tool reports a mirror mismatch (A9).
+
+## 7. Roll back a bad sync
+
+If a sync left the destination in a bad state, remove the destination and re-sync it from the source:
+
+```
+rm -rf "${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
+mkdir -p "${HERMES_CONTEXT_DST:-/workspace/hermes-context/}"
+~/.local/bin/sync-hermes-context.sh
+```
+
+This restores the destination from `HERMES_CONTEXT_SRC`. This is the documented rollback: it is not a reinstall and not a timer disable.
+
+## 8. Troubleshooting
+
+- **A13** — the pre-sync staging verification failed; the destination was left untouched. Check the tool's output for the underlying cause and re-run when fixed.
+- **A14** — a staging path conflict: the staging area overlaps the source, the destination, or a path the tool owns. This includes `TMPDIR` set but empty, or pointing into the destination. Change `TMPDIR` or the conflicting path and re-run.
+- **A9** — mirror mismatch, reported by `--verify` when the destination is not an exact mirror of the source. Re-run a real sync to converge.
+- **A18** — a degenerate path was given: the destination or source is `/`, empty, or `.`. Set real paths in `HERMES_CONTEXT_SRC` / `HERMES_CONTEXT_DST`.
+- **A12** — a path-identity problem: the source and destination are the same path, one is inside the other, or a path resolves through a symlink into the protected tree. Adjust the variables so source and destination are independent real directories.
+- **A23** — an environment variable is set but empty. Either unset it (to use the production default) or give it a real value.
+- **Usage error, exit 2** — an argument other than `--dry-run` or `--verify` was passed. Use only the two documented flags.
+- Any other condition: inspect the tool's output directly; no further named error classes are defined for this tool.

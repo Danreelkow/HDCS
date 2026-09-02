@@ -1,0 +1,50 @@
+=== context.hcdl ===
+def artifact := {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md} @ runs/001-hermes-context-timer/artifact/
+def tool_flags := {--dry-run, --verify}; ∀ other token -> usage error exit 2 (rsync internal flags ¬ tool flags)
+def env := {HERMES_CONTEXT_SRC := /opt/data/workspace/hermes-context/, HERMES_CONTEXT_DST := /workspace/hermes-context/}; set-but-empty -> A23; unset -> prod defaults
+def behavior: real sync = one-way mirror, DST converges to SRC (recursive, removes stale DST extras, preserves types ∧ symlink targets), staging verify -> A13 on fail (DST untouched); --dry-run zero writes; --verify exit 0 iff exact mirror else nonzero + A9
+def citations := {A23 set-but-empty env, A18 degenerate paths (∅, '.', '/'), A12 path identity/ancestor/symlink component, A13 staging verify fail, A14 staging path conflict incl TMPDIR set-but-empty, A9 mirror mismatch} — closed world; unknown citations -> describe condition, no A-number
+def install := mkdir -p/install -D required (dirs ∉ assumed); bin -> ~/.local/bin; units -> ~/.config/systemd/user/; timer period := 6h
+A1: accuracy contract := system-facts block, closed-world tool claims only
+A3: register := plain imperative; hcdl terms (A-number etc.) explained or omitted
+A4: no invented flags/env/paths/defaults
+A5: document tool as delivered incl refusals
+A6: sections ordered [What this tool does, Test before installing (--dry-run), Install, Configure, Schedule, Verify a sync, Roll back a bad sync, Troubleshooting]; ∀ section non-empty; rollback = remove/re-sync DST from HERMES_CONTEXT_SRC (concrete restore)
+A7: validation := S4 rubric — FAIL iff ∃ command failing as written vs artifact ∨ MUST_KEEP hollow/missing
+INV_MK1: runbook names HERMES_CONTEXT_SRC ∧ HERMES_CONTEXT_DST exactly
+INV_MK2: runbook includes pre-install --dry-run test
+INV_MK3: runbook states documented rollback for bad sync
+open: none
+
+```yaml
+reg: {domain: cs-technical-writing, canon: operator-doc register — exact CLI flags, env var names, systemd unit paths, exit codes, citation ids; no invented identifiers}
+intent: := author RUNBOOK.md, single-file operator runbook for run-001 hermes-context sync tool, zero-context new-operator audience, 8 mandated sections in order, every tool claim bound to closed-world facts block; ∀ command executable as-written against artifact
+must_keep:
+  - "documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly"
+  - "includes a --dry-run test the operator can run before installing"
+  - "states the documented rollback for a bad sync"
+resolved:
+  - "Q1: scope of assertable tool facts -> A: closed world, system-facts block + CLI/citation register only (A1, A4)"
+  - "Q2: writing register -> A: plain imperative English; hcdl register terms explained or omitted (A3)"
+  - "Q3: refusal treatment -> A: document as delivered incl refusals; cite only A23/A18/A12/A13/A14/A9 where true (A5)"
+  - "Q4: rollback content -> A: concrete data-restore — remove bad DST, re-sync from configured HERMES_CONTEXT_SRC; NOT mere timer disable (A6)"
+  - "Q5: validation bar -> A: S4 rubric — every command must succeed as-written vs artifact; MUST_KEEP sections non-hollow (A7)"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "closed-world tool claims: ∀ flag/env/default/behavior ∉ facts block -> forbidden (A1, A4)"
+  - "tool_flags = {--dry-run, --verify} only; --checksum/--delete/--itemize-changes are rsync internals, ¬ taught as tool flags"
+  - "citation register closed: A23, A18, A12, A13, A14, A9; unknown -> describe condition sans citation"
+  - "install section teaches mkdir -p / install -D; target dirs not assumed to exist"
+  - "sections in mandated order, ∀ non-empty"
+  - "example operator paths allowed iff clearly marked as examples"
+  - "rollback = remove/re-sync DST from HERMES_CONTEXT_SRC; ¬ reinstall/¬ disable-only"
+  - "no_resurrect: run-001 delivered refusals documented as-is (A5)"
+paths:
+  - runs/001-hermes-context-timer/artifact/sync-hermes-context.sh
+  - runs/001-hermes-context-timer/artifact/hermes-context.service
+  - runs/001-hermes-context-timer/artifact/hermes-context.timer
+  - runs/001-hermes-context-timer/artifact/README.md
+  - RUNBOOK.md
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+```

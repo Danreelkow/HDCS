@@ -1,0 +1,19 @@
+# Debrief: RUNBOOK.md for the hermes-context sync tool (run-001)
+
+**What was asked.** Write a single-file operator runbook (RUNBOOK.md) for the hermes-context sync tool, aimed at a brand-new operator with no prior context. It must have eight sections in a fixed order, and every claim about the tool must come only from the supplied facts block. Every command in the runbook must actually work as written against the delivered artifact.
+
+**Environment variables.** The runbook documents HERMES_CONTEXT_SRC (the source-override) and HERMES_CONTEXT_DST (the destination-override) exactly as specified — no other env var names may be invented.
+
+**Dry run.** It includes a --dry-run test the operator can run before installing anything, so a bad sync can be previewed safely. The tool's only flags are --dry-run and --verify; rsync's own flags like --checksum, --delete, and --itemize-changes must not be taught as tool flags.
+
+**Rollback.** The documented rollback for a bad sync is concrete data restoration: remove the bad destination directory and re-sync it from the configured HERMES_CONTEXT_SRC. Merely disabling the timer or reinstalling does not count as rollback.
+
+**Refusals.** The runbook documents the tool as delivered, including its refusals, without softening or omitting them (the no_resurrect rule). Refusal citations are limited to the closed register A23, A18, A12, A13, A14, and A9 — a refusal cites an A-number only where it is actually true; otherwise the condition is described without a citation.
+
+**Install path.** The install section teaches creating directories explicitly (mkdir -p / install -D) rather than assuming target directories exist; the .local/bin install-path is covered there. Example operator paths are allowed only if clearly marked as examples.
+
+**Writing style.** Plain imperative English; internal register jargon is either explained or left out.
+
+**Validation.** The verifier (independent of the builder) checks every command succeeds as written against the artifact and that the required sections are substantive, not hollow. The workflow runs plan, scoped build, verify, deliver, with at most two fix cycles and a READY or NOT_READY gate at the end.
+
+**Artifacts covered.** The sync script, the systemd service and timer units (user-level-timer: systemctl --user / user units), the README, and the new RUNBOOK.md, all under runs/001-hermes-context-timer/.

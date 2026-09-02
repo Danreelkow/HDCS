@@ -1,0 +1,16 @@
+def artifact := {sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md} @ runs/001-hermes-context-timer/artifact/
+def tool_flags := {--dry-run, --verify}; ∀ other token -> usage error exit 2 (rsync internal flags ¬ tool flags)
+def env := {HERMES_CONTEXT_SRC := /opt/data/workspace/hermes-context/, HERMES_CONTEXT_DST := /workspace/hermes-context/}; set-but-empty -> A23; unset -> prod defaults
+def behavior: real sync = one-way mirror, DST converges to SRC (recursive, removes stale DST extras, preserves types ∧ symlink targets), staging verify -> A13 on fail (DST untouched); --dry-run zero writes; --verify exit 0 iff exact mirror else nonzero + A9
+def citations := {A23 set-but-empty env, A18 degenerate paths (∅, '.', '/'), A12 path identity/ancestor/symlink component, A13 staging verify fail, A14 staging path conflict incl TMPDIR set-but-empty, A9 mirror mismatch} — closed world; unknown citations -> describe condition, no A-number
+def install := mkdir -p/install -D required (dirs ∉ assumed); bin -> ~/.local/bin; units -> ~/.config/systemd/user/; timer period := 6h
+A1: accuracy contract := system-facts block, closed-world tool claims only
+A3: register := plain imperative; hcdl terms (A-number etc.) explained or omitted
+A4: no invented flags/env/paths/defaults
+A5: document tool as delivered incl refusals
+A6: sections ordered [What this tool does, Test before installing (--dry-run), Install, Configure, Schedule, Verify a sync, Roll back a bad sync, Troubleshooting]; ∀ section non-empty; rollback = remove/re-sync DST from HERMES_CONTEXT_SRC (concrete restore)
+A7: validation := S4 rubric — FAIL iff ∃ command failing as written vs artifact ∨ MUST_KEEP hollow/missing
+INV_MK1: runbook names HERMES_CONTEXT_SRC ∧ HERMES_CONTEXT_DST exactly
+INV_MK2: runbook includes pre-install --dry-run test
+INV_MK3: runbook states documented rollback for bad sync
+open: none
