@@ -33,3 +33,4 @@ MUST_KEEP: default mode is dry-run that performs no writes
 MUST_KEEP: no root required and no logrotate dependency
 MUST_KEEP: archived originals land outside the runs directory
 MUST_KEEP: the config defines exactly the five keys RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP
+MUST_KEEP: the conf values are exactly RUNS_DIR=/workspace/hdcs/runs, ARCHIVE_DIR=/workspace/.hdcs-rotate/archive, AGE_DAYS=14, PATTERN=*.txt, KEEP=50 (builders never invent conf values)
