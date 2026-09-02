@@ -1,1 +1,1 @@
-GATE FAIL: verify accepted a regular file in place of a SRC symlink with identical bytes (A9: equivalence is lstat-based — never dereference in verify)
+GATE FAIL: README does not document the service ExecStart location: /.local/bin/sync-hermes-context.sh (docs must match the unit)

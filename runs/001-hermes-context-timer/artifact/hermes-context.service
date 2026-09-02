@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync hermes context from host workspace to user workspace
+Description=Hermes context one-way sync (host -> workspace)
 
 [Service]
 Type=oneshot
