@@ -1,60 +1,75 @@
 #!/usr/bin/env bash
-# verify-rotation.sh — A6 verifier: exit 0 <=> conf parses AND no pending
-# rotation AND archive consistent. Exotic filenames/races -> KNOWN_LIMITATIONS
-# warning, never a FAIL (A7). bash+coreutils only, no root, no logrotate (A2).
+# verify-rotation.sh — exit 0 iff conf parses (exactly 5 keys), no pending
+# rotation, and the archive exists with a consistent cksum manifest.
+# Nonzero otherwise, with reason line.
 set -u
 
-CONF_DIR="$(cd "$(dirname "$0")" && pwd)"
-if ! source "$CONF_DIR/hdcs-runs-rotation.conf" 2>/dev/null; then
-  echo "FAIL: conf does not parse" >&2; exit 1
+CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
+[ -f "$CONF" ] || CONF="hdcs-runs-rotation.conf"
+
+fail() { echo "VERIFY FAIL: $1" >&2; exit 1; }
+
+# (a) conf parses with exactly 5 keys, no unknown keys
+declare -A C=()
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|\#*) continue ;; esac
+  k="${line%%=*}"; v="${line#*=}"
+  [ "$k" != "$line" ] || fail "conf parse error: $line"
+  case "$k" in
+    RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) ;;
+    *) fail "conf: unknown key '$k' — exactly five keys required" ;;
+  esac
+  C["$k"]="$v"
+done < "$CONF"
+[ "${#C[@]}" -eq 5 ] || fail "conf must have exactly 5 keys, found ${#C[@]}"
+for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+  [ -n "${C[$k]:-}" ] || fail "conf missing key $k"
+done
+
+RUNS_DIR="${C[RUNS_DIR]}"
+ARCHIVE_DIR="${C[ARCHIVE_DIR]}"
+AGE_DAYS="${C[AGE_DAYS]}"
+PATTERN="${C[PATTERN]}"
+KEEP="${C[KEEP]}"
+
+if [ "${HDCS_RUNS_DIR+set}" = "set" ]; then
+  [ -n "$HDCS_RUNS_DIR" ] || fail "A4: HDCS_RUNS_DIR set but empty"
+  RUNS_DIR="$HDCS_RUNS_DIR"
+fi
+if [ "${HDCS_ARCHIVE_DIR+set}" = "set" ]; then
+  [ -n "$HDCS_ARCHIVE_DIR" ] || fail "A4: HDCS_ARCHIVE_DIR set but empty"
+  ARCHIVE_DIR="$HDCS_ARCHIVE_DIR"
 fi
 
-RUNS_DIR="${HDCS_RUNS_DIR-$RUNS_DIR}"
-ARCHIVE_DIR="${HDCS_ARCHIVE_DIR-$ARCHIVE_DIR}"
-PATTERN="${HDCS_PATTERN-$PATTERN}"
-AGE_DAYS="${HDCS_AGE_DAYS-$AGE_DAYS}"
+for p in "$RUNS_DIR" "$ARCHIVE_DIR"; do
+  case "$p" in ''|'.'|'/') fail "A4: degenerate path '$p'" ;; esac
+done
+R="$(realpath -m -- "$RUNS_DIR")"
+A="$(realpath -m -- "$ARCHIVE_DIR")"
+[ "$R" = "$A" ] && fail "A4: RUNS_DIR == ARCHIVE_DIR"
+case "$R/" in "$A"/*) fail "A4: ARCHIVE_DIR contains RUNS_DIR" ;; esac
+case "$A/" in "$R"/*) fail "A4: RUNS_DIR contains ARCHIVE_DIR" ;; esac
 
-status=0
+# (b) no PATTERN file with age >= AGE_DAYS under RUNS_DIR
+pending=$(find "$R" -type f -name "$PATTERN" -mtime +"$((AGE_DAYS-1))" 2>/dev/null)
+[ -z "$pending" ] || fail "pending rotation: $pending"
 
-# pending rotation check
-if [ -d "$RUNS_DIR" ]; then
-  pending="$(find "$RUNS_DIR" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" -print -quit 2>/dev/null || true)"
-  if [ -n "$pending" ]; then
-    echo "FAIL: pending rotation — stale file present: $pending" >&2
-    status=1
-  fi
-fi
+# (c) archive must exist, hold archived files, and match its cksum manifest (A6)
+[ -d "$A" ] || fail "archive directory $A does not exist — nothing has been rotated"
+MANIFEST="$A/.hdcs-rotation-manifest"
+[ -f "$MANIFEST" ] || fail "archive manifest missing in $A"
+count=0
+while IFS= read -r f; do
+  [ -f "$f" ] || fail "archive entry not a regular file: $f"
+  count=$((count+1))
+done < <(find "$A" -type f ! -name '.hdcs-rotation-manifest' -print 2>/dev/null)
+[ "$count" -gt 0 ] || fail "archive contains no archived files"
+[ "$count" -le "$KEEP" ] || fail "archive exceeds KEEP=$KEEP ($count files)"
+current=$(find "$A" -type f ! -name '.hdcs-rotation-manifest' -print0 2>/dev/null \
+  | LC_ALL=C sort -z | xargs -0 -r cksum)
+stored=$(cat "$MANIFEST")
+[ "$current" = "$stored" ] || fail "archive listing/cksum inconsistent with manifest"
 
-# archive consistency: archived paths must lie outside RUNS_DIR
-if [ -e "$ARCHIVE_DIR" ]; then
-  if ! [ -d "$ARCHIVE_DIR" ]; then
-    echo "FAIL: ARCHIVE_DIR exists but is not a directory" >&2; status=1
-  else
-    while IFS= read -r -d '' f; do
-      rel="$(realpath --relative-to "$ARCHIVE_DIR" "$f")"
-      if [ -d "$RUNS_DIR" ] && [ -e "$RUNS_DIR/$rel" ]; then
-        echo "FAIL: archived path still pending in RUNS_DIR: $rel" >&2
-        status=1
-      fi
-    done < <(find "$ARCHIVE_DIR" -type f -print0 2>/dev/null)
-    if inside_check; then :; fi  # placeholder no-op, containment checked below
-  fi
-fi
-
-inside() {
-  local a b; a="$(realpath -m -- "$1" 2>/dev/null)"; b="$(realpath -m -- "$2" 2>/dev/null)"
-  [ "$a" = "$b" ] && return 1
-  case "$a/" in "$b"/*) return 0 ;; esac
-  return 1
-}
-if [ -e "$ARCHIVE_DIR" ] && inside "$ARCHIVE_DIR" "$RUNS_DIR"; then
-  echo "FAIL: ARCHIVE_DIR inside RUNS_DIR" >&2; status=1
-fi
-
-if [ "$status" -eq 0 ]; then
-  # A7: exotic filenames / races are reported as limitations, not FAILs
-  echo "KNOWN_LIMITATIONS: exotic filenames and concurrent modifications are not verified exhaustively"
-  echo "verify OK"
-fi
-exit "$status"
+echo "VERIFY OK"
+exit 0
 

@@ -1,7 +1,12 @@
-A1: ∀ dry-run mode -> zero writes, ARCHIVE_DIR not created
-A2: toolchain := bash + coreutils only, no root, no logrotate
-A4: ∀ path-law violation (identity ∨ non-containment ∨ degenerate) -> refuse, cite A-number, zero-write
-A5: ∀ path -> DST end state == SRC bytes (cmp-verified), name-preserving suffix, move-once; second --apply no-op
-A6: verifier exit 0 ⇔ conf parses ∧ no pending rotation ∧ archive consistent
-A7: exotic filenames/races -> KNOWN_LIMITATIONS section, not verify FAIL
-open: none — operator answers folded, gate READY
+defs:
+  RUNS_DIR := /workspace/hdcs/runs (conf default, env HDCS_RUNS_DIR override)
+  ARCHIVE_DIR := /workspace/.hdcs-rotate/archive (conf default, env HDCS_ARCHIVE_DIR override)
+  AGE_DAYS := 14, PATTERN := *.txt, KEEP := 50; conf = exactly these five KEY=VALUE lines
+invariants:
+  A1_dryrun: ∀ mode=DRY-RUN -> zero writes (no ARCHIVE_DIR creation, no state file, no move); --apply is sole writing mode
+  A2_env: pure bash + coreutils (find, cmp, realpath, cksum); ∄ logrotate invocation; ∄ root
+  A4_pathlaw: refuse RUNS_DIR==ARCHIVE_DIR, containment ∀ direction, degenerate ('', '.', '/'); refusal cites A-number, zero writes; set-but-empty env var = refusal (¬ fall back to conf)
+  A5_mirror: ∀ path -> archived bytes == source bytes (cmp), filename preserved + rotation suffix; move-once by age threshold => 2nd --apply zero-action no-op, ARCHIVE_DIR byte-identical (cksum)
+  A6_verify: exit 0 iff (a) conf parses ∧ (b) no PATTERN file age ≥ AGE_DAYS under RUNS_DIR ∧ (c) archived files exist ∧ listing consistent; nonzero otherwise
+  A7_limits: exotic filenames / concurrent writes during apply = KNOWN_LIMITATIONS, ¬ FAIL
+open: []

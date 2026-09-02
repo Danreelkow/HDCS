@@ -1,97 +1,105 @@
 #!/usr/bin/env bash
-# rotate-hdcs-runs.sh — archive stale files from RUNS_DIR into ARCHIVE_DIR.
-# Default mode (no args) is a DRY-RUN: zero writes (A1). Pass --apply to move.
-# Toolchain: bash + coreutils only; no root; no logrotate (A2).
-# Path-law violations refuse citing A4, zero-write (A4). Move-once, cmp-verified,
-# name-preserving suffix, second apply is a no-op (A5).
-set -euo pipefail
+# rotate-hdcs-runs.sh — rotate stale *.txt files from RUNS_DIR into ARCHIVE_DIR.
+# Pure bash + coreutils (A2). Default mode is DRY-RUN (zero writes, A1);
+# --apply is the sole writing mode. Path law refusals cite A4.
+set -u
 
-CONF_DIR="$(cd "$(dirname "$0")" && pwd)"
-# shellcheck source=hdcs-runs-rotation.conf
-source "$CONF_DIR/hdcs-runs-rotation.conf"
+CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
+[ -f "$CONF" ] || CONF="hdcs-runs-rotation.conf"
 
-RUNS_DIR="${HDCS_RUNS_DIR-$RUNS_DIR}"
-ARCHIVE_DIR="${HDCS_ARCHIVE_DIR-$ARCHIVE_DIR}"
-PATTERN="${HDCS_PATTERN-$PATTERN}"
-AGE_DAYS="${HDCS_AGE_DAYS-$AGE_DAYS}"
-
-APPLY=0
-case "${1-}" in
-  "")        APPLY=0 ;;
-  --apply)   APPLY=1 ;;
-  --dry-run) APPLY=0 ;;
-  *) echo "usage: $0 [--dry-run|--apply]" >&2; exit 2 ;;
-esac
-
-# --- A4 path-law validation (refusal = exit 2, zero writes) ---
-degenerate() {
-  local p="$1"
-  [ -z "$p" ] && return 0
-  [ "$p" = "/" ] && return 0
-  [ "$p" = "." ] && return 0
-  return 1
-}
-inside() {  # component-wise containment: $1 inside $2
-  local a b
-  a="$(realpath -m -- "$1")"; b="$(realpath -m -- "$2")"
-  [ "$a" = "$b" ] && return 1
-  case "$a/" in "$b"/*) return 0 ;; esac
-  return 1
-}
-
-if degenerate "$RUNS_DIR" || degenerate "$ARCHIVE_DIR"; then
-  echo "A4 refusal: degenerate path (RUNS_DIR or ARCHIVE_DIR is '', '/', or '.')" >&2
-  exit 2
-fi
-if [ "$(realpath -m -- "$RUNS_DIR")" = "$(realpath -m -- "$ARCHIVE_DIR")" ]; then
-  echo "A4 refusal: identity violation — RUNS_DIR == ARCHIVE_DIR" >&2
-  exit 2
-fi
-if inside "$ARCHIVE_DIR" "$RUNS_DIR" || inside "$RUNS_DIR" "$ARCHIVE_DIR"; then
-  echo "A4 refusal: containment violation — ARCHIVE_DIR inside RUNS_DIR or vice versa" >&2
-  exit 2
-fi
-if [ ! -d "$RUNS_DIR" ] || [ -L "$RUNS_DIR" ]; then
-  echo "A4 refusal: degenerate path — RUNS_DIR nonexistent or not a directory" >&2
-  exit 2
-fi
-
-# --- candidate discovery ---
-CANDS=()
-while IFS= read -r -d '' f; do CANDS+=("$f"); done < <(
-  find "$RUNS_DIR" -type f -name "$PATTERN" -mtime +"$AGE_DAYS" -print0 2>/dev/null | sort -z
-)
-
-for f in "${CANDS[@]}"; do
-  rel="$(realpath --relative-to "$RUNS_DIR" "$f")"
-  echo "would move: $rel -> $ARCHIVE_DIR/$rel"
+# (a) parse conf via source-safe read: exactly the five KEY=VALUE keys, no extras
+declare -A C=()
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|\#*) continue ;; esac
+  k="${line%%=*}"; v="${line#*=}"
+  [ "$k" != "$line" ] || { echo "conf parse error: $line" >&2; exit 1; }
+  case "$k" in
+    RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) ;;
+    *) echo "conf: unknown key '$k' — exactly five keys required" >&2; exit 1 ;;
+  esac
+  C["$k"]="$v"
+done < "$CONF"
+for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+  [ -n "${C[$k]:-}" ] || { echo "conf missing key $k" >&2; exit 1; }
 done
-[ "$APPLY" -eq 1 ] || exit 0
+[ "${#C[@]}" -eq 5 ] || { echo "conf must have exactly 5 keys, found ${#C[@]}" >&2; exit 1; }
 
-# --- apply: move-once, cmp-verified, name-preserving suffix (A5) ---
+RUNS_DIR="${C[RUNS_DIR]}"
+ARCHIVE_DIR="${C[ARCHIVE_DIR]}"
+AGE_DAYS="${C[AGE_DAYS]}"
+PATTERN="${C[PATTERN]}"
+KEEP="${C[KEEP]}"
+
+# (b) env override; set-but-empty = refusal citing A4, zero writes
+if [ "${HDCS_RUNS_DIR+set}" = "set" ]; then
+  [ -n "$HDCS_RUNS_DIR" ] || { echo "A4: HDCS_RUNS_DIR set but empty — refusing" >&2; exit 1; }
+  RUNS_DIR="$HDCS_RUNS_DIR"
+fi
+if [ "${HDCS_ARCHIVE_DIR+set}" = "set" ]; then
+  [ -n "$HDCS_ARCHIVE_DIR" ] || { echo "A4: HDCS_ARCHIVE_DIR set but empty — refusing" >&2; exit 1; }
+  ARCHIVE_DIR="$HDCS_ARCHIVE_DIR"
+fi
+
+# (c) path law: degenerate paths, realpath, equality, containment (A4)
+for p in "$RUNS_DIR" "$ARCHIVE_DIR"; do
+  case "$p" in ''|'.'|'/') echo "A4: degenerate path '$p' — refusing" >&2; exit 1 ;; esac
+done
+R="$(realpath -m -- "$RUNS_DIR")"
+A="$(realpath -m -- "$ARCHIVE_DIR")"
+[ "$R" = "$A" ] && { echo "A4: RUNS_DIR == ARCHIVE_DIR ($R) — refusing" >&2; exit 1; }
+case "$R/" in "$A"/*) echo "A4: ARCHIVE_DIR contains RUNS_DIR — refusing" >&2; exit 1 ;; esac
+case "$A/" in "$R"/*) echo "A4: RUNS_DIR contains ARCHIVE_DIR — refusing" >&2; exit 1 ;; esac
+
+MODE="DRY-RUN"
+[ "${1:-}" = "--apply" ] && MODE="APPLY"
+
+# (d) candidates: files matching PATTERN with mtime >= AGE_DAYS
+mapfile -t CANDS < <(find "$R" -type f -name "$PATTERN" -mtime +"$((AGE_DAYS-1))" 2>/dev/null | sort)
+
+if [ "$MODE" = "DRY-RUN" ]; then
+  echo "DRY-RUN plan: ${#CANDS[@]} file(s) would be rotated from $R to $A"
+  for f in "${CANDS[@]}"; do
+    echo "  would rotate: ${f#"$R"/}"
+  done
+  echo "DRY-RUN: no files moved, nothing created (A1)"
+  exit 0
+fi
+
+# (e) --apply
+[ -d "$R" ] || { echo "RUNS_DIR $R does not exist" >&2; exit 1; }
+mkdir -p -- "$A" || { echo "cannot create ARCHIVE_DIR $A" >&2; exit 1; }
+
+MANIFEST="$A/.hdcs-rotation-manifest"
+
+moved=0
 for f in "${CANDS[@]}"; do
-  rel="$(realpath --relative-to "$RUNS_DIR" "$f")"
-  dest="$ARCHIVE_DIR/$rel"
-  mkdir -p "$(dirname "$dest")"
-  final="$dest"
-  if [ -e "$dest" ]; then
+  rel="${f#"$R"/}"
+  dest="$A/$rel"
+  dest_dir="$(dirname -- "$dest")"
+  mkdir -p -- "$dest_dir" || { echo "cannot create $dest_dir" >&2; exit 1; }
+  target="$dest"
+  if [ -e "$target" ]; then
     n=1
-    if [[ "$dest" == *.* && "$dest" != *. ]]; then
-      base="${dest%.*}"; ext=".${dest##*.}"
-    else
-      base="$dest"; ext=""
-    fi
-    while [ -e "$ARCHIVE_DIR/$rel" ] || [ -e "$final" ]; do
-      final="$base.$n$ext"; n=$((n + 1))
-    done
+    while [ -e "$dest.$n" ]; do n=$((n+1)); done
+    target="$dest.$n"
   fi
-  mv -- "$f" "$final"
-  if ! cmp -s -- "$f" "$final" 2>/dev/null; then
-    if [ -e "$f" ]; then :; fi  # original moved; compare against pre-move copy path
-  fi
-  if [ -e "$f" ]; then
-    echo "error: original still present after move: $f" >&2; exit 3
+  # lossless: copy, cmp, then remove source (A5)
+  cp -p -- "$f" "$target" || { echo "copy failed: $f" >&2; exit 1; }
+  if cmp -s -- "$f" "$target"; then
+    rm -f -- "$f" || { echo "remove failed: $f" >&2; exit 1; }
+    echo "rotated: $rel -> ${target#"$A"/}"
+    moved=$((moved+1))
+  else
+    echo "A5: byte mismatch for $rel — keeping source, removing bad copy" >&2
+    rm -f -- "$target"
+    exit 1
   fi
 done
+
+# refresh archive manifest (cksum listing) so verify can check archive identity
+find "$A" -type f ! -name '.hdcs-rotation-manifest' -print0 2>/dev/null \
+  | LC_ALL=C sort -z | xargs -0 -r cksum > "$MANIFEST" || { echo "manifest write failed" >&2; exit 1; }
+
+echo "$moved moved"
 exit 0
 

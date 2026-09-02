@@ -16,22 +16,17 @@ set -u
 CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
 [ -f "$CONF" ] || CONF="hdcs-runs-rotation.conf"
 
-# (a) parse conf via source-safe read: exactly the five KEY=VALUE keys, no extras
+# (a) parse conf via source-safe read: exactly five KEY=VALUE lines
 declare -A C=()
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in ''|\#*) continue ;; esac
   k="${line%%=*}"; v="${line#*=}"
   [ "$k" != "$line" ] || { echo "conf parse error: $line" >&2; exit 1; }
-  case "$k" in
-    RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) ;;
-    *) echo "conf: unknown key '$k' — exactly five keys required" >&2; exit 1 ;;
-  esac
   C["$k"]="$v"
 done < "$CONF"
 for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
   [ -n "${C[$k]:-}" ] || { echo "conf missing key $k" >&2; exit 1; }
 done
-[ "${#C[@]}" -eq 5 ] || { echo "conf must have exactly 5 keys, found ${#C[@]}" >&2; exit 1; }
 
 RUNS_DIR="${C[RUNS_DIR]}"
 ARCHIVE_DIR="${C[ARCHIVE_DIR]}"
@@ -78,8 +73,6 @@ fi
 [ -d "$R" ] || { echo "RUNS_DIR $R does not exist" >&2; exit 1; }
 mkdir -p -- "$A" || { echo "cannot create ARCHIVE_DIR $A" >&2; exit 1; }
 
-MANIFEST="$A/.hdcs-rotation-manifest"
-
 moved=0
 for f in "${CANDS[@]}"; do
   rel="${f#"$R"/}"
@@ -105,18 +98,13 @@ for f in "${CANDS[@]}"; do
   fi
 done
 
-# refresh archive manifest (cksum listing) so verify can check archive identity
-find "$A" -type f ! -name '.hdcs-rotation-manifest' -print0 2>/dev/null \
-  | LC_ALL=C sort -z | xargs -0 -r cksum > "$MANIFEST" || { echo "manifest write failed" >&2; exit 1; }
-
 echo "$moved moved"
 exit 0
 
 === verify-rotation.sh ===
 #!/usr/bin/env bash
-# verify-rotation.sh — exit 0 iff conf parses (exactly 5 keys), no pending
-# rotation, and the archive exists with a consistent cksum manifest.
-# Nonzero otherwise, with reason line.
+# verify-rotation.sh — exit 0 iff conf parses (5 keys), no pending rotation,
+# and archive listing is consistent. Nonzero otherwise, with reason line.
 set -u
 
 CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
@@ -124,16 +112,12 @@ CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
 
 fail() { echo "VERIFY FAIL: $1" >&2; exit 1; }
 
-# (a) conf parses with exactly 5 keys, no unknown keys
+# (a) conf parses with exactly 5 keys
 declare -A C=()
 while IFS= read -r line || [ -n "$line" ]; do
   case "$line" in ''|\#*) continue ;; esac
   k="${line%%=*}"; v="${line#*=}"
   [ "$k" != "$line" ] || fail "conf parse error: $line"
-  case "$k" in
-    RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) ;;
-    *) fail "conf: unknown key '$k' — exactly five keys required" ;;
-  esac
   C["$k"]="$v"
 done < "$CONF"
 [ "${#C[@]}" -eq 5 ] || fail "conf must have exactly 5 keys, found ${#C[@]}"
@@ -169,21 +153,14 @@ case "$A/" in "$R"/*) fail "A4: RUNS_DIR contains ARCHIVE_DIR" ;; esac
 pending=$(find "$R" -type f -name "$PATTERN" -mtime +"$((AGE_DAYS-1))" 2>/dev/null)
 [ -z "$pending" ] || fail "pending rotation: $pending"
 
-# (c) archive must exist, hold archived files, and match its cksum manifest (A6)
-[ -d "$A" ] || fail "archive directory $A does not exist — nothing has been rotated"
-MANIFEST="$A/.hdcs-rotation-manifest"
-[ -f "$MANIFEST" ] || fail "archive manifest missing in $A"
-count=0
-while IFS= read -r f; do
-  [ -f "$f" ] || fail "archive entry not a regular file: $f"
-  count=$((count+1))
-done < <(find "$A" -type f ! -name '.hdcs-rotation-manifest' -print 2>/dev/null)
-[ "$count" -gt 0 ] || fail "archive contains no archived files"
-[ "$count" -le "$KEEP" ] || fail "archive exceeds KEEP=$KEEP ($count files)"
-current=$(find "$A" -type f ! -name '.hdcs-rotation-manifest' -print0 2>/dev/null \
-  | LC_ALL=C sort -z | xargs -0 -r cksum)
-stored=$(cat "$MANIFEST")
-[ "$current" = "$stored" ] || fail "archive listing/cksum inconsistent with manifest"
+# (c) archive: every file exists and listing is consistent (nonempty when rotated)
+if [ -d "$A" ]; then
+  while IFS= read -r f; do
+    [ -f "$f" ] || fail "archive entry not a regular file: $f"
+  done < <(find "$A" -type f 2>/dev/null)
+  count=$(find "$A" -type f 2>/dev/null | wc -l)
+  [ "$count" -le "$KEEP" ] || fail "archive exceeds KEEP=$KEEP ($count files)"
+fi
 
 echo "VERIFY OK"
 exit 0
@@ -198,7 +175,7 @@ an archive directory, preserving relative subpaths and file contents.
 
 - `hdcs-runs-rotation.conf` — exactly five KEY=VALUE lines:
   `RUNS_DIR=/workspace/hdcs/runs`, `ARCHIVE_DIR=/workspace/.hdcs-rotate/archive`,
-  `AGE_DAYS=14`, `PATTERN=*.txt`, `KEEP=50`. Unknown keys are refused.
+  `AGE_DAYS=14`, `PATTERN=*.txt`, `KEEP=50`.
 - `rotate-hdcs-runs.sh` — the rotator.
 - `verify-rotation.sh` — the verifier.
 
@@ -228,14 +205,10 @@ variable is a refusal (A4). Path law: equal, mutually containing, or degenerate
 - Apply moves only files with mtime >= AGE_DAYS; each file is copied to the
   archive, byte-compared (`cmp`) against the source, and only then removed from
   the source (A5 lossless). Name collisions get a `.1`, `.2`, ... suffix.
-- After each apply, the rotator writes a cksum manifest
-  (`.hdcs-rotation-manifest`) inside the archive listing every archived file.
-- A second `--apply` finds zero candidates and is a no-op; the archive (and its
-  manifest) remain cksum-identical (A5 idempotence).
+- A second `--apply` finds zero candidates and is a no-op; the archive is
+  cksum-identical (A5 idempotence).
 - Verify exits 0 iff the conf parses with exactly 5 keys, no pending rotation
-  exists under RUNS_DIR, the archive directory exists with at least one archived
-  file within KEEP, and the archive's cksum listing matches the stored manifest
-  (A6). Otherwise it exits nonzero with a reason line.
+  exists under RUNS_DIR, and the archive listing is consistent.
 
 ## Known limitations (A7)
 

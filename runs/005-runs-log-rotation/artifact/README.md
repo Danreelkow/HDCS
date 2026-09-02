@@ -1,55 +1,52 @@
-# hdcs-runs-rotation
+# hdcs rotation triad
 
-Rotate stale files out of a runs directory into an archive directory, with a
-dry-run default, lossless idempotent apply, and an honest verifier.
+Rotates stale `*.txt` files (age >= 14 days) from the hdcs runs directory into
+an archive directory, preserving relative subpaths and file contents.
+
+## Files
+
+- `hdcs-runs-rotation.conf` — exactly five KEY=VALUE lines:
+  `RUNS_DIR=/workspace/hdcs/runs`, `ARCHIVE_DIR=/workspace/.hdcs-rotate/archive`,
+  `AGE_DAYS=14`, `PATTERN=*.txt`, `KEEP=50`. Unknown keys are refused.
+- `rotate-hdcs-runs.sh` — the rotator.
+- `verify-rotation.sh` — the verifier.
 
 ## Usage
 
-    ./rotate-hdcs-runs.sh           # dry-run (default): prints would-move actions, zero writes
-    ./rotate-hdcs-runs.sh --dry-run # same, explicit
-    ./rotate-hdcs-runs.sh --apply   # perform the moves
-    ./verify-rotation.sh            # A6 verifier
+Dry-run (default; zero writes, A1):
 
-Configuration is read from `hdcs-runs-rotation.conf` (RUNS_DIR, ARCHIVE_DIR,
-PATTERN, AGE_DAYS). Environment variables `HDCS_RUNS_DIR`, `HDCS_ARCHIVE_DIR`,
-`HDCS_PATTERN`, `HDCS_AGE_DAYS` override the conf values.
-Install location: alongside this README (scripts resolve the conf relative to
-their own directory), e.g. `/workspace/.hdcs-rotate/`.
+    ./rotate-hdcs-runs.sh
 
-## A1 — dry-run zero-write
+Apply (sole writing mode):
 
-Default mode (no arguments) and `--dry-run` perform NO writes: no archive
-directory is created, no file in RUNS_DIR is touched, modified, or moved.
+    ./rotate-hdcs-runs.sh --apply
 
-## A2 — toolchain
+Verify:
 
-bash + coreutils only. No root required. No logrotate anywhere.
+    ./verify-rotation.sh
 
-## A4 — path-law refusals
+## Environment overrides
 
-Identity (RUNS_DIR == ARCHIVE_DIR), containment (either inside the other), and
-degenerate paths ('', '/', '.', or RUNS_DIR nonexistent/not a directory) are
-refused with an A4-citing stderr message, exit 2, and zero writes.
+`HDCS_RUNS_DIR` and `HDCS_ARCHIVE_DIR` override the conf values. A set-but-empty
+variable is a refusal (A4). Path law: equal, mutually containing, or degenerate
+(`''`, `.`, `/`) paths are refused citing A4, with zero writes.
 
-## A5 — lossless idempotence
+## Behavior
 
-Each candidate is moved once to a mirrored relative path under ARCHIVE_DIR;
-if the destination exists, a name-preserving suffix (`.1`, `.2`, …) is added.
-The original is confirmed gone after the move. A second `--apply` finds no
-remaining candidates and is a no-op (exit 0, archive unchanged).
+- Dry-run lists would-be moves and creates nothing.
+- Apply moves only files with mtime >= AGE_DAYS; each file is copied to the
+  archive, byte-compared (`cmp`) against the source, and only then removed from
+  the source (A5 lossless). Name collisions get a `.1`, `.2`, ... suffix.
+- After each apply, the rotator writes a cksum manifest
+  (`.hdcs-rotation-manifest`) inside the archive listing every archived file.
+- A second `--apply` finds zero candidates and is a no-op; the archive (and its
+  manifest) remain cksum-identical (A5 idempotence).
+- Verify exits 0 iff the conf parses with exactly 5 keys, no pending rotation
+  exists under RUNS_DIR, the archive directory exists with at least one archived
+  file within KEEP, and the archive's cksum listing matches the stored manifest
+  (A6). Otherwise it exits nonzero with a reason line.
 
-## A6 — verifier criteria
+## Known limitations (A7)
 
-`verify-rotation.sh` exits 0 if and only if: the conf parses, no pending
-rotation exists (no RUNS_DIR file matches PATTERN older than AGE_DAYS), and
-the archive is consistent (exists only if moves were made; no archived path
-still pending in RUNS_DIR; ARCHIVE_DIR outside RUNS_DIR). It exits nonzero on
-pending rotation or any inconsistency.
-
-## KNOWN_LIMITATIONS (A7)
-
-Exotic filenames (newlines, control characters, extremely long names) and
-concurrent modification races during apply are not exhaustively handled; the
-verifier reports them as limitations rather than FAILs where detection is
-unreliable. Symlinked entries inside RUNS_DIR are not followed (only regular
-files are candidates).
+Exotic filenames and concurrent writes during `--apply` are known limitations,
+not failures.

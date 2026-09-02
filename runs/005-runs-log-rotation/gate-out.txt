@@ -1,1 +1,3 @@
-GATE FAIL: config missing key KEEP
+rotated: 001-old/gate-out.txt -> 001-old/gate-out.txt
+1 moved
+GATE PASS

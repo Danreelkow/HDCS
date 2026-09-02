@@ -1,0 +1,2 @@
+VERDICT: FAIL
+EVIDENCE: `verify-rotation.sh:70` rejects archives with more than `KEEP` files (`[ "$count" -le "$KEEP" ] || fail ...`), but A6 defines exit 0 solely by conf parsing, no pending PATTERN file, archived files existing, and listing consistency; the added KEEP-limit condition causes nonzero exit when all A6 conjuncts hold. `hdcs-runs-rotation.conf:1` also adds a comment line despite the packet specifying a conf consisting of exactly the five `KEY=VALUE` lines.
