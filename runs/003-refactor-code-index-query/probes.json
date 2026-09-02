@@ -1,0 +1,8 @@
+{
+  "behavior-preservation": ["behavior-preserving", "observable behavior", "identical behavior"],
+  "exit-codes": ["exit codes", "exit code"],
+  "telemetry-kept": ["telemetry", "usage log"],
+  "freshness-check": ["freshness", "stale"],
+  "single-file-scope": ["single file", "one file"],
+  "no-new-dependencies": ["node: builtins", "no new dependencies", "builtins only"]
+}
