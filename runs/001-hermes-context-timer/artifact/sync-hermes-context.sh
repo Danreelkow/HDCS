@@ -32,15 +32,6 @@ while [ "$DST" != "/" ] && [ "${DST%/}" != "$DST" ]; do DST="${DST%/}"; done
 case "$SRC" in ""|".") echo "A18: degenerate HERMES_CONTEXT_SRC" >&2; exit 1 ;; esac
 case "$DST" in ""|".") echo "A18: degenerate HERMES_CONTEXT_DST" >&2; exit 1 ;; esac
 
-R_SRC=$(realpath -m -- "$SRC")
-R_DST=$(realpath -m -- "$DST")
-[ "$R_SRC" != "/" ] || { echo "A18: degenerate SRC resolves to /" >&2; exit 1; }
-[ "$R_DST" != "/" ] || { echo "A18: degenerate DST resolves to /" >&2; exit 1; }
-
-LOG_PARENT="${HOME}/.cache/hermes-context"
-LOG_FILE="$LOG_PARENT/sync.log"
-ENTRYPOINT_DIR="${HOME}/.local/bin"
-
 # bidirectional containment on component boundaries (never string prefixes)
 contains_bi() { # true if a==b, a inside b, or b inside a
   local a=$1 b=$2
@@ -51,6 +42,52 @@ is_inside() { # true if child==parent or strictly inside parent
   [ "$child" = "$parent" ] || [ "${child#"$parent"/}" != "$child" ]
 }
 
+# --- A12: symlinked ANCESTOR / endpoint on the ORIGINAL path strings ----------
+# realpath -m resolves intermediate symlinks and would HIDE them, so the
+# symlink-ancestor walk runs on the original DST/SRC strings FIRST, component
+# by component (from the endpoint upward). Any symlink component on the DST
+# path is refused before anything is resolved or written (A22: a DST-level
+# symlink is never replaced — even a dangling one, and the refusal always
+# cites the A-number, never dying on a failed realpath). A symlink component
+# on the SRC path is PERMITTED (a symlinked source root/ancestor is mirrored
+# losslessly) unless it resolves into DST — the destination must never be
+# reachable through a source link.
+walk_original_components() { # $1 = absolute original path, $2 = role label, $3 = forbidden root ('' = forbid all)
+  local p=$1 role=$2 forbid=$3 rp
+  while [ "$p" != "/" ]; do
+    if [ -L "$p" ]; then
+      # realpath may fail on a dangling link — never let set -e kill us
+      # before the A-numbered refusal is emitted
+      rp=$(realpath -- "$p" 2>/dev/null || true)
+      if [ -z "$forbid" ]; then
+        echo "A12: $role path component $p is a symlink${rp:+ (resolves to $rp)}; refusing to follow or replace it" >&2
+        exit 1
+      fi
+      local resolved
+      resolved=$(realpath -m -- "$p" 2>/dev/null || true)
+      if [ -n "$resolved" ] && { [ "$resolved" = "$forbid" ] || [ "${resolved#"$forbid"/}" != "$resolved" ]; }; then
+        echo "A12: $role path component $p is a symlink resolving into DST ($forbid); refusing" >&2
+        exit 1
+      fi
+    fi
+    p=${p%/*}
+    [ -n "$p" ] || p=/
+  done
+}
+if [ "${DST#/}" = "$DST" ]; then DST="/$DST"; fi
+if [ "${SRC#/}" = "$SRC" ]; then SRC="/$SRC"; fi
+R_DST=$(realpath -m -- "$DST")
+walk_original_components "$DST" "DST" ""
+walk_original_components "$SRC" "SRC" "$R_DST"
+
+R_SRC=$(realpath -m -- "$SRC")
+[ "$R_SRC" != "/" ] || { echo "A18: degenerate SRC resolves to /" >&2; exit 1; }
+[ "$R_DST" != "/" ] || { echo "A18: degenerate DST resolves to /" >&2; exit 1; }
+
+LOG_PARENT="${HOME}/.cache/hermes-context"
+LOG_FILE="$LOG_PARENT/sync.log"
+ENTRYPOINT_DIR="${HOME}/.local/bin"
+
 # --- A12: identity / ancestor / descendant (realpath-based) -------------------
 if [ "$R_SRC" = "$R_DST" ]; then
   echo "A12: SRC and DST resolve to the same path ($R_DST)" >&2; exit 1
@@ -59,26 +96,14 @@ if is_inside "$R_DST" "$R_SRC" || is_inside "$R_SRC" "$R_DST"; then
   echo "A12: SRC and DST are in an ancestor/descendant relation" >&2; exit 1
 fi
 
-# --- A22: DST itself is a symlink -> refuse, never replace --------------------
-if [ -L "$DST" ]; then
-  echo "A22: DST is a symlink ($DST -> $(readlink -- "$DST")); refusing to replace it" >&2
-  exit 1
-fi
-
-# --- A22/A12: symlinked ANCESTOR of DST -> refuse, never follow ---------------
-# Walk every real path component of DST (component tests, never string prefixes).
-# An ancestor that is a symlink REFUSES: if it resolves into SRC the path law
-# is A12 (identity containment via realpath), otherwise A22 — a symlinked DST
-# path is never followed or replaced, so no writes can land through the link.
+# --- A12: resolved DST path must not pass through any symlink -----------------
+# Extra safety on the resolved form: after the original-string walk above,
+# every existing symlink on the DST path has already been caught; this walk
+# re-checks the resolved components (no-op in normal flows).
 comp="$R_DST"
 while [ "$comp" != "/" ]; do
   if [ -L "$comp" ]; then
-    RP=$(realpath -- "$comp")
-    if [ "$RP" = "$R_SRC" ] || is_inside "$RP" "$R_SRC"; then
-      echo "A12: DST component $comp is a symlink resolving into SRC ($RP)" >&2
-      exit 1
-    fi
-    echo "A22: DST component $comp is a symlink (-> $RP); refusing to follow or replace it" >&2
+    echo "A12: DST component $comp is a symlink; refusing to follow or replace it" >&2
     exit 1
   fi
   comp=$(dirname -- "$comp")
@@ -130,10 +155,13 @@ same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
 # A9-class compare: contents + structure + symlinks (NOT metadata/times).
 # Never dereferences symlinks: a regular file holding the target bytes of a SRC
 # symlink still fails. Empty rsync itemize diff AND full lstat walk must pass.
+# rsync flags: -r recursive, -l compare/copy SYMLINKS AS SYMLINKS (without -l
+# symlinks are skipped and legit mirrors diff), -c checksum, -n dry, --delete
+# so stale destination entries are reported.
 verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
-  local s=$1 d=$2 rel sp dp out wr
+  local s=$1 d=$2 rel p out dp
   if command -v rsync >/dev/null 2>&1; then
-    out=$(rsync -rcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
+    out=$(rsync -rlpcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
     if [ -n "$out" ]; then
       echo "A9: rsync content diff detected:" >&2
       printf '%s\n' "$out" >&2
@@ -171,9 +199,9 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
 if [ "$MODE" = dry ]; then
   if { [ -e "$DST" ] || [ -L "$DST" ]; } && [ -d "$DST" ]; then
     if command -v rsync >/dev/null 2>&1; then
-      # --checksum in the plan too: a same-size/same-mtime byte change must be
-      # counted as work, matching what the real run will actually do
-      out=$(rsync -anc --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
+      # -a includes -l (symlinks counted as symlinks); --checksum so a
+      # same-size/same-mtime byte change is counted as work
+      out=$(rsync -alnc --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
       DEL=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
       SYNC=$(printf '%s\n' "$out" | grep -Ev '^(\.|\*deleting|$)' | grep -c . || true)
     else

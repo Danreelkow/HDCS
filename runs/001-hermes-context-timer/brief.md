@@ -1,43 +1,24 @@
-state:
-  s0 := packet validated. SRC=${HERMES_CONTEXT_SRC-default /opt/data/workspace/hermes-context/}, DST=${HERMES_CONTEXT_DST-default /workspace/hermes-context/} (A17/A23: unset→default, set-but-empty→refuse).
-  A2 one-way host→workspace. A5 mirror: rsync -a --delete primary; rsync absent → cp -a + recursive reconcile (delete stale subtrees, copy diffs); end state DST≡SRC recursive.
-  A9-class compare = contents+structure+symlinks (not metadata/timestamps/hardlinks); mismatch → exit nonzero, never warn-and-exit-0.
-  A6/A16: --dry-run ⇒ zero writes ∀ kind incl. logs, no stage dir, absent DST stays absent, exit 0 with plan printed.
-  A8: log ~/.cache/hermes-context/sync.log (real runs only, one line); entrypoint ~/.local/bin/sync-hermes-context.sh; both outside DST ⇒ never deleted by sync.
-  A11/A13: guards → mktemp -d stage → re-validate → copy SRC→stage → A9-compare SRC vs stage → only then touch DST; no rm -rf before verified stage.
-  Guards: A18 degenerate {"/","","."} component test; A12 realpath identity/ancestor/descendant; A22 DST symlink → refuse, never replace; A14/A15 owned={instantiated stage, log parent, entrypoint dir} concrete, component-boundary; refusals cite only A12|A14/A15|A18|A22|A23 (A19).
-  A20: parent string-validated → mktemp -d → re-validate instantiated; reserved names via mktemp bookkeeping. A21 exotic filenames → KNOWN_LIMITATIONS. A10 FAIL only normal-operation defects. A3 standalone-executable, no root, systemd optional.
-Δ:
-  1. mkdir hermes-context/; write sync-hermes-context.sh (#/usr/bin/env bash, set -euo pipefail):
-     (a) parse --dry-run; resolve SRC/DST per A23. expect: set-but-empty → exit≠0, stderr "A23".
-     (b) guards A18→A12→A22→A14/A15 (log parent, entrypoint dir). expect: each refusal exit≠0 citing its A-number only.
-     (c) dry-run branch: plan via `rsync -an --delete --itemize-changes SRC/ DST/` (DST absent ⇒ all-create) else read-only find-diff; print "dry-run: sync=N delete=M". expect: zero writes anywhere, exit 0.
-     (d) stage: validate ${TMPDIR:-/tmp} as string → mktemp -d → realpath re-validate vs A14/A15 → `rsync -a --delete SRC/ stage/`; no rsync → `cp -a SRC/. stage/` + delete stage entries absent from SRC.
-     (e) A13: A9-compare SRC vs stage (`diff -r --no-dereference` + symlink-target check); mismatch → rm stage, exit≠0, DST untouched.
-     (f) touch DST: `rsync -a --delete stage/ DST/`; fallback: delete DST entries absent from stage, cp -a missing/differing; then A9-compare SRC vs DST, mismatch → exit≠0.
-     (g) append one-line UTC summary to log (mkdir -p parent); rm -rf stage; exit 0. Real path only — dry-run never reaches (d)-(g).
-     expect: bash -n → exit 0; chmod +x applied.
-  2. write hermes-context.service: [Service] Type=oneshot, ExecStart=%h/.local/bin/sync-hermes-context.sh; [Install] WantedBy=default.target.
-     expect: systemd-analyze verify hermes-context.service → exit 0.
-  3. write hermes-context.timer: [Timer] OnCalendar=*-*-* 00/6:00:00, Persistent=true, Unit=hermes-context.service; [Install] WantedBy=default.target.
-     expect: systemd-analyze verify hermes-context.timer → exit 0.
-  4. write README.md: install (script→~/.local/bin; units→~/.config/systemd/user; systemctl --user daemon-reload && enable --now hermes-context.timer), env override examples, --dry-run test procedure, sync-strategy states (rsync primary / cp fallback, both = recursive mirror), KNOWN_LIMITATIONS section (A21 exotic filenames; adversarial env beyond A14).
-     expect: contains strings HERMES_CONTEXT_SRC, HERMES_CONTEXT_DST, --dry-run, OnCalendar, default.target.
-  5. smoke matrix (mktemp fixtures, env-overridden SRC/DST):
-     (i) dry-run, absent DST → exit 0; DST still absent after.
-     (ii) dry-run, existing DST → exit 0; tree-hash before==after.
-     (iii) real run → exit 0; A9-compare SRC≡DST; exactly one log line; rerun → 0 copied 0 deleted, log grows by one line.
-     (iv) SRC==DST → cites A12; DST symlink→elsewhere → cites A22; DST="." → cites A18; all exit≠0, DST unchanged.
-     (v) PATH-shim hiding rsync, real run → exit 0, A9-compare passes.
-     (vi) corrupt one DST file, rerun → exit 0, content restored, A9-compare passes.
-     expect: all (i)-(vi) outcomes exactly as stated.
+state: s0 := SRC=/opt/data/workspace/hermes-context/; DST=/workspace/hermes-context/; mirror_class A9; no artifacts built yet; open: [].
+Δ :=
+1. Create sync-hermes-context.sh (bash, set -euo pipefail):
+   1a. Env contract (A17/A23): SRC_ENV/DST_ENV/LOG_ENV unset->defaults (/opt/data/workspace/hermes-context/ , /workspace/hermes-context/ , ~/.cache/hermes-context/); set-empty->exit nonzero citing A23. Expect: empty env value -> refuse exit !=0.
+   1b. Path guards (A12/A18/A22): realpath both; refuse if SRC==DST, ancestor/descendant (component-boundary), degenerate ('', '.', '/'), or DST is symlink — every refusal message cites an A-number. Expect: 4 synthetic bad-input cases each exit nonzero with A-citation.
+   1c. Log dir (A8): only at real run, mkdir -p outside DST; verify realpath not under DST. Expect: dry-run leaves zero new dirs anywhere.
+   1d. --dry-run mode (A6/A16): rsync --delete --dry-run path only, no mkdir, no log file, no mktemp; DST nonexistent-if-absent preserved. Expect: on absent DST, dry-run exit 0 and test -e DST = false; strace/stat shows no writes under DST or SRC.
+   1e. Real run (A11/A13/A20/A23): validate log parent as pure string -> mktemp -d under it -> re-validate stage dir; run rsync -a --delete SRC/ STAGE/ ; if rsync absent or fails, rm -rf STAGE, mktemp again, cp -a SRC/. STAGE/ (A4/A5); content-verify stage vs SRC per A9 (contents+structure+symlinks, recursive; diff -r --no-dereference or equivalent; verify exit nonzero on mismatch); on verify success, mkdir -p DST, rsync -a --delete STAGE/ DST/ (or cp -a fallback), then rm -rf STAGE. Sync never writes SRC (A2). Bookkeeping dirs use mktemp random names (A20). Expect: real run exit 0; post-state DST == SRC per A9; rsync and cp -a paths both tested and converge; corrupted-stage test exits nonzero before touching DST.
+2. Create hermes-context.service: Type=oneshot, ExecStart=%h/.local/bin/sync-hermes-context.sh (or /workspace/hdcs/bin), no root. Expect: systemd-analyze verify user-unit clean.
+3. Create hermes-context.timer: OnCalendar=*-*-* 00/6:00:00, Persistent=true, Unit=hermes-context.service. Expect: systemd-analyze verify clean.
+4. Create README.md: usage, standalone vs systemd --user install, --dry-run semantics, env override contract, KNOWN_LIMITATIONS (A10/A14/A21 exotic filenames, adversarial env combos). Expect: documents all four MUST_KEEPs verbatim.
 accept:
-  - hermes-context/{sync-hermes-context.sh,hermes-context.service,hermes-context.timer,README.md} exist; script +x, bash -n 0; both units verify 0
-  - smoke (i)-(vi) pass verbatim
-  - every refusal stderr cites only A12|A14/A15|A18|A22|A23
-  - --dry-run: no stage, no log, no DST write; absent DST stays absent
-  - real run: A9-compare SRC≡DST, stale subtrees deleted, idempotent, one log line/run
-  - script writes only to {stage, DST, log}; log+entrypoint outside DST
-  - README KNOWN_LIMITATIONS section present
-constraints: [A19 closed refusal law, no invented scope; A2 no writeback DST→SRC; A11 stage→verify→touch, no rm -rf DST pre-verify; A6/A16 dry-run zero-write incl. logs; A8 placement; A9-class mirror only; A20 stage ordering; A22 refuse-never-replace; A23 unset/empty semantics; bash+rsync+systemd-user canon, no root, no systemd required at runtime; A21 exotic → +open not FAIL]
-deliverable: [hermes-context/sync-hermes-context.sh, hermes-context/hermes-context.service, hermes-context/hermes-context.timer, hermes-context/README.md]
+- [ ] artifact dir contains exactly: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md; script passes bash -n and shellcheck (or noted KNOWN_LIMITATIONS).
+- [ ] dry-run: exit 0, zero writes (no DST creation if absent, no log file, no tmp dirs); DST absent stays absent.
+- [ ] real run rsync path: DST end state == SRC end state (contents+structure+symlinks, recursive); stale DST-only file deleted; exit 0.
+- [ ] real run cp -a fallback (rsync masked): same convergence; verify exit nonzero when a mismatch is injected.
+- [ ] guards: SRC==DST, ancestor/descendant, '', '.', '/', DST-symlink each refused nonzero with A-number citation; SRC never modified (checksum SRC before/after run).
+- [ ] env: unset->defaults used; set-empty->refused nonzero.
+- [ ] units verify via systemd-analyze --user; no root required anywhere.
+- [ ] README contains the three MUST_KEEP strings verbatim and a KNOWN_LIMITATIONS section.
+constraints:
+- MUST_KEEP verbatim: "source path is /opt/data/workspace/hermes-context/", "dry-run mode that performs no writes", "systemd user units, no root required".
+- A2: never write to SRC. A8: log dir + install paths outside DST. A11/A13: stage -> content-verify -> touch DST on both sync paths. A19/A24: no invented ownership scope; refusals cite A-numbers only from the register. A20: no fixed bookkeeping names colliding with SRC contents. A10/A14/A21: beyond-guard cases -> KNOWN_LIMITATIONS, not FAIL.
+deliverable: [sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md]

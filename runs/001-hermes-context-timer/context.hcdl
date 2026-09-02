@@ -1,24 +1,12 @@
-reg: cs-programming (shell + systemd user units)
-defs:
-  SRC := ${HERMES_CONTEXT_SRC-default /opt/data/workspace/hermes-context}
-  DST := ${HERMES_CONTEXT_DST-default /workspace/hermes-context}
-  SET-BUT-EMPTY -> refuse (A18); UNSET -> production default (A23)
-  mirror := A9 class: contents + recursive structure + symlinks; NOT metadata/timestamps/hardlinks
-invariants:
-  A2_oneway: ∀ run -> host->workspace only, no writeback
-  A5_mirror: ∀ path (rsync --delete | cp-fallback) -> DST end state == SRC end state, recursive
-  A6_dryrun: --dry-run -> zero writes ∀ kind incl. logs; DST byte-identical; absent DST stays absent (A16)
-  A8_placement: log file parent + entrypoint dir live OUTSIDE DST always
-  A11_order: stage -> content-verify (A13: A9-class compare vs SRC) -> only then touch DST; ∀ destructive op
-  A12_identity: refuse when realpath(SRC)==realpath(DST) ∨ ancestor/descendant ∨ DST symlink into SRC
-  A14/A15_guard: refuse iff realpath(DST) == owned ∨ owned ⊂ DST ∨ DST ⊂ owned; owned = CONCRETE paths (instantiated stage dir, log file parent, entrypoint dir); component-boundary compare, never string-prefix
-  A18_degenerate: refuse SRC/DST ∈ {"/", "", "."} via component test; DST symlink outside SRC -> REFUSE, never replace (A22)
-  A19_closed_law: refusals cite A12|A14/A15|A18 only; else invented scope = wall
-  A20/A23_stage: pure-string parent candidates -> validate -> mktemp -d under validated parent (atomic, not C4 violation) -> re-validate instantiated path; reserved working names never collide with mirror files (mktemp for bookkeeping)
-  A21_exotic: newline/control-char filenames -> KNOWN_LIMITATIONS (+open), not FAIL
-  A10_bar: FAIL only on normal-operation defects; adversarial env beyond A14 guard -> +open
-  A17_param: env override is the gate contract; deployed defaults are production values, not scope limits
-  self-verify: A9-class recursive compare, mismatch -> exit nonzero, never warn-and-exit-0
-open:
-  KNOWN_LIMITATIONS: exotic filenames (A21); adversarial env combos beyond A14 (A10/A14)
-  none blocking
+def SRC := /opt/data/workspace/hermes-context/; def DST := /workspace/hermes-context/
+def mirror_class A9: contents + structure + symlinks only; metadata/timestamps/hardlinks excluded
+A2: sync never writes to SRC; one-way host -> workspace
+A5/A7: forall sync path (rsync primary ∨ cp -a fallback) -> DST end state == SRC end state, recursive; verify exit nonzero on mismatch
+A6/A16: --dry-run -> zero writes of any kind; DST nonexistent-if-absent preserved; log dir always outside DST (A8)
+A11/A13: stage -> content-verify -> touch DST; applies to both sync paths
+A12/A18/A22: refuse SRC==DST, ancestor/descendant, degenerate paths ('', '.', '/'), DST-level symlinks
+A14/A15/A23: concrete-owned-path guard, boundary-aware; stage order = validate-pure-string-parent -> mktemp -d -> re-validate
+A17/A23: env override is contract; unset->default, set-empty->refuse
+A10/A21: exotic filenames + adversarial env combos beyond guard -> KNOWN_LIMITATIONS, not FAIL
+A19/A24: no ownership scope invented beyond OS; refusal law closed
+open: []
