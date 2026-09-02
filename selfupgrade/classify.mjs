@@ -17,19 +17,25 @@ if (!task || !/^\d+$/.test(codeArg || '')) {
 const code = Number(codeArg);
 
 if (code === 0) { out({ verdict: 'delivered', reason: 'exit 0', repetitions: 0 }); process.exit(0); }
-if (code === 2) { out({ verdict: 'park', reason: 'needs-clarification (human seam)', repetitions: 0 }); process.exit(0); }
 if (code === 3) { out({ verdict: 'park', reason: 'budget exhausted', repetitions: 0 }); process.exit(0); }
-if (code !== 1) { out({ verdict: 'park', reason: `unknown exit code ${code}`, repetitions: 0 }); process.exit(0); }
+if (code !== 1 && code !== 2) { out({ verdict: 'park', reason: `unknown exit code ${code}`, repetitions: 0 }); process.exit(0); }
 
-// exit 1 = FAIL: extract finding class from the judge verdict, track repetitions.
+// exit 1 = FAIL, exit 2 = S4-hold (NEEDS-CLARIFICATION): both carry judge evidence worth
+// tracking — a class that repeats across laps is the promote signal regardless of which
+// exit code carried it (live-found defect: S4-hold objections rode exit 2 and were invisible).
 const verdictPath = path.join(RUNS, task, 's4-verdict.txt');
 let vtxt = '';
 try { vtxt = fs.readFileSync(verdictPath, 'utf8'); } catch {
-  out({ verdict: 'requeue', reason: 'exit 1 with no s4-verdict.txt', repetitions: 1 });
+  out({ verdict: code === 2 ? 'park' : 'requeue', reason: code === 2 ? 'needs-clarification (human seam); no s4-verdict.txt to class' : `exit 1 with no s4-verdict.txt`, repetitions: 1 });
   process.exit(0);
 }
 const evLine = (vtxt.split('\n').find(l => /^EVIDENCE:/i.test(l)) || vtxt.split('\n').find(l => /^VERDICT:/i.test(l)) || vtxt.split('\n').find(l => l.trim()) || '').trim();
-const findingClass = evLine.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, 6).join(' ') || 'empty-verdict';
+// finding class v2: cited A-numbers are the stable signature (S4 rephrases every lap but
+// cites the same laws); word-prefix fallback only when the evidence cites nothing.
+const anums = [...new Set((evLine.toLowerCase().match(/a\d+/g) || []))].sort();
+const findingClass = anums.length
+  ? anums.join(' ')
+  : (evLine.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).slice(0, 6).join(' ') || 'empty-verdict');
 
 fs.mkdirSync(HISTORY, { recursive: true });
 const histPath = path.join(HISTORY, `${task}.jsonl`);
@@ -38,5 +44,12 @@ const reps = fs.readFileSync(histPath, 'utf8').trim().split('\n')
   .map(l => { try { return JSON.parse(l).findingClass; } catch { return null; } })
   .filter(c => c === findingClass).length;
 
+if (code === 2) {
+  // S4-hold: task parks at the human seam REGARDLESS (kernel contract). But a class
+  // repeated >=3x is harvested: promote fires the fixture/law author -> .proposed only (A29).
+  if (reps >= 3) out({ verdict: 'promote', taskParked: true, reason: `exit-2 class repeated ${reps}x: "${findingClass}" — harvesting proposal; task stays parked (human seam)`, repetitions: reps });
+  else out({ verdict: 'park', reason: `needs-clarification (human seam); class "${findingClass}" seen ${reps}x`, repetitions: reps });
+  process.exit(0);
+}
 if (reps >= 2) out({ verdict: 'promote', reason: `finding class repeated ${reps}x: "${findingClass}"`, repetitions: reps });
 else out({ verdict: 'requeue', reason: `exit 1, finding class "${findingClass}"`, repetitions: reps });

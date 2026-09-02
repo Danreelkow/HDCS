@@ -69,7 +69,9 @@ function tick() {
       });
       let pv = null; try { pv = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch {}
       console.log(`[driver] promote flow: ${pv ? pv.reason : 'unparseable'}`);
-      move(p, promoted, `PROMOTED — ${v.reason} | promote-flow: ${pv ? pv.reason : 'failed'}`);
+      const dstNote = `PROMOTED — ${v.reason} | promote-flow: ${pv ? pv.reason : 'failed'}`;
+      if (v.taskParked) move(p, parked, `PARKED (task) — ${dstNote}`);
+      else move(p, promoted, dstNote);
       return { verdict: 'promote', reason: v.reason, promoteFlow: pv };
     }
     move(p, promoted, `PROMOTED — ${v.reason}`);

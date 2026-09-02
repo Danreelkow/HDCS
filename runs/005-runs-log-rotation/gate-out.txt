@@ -1,1 +1,3 @@
-GATE FAIL: dry-run nonzero: ERROR: malformed config /workspace/hdcs/runs/005-runs-log-rotation/artifact/hdcs-runs-rotation.conf (schema: exactly RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP; no comments)
+rotated: 001-old/gate-out.txt -> 001-old/gate-out.txt
+rotated: 003-boundary/gate-out.txt -> 003-boundary/gate-out.txt
+GATE FAIL: verify failed on rotated tree (artifact dir was read-only — verify must not need write access)

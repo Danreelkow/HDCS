@@ -3,7 +3,7 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: `verify-rotation.sh` violates A7’s “flag accumulator for every check”: malformed-config handling (line 37), path-law checks (lines 55–72), missing archive check (lines 118–120), and archive `find` check (lines 121–123) terminate directly with `die` instead of contributing to a verifier-wide accumulator. Its config parser also silently accepts comment lines (`verify-rotation.sh`, lines 20–21) despite the packet requiring a conf with exactly five key lines and no comments. In `rotate-hdcs-runs.sh`, the loss check (around lines 153–159) compares the destination after `mv` with a temporary `cp` snapshot, not “archived vs original” as required by A5. The apply pruning pipeline (around lines 181–183) additionally invokes `awk`, which is outside the specified bash/coreutils toolchain.
+EVIDENCE: `verify-rotation.sh` violates A7: the `find` commands feeding the process-substitution loops at the stale scan (`done < <(find "$RUNS" ... -print0)`, line 94), archive scan (`done < <(find "$ARCH" ... -print0)`, line 114), and fresh scan (later `done < <(find "$RUNS" ... -print0)`) have their exit statuses discarded. The subsequent `find ... >/dev/null` commands are separate scans and do not accumulate the status of the scans actually supplying the checks. Additionally, line 33 uses an unchecked pipeline, `grep -E ... | grep -vcE ...`, contrary to A7’s prohibition on bare pipeline status/checks.
 
 ## Packet
 ```yaml

@@ -158,11 +158,16 @@ mk_prom_run 0
 assert 15 "fixture that cannot fail must fail LOCK3 (wall, not gate)" test "$(pf_field 0 '[ -f artifact/x.sh ] && fail \"A1: unreachable\"' lock3)" = "false"
 rm -f "$SB/block.txt"
 
+# F15b: if/then-fail last line is a valid fail invocation (live-found gap)
+mk_prom_run 1
+assert 15b "if/then fail construct passes grammar guard" test "$(pf_field 0 'if ! bash artifact/x.sh; then fail \"A1: x.sh must exit 0\"; fi' promote)" = "true"
+rm -f "$SB/block.txt"
+
 # ---- promote.mjs end-to-end (F16-F17) ----
 cat > "$SB/stub-ok.sh" <<'EOF'
 #!/usr/bin/env bash
 cat > "$PROMOTE_OUT" <<'JSON'
-{"text":"```\nbash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"\n```"}
+{"text":"```bash\nbash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"\n```"}
 JSON
 EOF
 cat > "$SB/stub-fail.sh" <<'EOF'
@@ -187,6 +192,40 @@ mk_prom_run 1
 mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
 assert_not 17 "failed author seat exits nonzero" env HDCS_AUTHOR_CMD="bash $SB/stub-fail.sh" node "$HERE/promote.mjs" prom
 assert_not 17 "no gate.sh.proposed on author failure" test -f "$SB/runs/prom/gate.sh.proposed"
+
+# F18: locks reject (untestable class) -> law-drafter fallback -> answers.md.proposed
+cat > "$SB/stub-law.sh" <<'EOF'
+#!/usr/bin/env bash
+cat > "$PROMOTE_OUT" <<'JSON'
+{"text":"```\nA2 (2026-09-02, DRAFT — operator approval pending, A29): x.sh must exit 0 on every invocation.\n    Scope: exit-code contract for artifact helpers. Rationale: S4 evidence repeated 2x; fixture path cannot express it.\n    Gate-testable: no — pure register law, S4-enforced.\n```"}
+JSON
+EOF
+fresh
+mk_prom_run 0
+mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
+printf 'VERDICT: FAIL\nEVIDENCE: x.sh contract is behavioral, not mechanical.\n' > "$SB/runs/prom/s4-verdict.txt"
+assert 18 "locks-reject falls back to law-drafter (exit 0)" env HDCS_AUTHOR_CMD="bash $SB/stub-law.sh" node "$HERE/promote.mjs" prom
+assert 18 "answers.md.proposed landed" test -f "$SB/runs/prom/answers.md.proposed"
+assert 18 "proposal is a DRAFT citing an A-number (A29)" sh -c "grep -q 'DRAFT' '$SB/runs/prom/answers.md.proposed' && grep -q 'A2' '$SB/runs/prom/answers.md.proposed'"
+
+# F19: both paths fail -> clean negative, nothing lands
+fresh
+cat > "$SB/stub-junk.sh" <<'EOF'
+#!/usr/bin/env bash
+printf '{"text":"```\ntrue\n```"}' > "$PROMOTE_OUT"
+EOF
+mk_prom_run 0
+mkdir -p "$SB/runs"; cp -r "$SB/prom" "$SB/runs/prom"
+printf 'VERDICT: FAIL\nEVIDENCE: untestable and undraftable.\n' > "$SB/runs/prom/s4-verdict.txt"
+assert_not 19 "fixture-reject + law-draft-mismatch exits nonzero" env HDCS_AUTHOR_CMD="bash $SB/stub-junk.sh" node "$HERE/promote.mjs" prom
+assert_not 19 "no answers.md.proposed on double failure" test -f "$SB/runs/prom/answers.md.proposed"
+
+# F21: baseline — snapshot gate failing its own artifact blocks authoring (live-found on 005)
+mk_prom_run 0
+sed -i 's/^echo "GATE PASS"$/fail "A9: widened beyond artifact"\necho "GATE PASS"/' "$SB/prom/gate.sh"
+assert 21 "baseline failure must block fixture authoring with named reason" test "$(pf_field 0 'bash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"' promote)" = "false"
+assert 21 "baseline reason names the gate-artifact split" test "$(pf_field 0 'bash artifact/x.sh >/dev/null 2>&1 || fail \"A1: x.sh must exit 0\"' reason)" != ""
+rm -f "$SB/block.txt"
 
 echo "----"
 echo "selftest: $PASS passed, $FAIL failed"

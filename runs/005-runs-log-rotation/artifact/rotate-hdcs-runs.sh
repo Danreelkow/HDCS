@@ -1,174 +1,143 @@
 #!/usr/bin/env bash
-# rotate-hdcs-runs.sh — rotate stale files out of RUNS_DIR into ARCHIVE_DIR.
-# Pure bash + coreutils. --apply is the sole writer (A1); default mode is dry-run.
-# Staleness: explicit stat epoch math — age >= AGE_DAYS (boundary rotates, A5).
-# A5_mirror: every moved file preserves its recursive relative path, i.e.
-#   RUNS_DIR/<rel>  ->  ARCHIVE_DIR/<rel>   (collision suffix appended to the
-#   basename only, inside the mirrored directory — never flattened).
-# Usage: rotate-hdcs-runs.sh [--apply]
-# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (set-but-empty refused, A4).
-
+# rotate-hdcs-runs.sh — hdcs runs rotation.
+# Default (no args): DRY-RUN — prints planned moves/prunes, performs ZERO writes (A1).
+# --apply: sole writing mode. Toolchain: bash + coreutils only (A2). No root, no logrotate.
+# Stale law (A5/A6): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
+# arithmetic, never bare -mtime +N.
+# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (unset -> conf defaults; set-but-empty -> refuse, A4).
+# PATTERN/AGE_DAYS/KEEP overrides honored everywhere: HDCS_PATTERN, HDCS_AGE_DAYS, HDCS_KEEP.
+# KEEP=0 prunes the ENTIRE archive (A5: KEEP is a hard bound, never skipped).
+# Prune uses only POSIX-portable find/stat (no -printf).
 set -u
 
-die() { echo "ERROR: $*" >&2; exit 1; }
-
-CONF_PATH="$(cd "$(dirname "$0")" && pwd)/hdcs-runs-rotation.conf"
-
-# ---- conf parsing (exactly the 5-key schema) -------------------------------
-declare -A CONF=()
-parse_conf() {
-    local f="$1" line key val
-    [ -r "$f" ] || return 1
-    while IFS= read -r line; do
-        case "$line" in ''|'#'*) continue ;; esac
-        case "$line" in
-            [A-Z_]*=*) : ;;
-            *) return 1 ;;
-        esac
-        key="${line%%=*}"
-        val="${line#*=}"
-        case "$key" in
-            RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) CONF["$key"]="$val" ;;
-            *) return 1 ;;
-        esac
-    done < "$f"
-    for key in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
-        [ -n "${CONF[$key]+x}" ] || return 1
-    done
-    return 0
-}
-parse_conf "$CONF_PATH" || die "malformed config $CONF_PATH (schema: RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP)"
-
-# ---- resolve env > conf; set-but-empty -> refuse (A4) ----------------------
-if [ -n "${HDCS_RUNS_DIR+x}" ]; then
-    [ -n "$HDCS_RUNS_DIR" ] || die "A4: HDCS_RUNS_DIR is set but empty; refusing"
-    RUNS_DIR="$HDCS_RUNS_DIR"
-else
-    RUNS_DIR="${CONF[RUNS_DIR]}"
+APPLY=0
+if [ "${1:-}" = "--apply" ]; then
+  APPLY=1
+elif [ $# -gt 0 ]; then
+  echo "usage: rotate-hdcs-runs.sh [--apply]" >&2
+  exit 2
 fi
-if [ -n "${HDCS_ARCHIVE_DIR+x}" ]; then
-    [ -n "$HDCS_ARCHIVE_DIR" ] || die "A4: HDCS_ARCHIVE_DIR is set but empty; refusing"
-    ARCHIVE_DIR="$HDCS_ARCHIVE_DIR"
-else
-    ARCHIVE_DIR="${CONF[ARCHIVE_DIR]}"
-fi
-AGE_DAYS="${CONF[AGE_DAYS]}"
-PATTERN="${CONF[PATTERN]}"
-KEEP="${CONF[KEEP]}"
 
-# ---- A4 path law: refusals precede ANY write --------------------------------
-for p in "$RUNS_DIR" "$ARCHIVE_DIR"; do
-    case "$p" in
-        ''|'.'|'/') die "A4: degenerate path '$p' refused" ;;
-    esac
-done
-case "$AGE_DAYS" in
-    ''|*[!0-9]*) die "A4: AGE_DAYS must be a nonnegative integer" ;;
-esac
-case "$KEEP" in
-    ''|*[!0-9]*) die "A4: KEEP must be a nonnegative integer" ;;
-esac
+die() { echo "REFUSE (A4): $1" >&2; exit 1; }
 
-RUNS_R="$(realpath -m -- "$RUNS_DIR")"  || die "A4: cannot resolve RUNS_DIR '$RUNS_DIR'"
-ARCH_R="$(realpath -m -- "$ARCHIVE_DIR")" || die "A4: cannot resolve ARCHIVE_DIR '$ARCHIVE_DIR'"
+# --- conf defaults (operator-fixed, exactly 5 keys, no comments) ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
+CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    RUNS_DIR=*) CONF_RUNS="${line#RUNS_DIR=}";;
+    ARCHIVE_DIR=*) CONF_ARCH="${line#ARCHIVE_DIR=}";;
+    AGE_DAYS=*) CONF_AGE="${line#AGE_DAYS=}";;
+    PATTERN=*) CONF_PAT="${line#PATTERN=}";;
+    KEEP=*) CONF_KEEP="${line#KEEP=}";;
+  esac
+done < "$CONF"
 
-if [ "$RUNS_R" = "$ARCH_R" ]; then
-    die "A4: RUNS_DIR and ARCHIVE_DIR resolve to the same path ($RUNS_R); refusing"
-fi
-case "$ARCH_R/" in "$RUNS_R"/*) die "A4: ARCHIVE_DIR ($ARCH_R) is inside RUNS_DIR ($RUNS_R); refusing" ;; esac
-case "$RUNS_R/" in "$ARCH_R"/*) die "A4: RUNS_DIR ($RUNS_R) is inside ARCHIVE_DIR ($ARCH_R); refusing" ;; esac
+# --- resolve effective dirs: env override allowed; unset -> default; set-but-empty -> refuse (A4) ---
+RUNS_SRC="${HDCS_RUNS_DIR-$CONF_RUNS}"
+ARCH_SRC="${HDCS_ARCHIVE_DIR-$CONF_ARCH}"
+[ -z "$RUNS_SRC" ] && die "HDCS_RUNS_DIR is set-but-empty"
+[ -z "$ARCH_SRC" ] && die "HDCS_ARCHIVE_DIR is set-but-empty"
 
-# ---- stale plan via explicit epoch math (A5) --------------------------------
-# age = now_epoch - mtime_epoch; stale iff age >= AGE_DAYS * 86400.
-# find is used ONLY to enumerate candidate paths (no time predicate at all);
-# the staleness decision is applied per file from stat epochs, so a file whose
-# exact age equals AGE_DAYS is included (boundary per A5).
-THRESHOLD=$((AGE_DAYS * 86400))
-NOW_EPOCH="$(date +%s)" || die "cannot read clock"
-declare -a STALE=()
+# --- path law (A4): degenerate '', '.', '/' — checked on the original string AND after canonicalization ---
+case "$RUNS_SRC" in ''|.|/) die "degenerate RUNS_DIR '$RUNS_SRC'";; esac
+case "$ARCH_SRC" in ''|.|/) die "degenerate ARCHIVE_DIR '$ARCH_SRC'";; esac
+
+RUNS="$(realpath -m -- "$RUNS_SRC")" || die "RUNS_DIR not resolvable"
+ARCH="$(realpath -m -- "$ARCH_SRC")" || die "ARCHIVE_DIR not resolvable"
+[ "$RUNS" = "/" ] && die "RUNS_DIR canonicalizes to '/'"
+[ "$ARCH" = "/" ] && die "ARCHIVE_DIR canonicalizes to '/'"
+[ "$RUNS" = "$ARCH" ] && die "RUNS_DIR and ARCHIVE_DIR are identical"
+
+# containment (either direction), component-safe via realpath'd canonical paths
+case "$RUNS" in "$ARCH"|"$ARCH"/*) die "RUNS_DIR '$RUNS' is inside ARCHIVE_DIR '$ARCH'";; esac
+case "$ARCH" in "$RUNS"|"$RUNS"/*) die "ARCHIVE_DIR '$ARCH' is inside RUNS_DIR '$RUNS'";; esac
+
+AGE_DAYS="${HDCS_AGE_DAYS-$CONF_AGE}"
+PATTERN="${HDCS_PATTERN-$CONF_PAT}"
+KEEP="${HDCS_KEEP-$CONF_KEEP}"
+case "$AGE_DAYS" in ''|*[!0-9]*) die "AGE_DAYS not a non-negative integer";; esac
+case "$KEEP" in ''|*[!0-9]*) die "KEEP not a non-negative integer";; esac
+
+NOW="$(date +%s)"
+MOVES=()
 while IFS= read -r -d '' f; do
-    [ -n "$f" ] || continue
-    mtime="$(stat -c %Y -- "$f")" || die "cannot stat $f"
-    if [ "$((NOW_EPOCH - mtime))" -ge "$THRESHOLD" ]; then
-        STALE+=("$f")
-    fi
-done < <(find "$RUNS_R" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
+  mt="$(stat -c %Y -- "$f")"
+  age=$(( (NOW - mt) / 86400 ))
+  if [ "$age" -ge "$AGE_DAYS" ]; then
+    MOVES+=("$f")
+  fi
+done < <(find "$RUNS" -type f -name "$PATTERN" -print0 2>/dev/null | sort -z)
 
-# ---- A5_mirror helper: mirrored destination for a source path ---------------
-rel_of() {
-    local src="$1"
-    if [ "$src" = "$RUNS_R" ]; then
-        printf '%s' "."
-    else
-        printf '%s' "${src#"$RUNS_R"/}"
-    fi
+# portable prune-list builder: emits "<mtime> <seq> <path>" lines sorted newest-first,
+# trimmed to KEEP entries; paths printed from field 3 on (spaces tolerated).
+# KEEP=0 -> every archived file is a prune candidate (A5: the bound always applies).
+prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited)
+  local p mt i=0 keep="$2"
+  local -a payload=()
+  while IFS= read -r p; do
+    [ -n "$p" ] || continue
+    mt="$(stat -c %Y -- "$p" 2>/dev/null)" || { echo "WARN: cannot stat archive file: $p" >&2; i=$((i+1)); continue; }
+    payload+=("$mt $i $p")
+    i=$((i+1))
+  done < <(find "$1" -type f | sort)
+  local n="${#payload[@]}"
+  [ "$n" -gt "$keep" ] || return 0
+  if [ "$keep" -eq 0 ]; then
+    printf '%s\n' "${payload[@]}" | sort -k1,1nr -k2,2n | cut -d' ' -f3-
+  else
+    printf '%s\n' "${payload[@]}" | sort -k1,1nr -k2,2n | tail -n +"$((keep+1))" | cut -d' ' -f3-
+  fi
 }
 
-plan_dest() {
-    local src="$1" rel dir base dest n
-    rel="$(rel_of "$src")"
-    dir="$ARCH_R/$(dirname -- "$rel")"
-    base="$(basename -- "$rel")"
-    dest="$dir/$base"
-    n=1
-    while [ -e "$dest" ]; do
-        dest="$dir/$base.$n"
-        n=$((n + 1))
+if [ "$APPLY" -eq 0 ]; then
+  # ---------------- DRY-RUN: zero writes (A1) ----------------
+  if [ "${#MOVES[@]}" -eq 0 ]; then
+    echo "dry-run: no stale files (stale <=> floor(age_days) >= $AGE_DAYS)"
+  else
+    for f in "${MOVES[@]}"; do
+      rel="${f#"$RUNS"/}"
+      echo "move: $rel -> ARCHIVE_DIR/$rel"
     done
-    printf '%s' "$dest"
-}
-
-# ---- dry-run (default): print plan, create nothing (A1) --------------------
-if [ "${1-}" != "--apply" ]; then
-    if [ "${#STALE[@]}" -eq 0 ]; then
-        echo "dry-run: nothing to rotate"
-        exit 0
-    fi
-    for src in "${STALE[@]}"; do
-        echo "$src -> $(plan_dest "$src")"
+  fi
+  if [ -d "$ARCH" ]; then
+    prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      echo "prune: ${rel#"$ARCH"/} (oldest beyond KEEP=$KEEP)"
     done
-    echo "dry-run: ${#STALE[@]} file(s) would be rotated (no changes made)"
-    exit 0
+  fi
+  exit 0
 fi
 
-# ---- --apply: sole writer (A1) ---------------------------------------------
-mkdir -p -- "$ARCH_R" || die "cannot create ARCHIVE_DIR $ARCH_R"
+# ---------------- APPLY: sole writing mode ----------------
+mkdir -p -- "$ARCH" || { echo "REFUSE (A4): cannot create ARCHIVE_DIR" >&2; exit 1; }
 
-moved=0
-for src in "${STALE[@]}"; do
-    rel="$(rel_of "$src")"
-    dir="$ARCH_R/$(dirname -- "$rel")"
-    base="$(basename -- "$rel")"
-    mkdir -p -- "$dir" || die "cannot create mirrored archive dir $dir"
-    dest="$dir/$base"
-    n=1
-    while [ -e "$dest" ]; do
-        dest="$dir/$base.$n"
-        n=$((n + 1))
-    done
-    # lossless check (A5): snapshot bytes, move, cmp-verify
-    tmp="$(mktemp)" || die "mktemp failed"
-    cp -- "$src" "$tmp" || { rm -f -- "$tmp"; die "snapshot failed for $src"; }
-    if mv -- "$src" "$dest" && cmp -s -- "$tmp" "$dest"; then
-        rm -f -- "$tmp"
-        echo "rotated: $src -> $dest"
-        moved=$((moved + 1))
-    else
-        rm -f -- "$tmp"
-        die "rotation of $src failed (bytes not verified); source left in place"
-    fi
+for f in "${MOVES[@]}"; do
+  rel="${f#"$RUNS"/}"
+  dest="$ARCH/$rel"
+  parent="$(dirname -- "$dest")"
+  mkdir -p -- "$parent" || { echo "WARN: cannot stage $rel, skipped" >&2; continue; }
+  if [ -e "$dest" ]; then
+    i=1
+    while [ -e "$dest.$i" ]; do i=$((i+1)); done
+    dest="$dest.$i"
+  fi
+  if cp -p -- "$f" "$dest" && cmp -s -- "$f" "$dest"; then
+    rm -f -- "$f" && echo "rotated: $rel -> ${dest#"$ARCH"/}"
+  else
+    echo "WARN: lossless check failed for $rel; source kept, archive copy at ${dest#"$ARCH"/}" >&2
+  fi
 done
 
-# ---- KEEP pruning: oldest archived entries beyond KEEP are removed ---------
-while IFS= read -r old; do
-    [ -n "$old" ] || continue
-    rm -f -- "$old"
-    echo "pruned (KEEP=$KEEP): $old"
-done < <(find "$ARCH_R" -type f -printf '%T@ %p\n' 2>/dev/null \
-         | sort -rn | awk -v k="$KEEP" 'NR > k { $1=""; sub(/^ /,""); print }')
-
-if [ "$moved" -eq 0 ]; then
-    echo "apply: zero-action (no files at or beyond AGE_DAYS=$AGE_DAYS)"
+# prune ARCHIVE_DIR to KEEP newest (ARCHIVE_DIR only — RUNS_DIR is never pruned);
+# KEEP=0 prunes everything (A5)
+if [ -d "$ARCH" ]; then
+  prune_select "$ARCH" "$KEEP" | while IFS= read -r rel; do
+    [ -n "$rel" ] || continue
+    rm -f -- "$rel" && echo "pruned: ${rel#"$ARCH"/}"
+  done
 fi
+
 exit 0
 

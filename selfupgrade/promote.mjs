@@ -44,7 +44,7 @@ if (seatRun.status !== 0 || !fs.existsSync(resPath)) {
 }
 let text = '';
 try { text = JSON.parse(fs.readFileSync(resPath, 'utf8')).text || ''; } catch { text = ''; }
-const m = text.match(/```\n([\s\S]*?)\n```/);
+const m = text.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
 const block = m ? m[1] : '';
 if (!block.trim()) { out({ promote: false, reason: 'author returned no fenced block' }); process.exit(1); }
 
@@ -55,7 +55,23 @@ const locks = sh(`node "${path.join(HERE, 'promote-fixture.mjs')}" "${run}" "${b
 let v = null;
 try { v = JSON.parse(locks.stdout.trim().split('\n').pop()); } catch {}
 if (!v || !v.promote) {
-  out({ promote: false, reason: `locks rejected: ${v ? v.reason : 'unparseable'}` });
+  // Fixture path failed — class may not be mechanically testable → law-drafter fallback (§2.4, A29).
+  const lawRes = path.join(ROOT, 'results', 'law_drafter.json');
+  const lawUser = path.join(ROOT, 'results', `law-${task}-user.txt`);
+  const answers = (() => { try { return fs.readFileSync(path.join(run, 'answers.md'), 'utf8').slice(0, 8000); } catch { return '(none — new task register)'; } })();
+  fs.writeFileSync(lawUser, `FINDING (repeated ${reps}x; fixture locks rejected: ${v ? v.reason : 'unparseable'} — likely not mechanically testable):\n${finding}\n\n=== REGISTER (answers.md verbatim) ===\n${answers}\n`);
+  const lawSeat = authorCmd
+    ? sh(authorCmd, { env: { ...process.env, PROMOTE_USERFILE: lawUser, PROMOTE_OUT: lawRes } })
+    : sh(`node "${path.join(ROOT, 'gates', 'seat.mjs')}" law_drafter "${JSON.parse(fs.readFileSync(path.join(ROOT, 'seats.json'), 'utf8')).law_drafter}" "${path.join(ROOT, 'prompts', 'law-drafter-system.txt')}" "${lawUser}"`, { cwd: ROOT });
+  let lawText = '';
+  try { lawText = JSON.parse(fs.readFileSync(lawRes, 'utf8')).text || ''; } catch {}
+  const lm = lawText.match(/```[a-zA-Z]*\n([\s\S]*?)\n```/);
+  if (lawSeat.status === 0 && lm && /A\d+/.test(lm[1]) && /DRAFT/.test(lm[1])) {
+    fs.writeFileSync(path.join(run, 'answers.md.proposed'), lm[1] + '\n');
+    out({ promote: false, law_proposed: true, reason: `fixture locks rejected (${v ? v.reason : 'unparseable'}) → answers.md.proposed landed (law-drafter; A29: operator merges)` });
+    process.exit(0);
+  }
+  out({ promote: false, reason: `locks rejected: ${v ? v.reason : 'unparseable'}; law fallback failed — operator reviews finding manually` });
   process.exit(1);
 }
 

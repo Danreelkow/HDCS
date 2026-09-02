@@ -25,8 +25,10 @@ if (!runDir || !blockFile || !fs.existsSync(path.join(runDir, 'gate.sh')) || !fs
 }
 const gateSrc = fs.readFileSync(path.join(runDir, 'gate.sh'), 'utf8');
 const block = fs.readFileSync(blockFile, 'utf8');
-const lastLine = block.trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).pop() || '';
-if (!/\|\|\s*fail\b|^fail\b|&&\s*fail\b/.test(lastLine)) {
+const lastLine = block.trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('#')).pop() || '';// fail-invocation forms: bare, || fail, && fail, ; fail, then fail, else fail — any real
+// shell separator before the invocation counts (live-found: if/then construct was wrongly
+// rejected). A comment mentioning fail does NOT count (guard is separator-anchored).
+if (!/(^fail\b)|(\|\|\s*fail\b)|(&&\s*fail\b)|(;\s*fail\b)|(\bthen\s+fail\b)|(\belse\s+fail\b)/.test(lastLine)) {
   out({ lock1: false, lock2: false, lock3: false, promote: false, reason: 'block grammar: last non-comment line must carry a fail invocation (gate-not-wall: a fixture must be able to fail)' });
   process.exit(1);
 }
@@ -37,6 +39,16 @@ const SB = fs.mkdtempSync(path.join(os.tmpdir(), 'hdcs-promote-'));
 try {
   const sandbox = path.join(SB, 'run');
   sh(`cp -r "${runDir}" "${sandbox}" && rm -rf "${sandbox}/state.json"`);
+
+  // BASELINE — the UNCOMPOSED snapshot gate must pass its own artifact first. A gate that
+  // fails its own snapshot (widened beyond the artifact, awaiting repair) cannot grade an
+  // author block: live-found on 005, where the A4 fixture red-checks a known artifact defect.
+  const base = sh(`cd "${sandbox}" && bash gate.sh 2>&1 | tail -1`, { cwd: sandbox });
+  if (base.status !== 0 || /GATE FAIL/.test(base.stdout)) {
+    out({ lock1: true, baseline: false, lock2: false, lock3: false, promote: false, reason: `baseline: snapshot gate fails its own artifact: ${base.stdout.trim().slice(0, 120)} — repair the artifact before authoring fixtures against it` });
+    process.exit(1);
+  }
+
   fs.writeFileSync(path.join(sandbox, 'gate.sh'), composed);
   const l1 = sh(`bash -n "${path.join(sandbox, 'gate.sh')}"`).status === 0;
   if (!l1) { out({ lock1: false, lock2: false, lock3: false, promote: false, reason: 'LOCK1 FAIL: composed gate.sh syntax error' }); process.exit(1); }
