@@ -153,7 +153,8 @@ for (const attempt of s3attempts) {
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
   const sections = extractSections(build);
   for (const [, name, body] of sections) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
-  log(`artifacts: ${sections.map(s => s[1]).join(', ') || 'NONE'}`);
+  log(`extract[${attempt}]: ${sections.length} section(s) -> [${fs.readdirSync('artifact').join(', ') || 'EMPTY'}]`);
+  log(`artifacts: ${sections.map(s => s[0]).join(', ') || 'NONE'}`);
   if (!fs.existsSync('gate.sh')) { outcomes.s3 = 'NO GATE (artifacts extracted)'; break; }
   let g = '', ok = true;
   try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
@@ -200,6 +201,7 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
     for (const [, name, body] of extractSections(fb)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+    log(`extract[feedback]: wrote [${fs.readdirSync('artifact').join(', ') || 'EMPTY'}]`);
     if (fs.existsSync('gate.sh')) {
       let g = '', ok = true;
       try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
@@ -249,6 +251,7 @@ if (outcomes.route === 'NEEDS-CLARIFICATION') {
   }
 }
 
+log('final artifact dir: ' + (fs.existsSync('artifact') ? (fs.readdirSync('artifact').join(', ') || 'EMPTY') : 'MISSING'));
 report();
 if (outcomes.route === 'NEEDS-CLARIFICATION') process.exit(2);
 process.exit(Object.values(outcomes).some(v => v.startsWith('FAIL')) ? 1 : 0);
