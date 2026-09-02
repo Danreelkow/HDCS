@@ -11,6 +11,7 @@ No thinking cap in prod. Think as long as the build demands — reason in the re
 1. env parameterization: HERMES_CONTEXT_SRC/DST required, namespaced; the contract applies to ALL instances (every reference renames together)
 2. dry-run: zero writes; DST must not even exist afterward
 3. real run: rsync-based; exact recursive mirror; idempotent second run
+3b. fallback copy (rsync unavailable) must still CONVERGE: same type is NOT equal — compare symlink TARGETS (differing readlink target = replace), file bytes, dir structure; the dry-run branch reports the same work. The gate probes this by hiding rsync from PATH.
 4. timer: OnCalendar valid repeating cadence ('*-*-* 00/6:00:00' preferred; '00/6:00:00' shorthand accepted)
 5. type changes: SRC file x vs DST dir x AND the inverse — remove then copy, converge; stale extras removed
 6. DST-internal symlink swap: replaced by the real file; the outside link target UNTOUCHED

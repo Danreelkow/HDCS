@@ -91,6 +91,12 @@ rm -rf "$SRC" "$DST"; mkdir -p "$SRC/inner"; printf 'q\n' > "$SRC/inner/f"; mkdi
 TOCOUT=$(TMPDIR="$DST" HERMES_CONTEXT_SRC="$SRC" HERMES_CONTEXT_DST="$DST" bash sync-hermes-context.sh 2>&1)
 [ $? -eq 0 ] && fail "run must refuse when TMPDIR is inside DST (A20/A11: stage parent is validated before mktemp)"
 [ -e "$DST"/tmp.* ] && fail "writes occurred into DST before refusal (A20: validate the stage PARENT before mktemp -d)"
+# A5/A7 fallback fixture (run 050 S4 finding): without rsync, symlink TARGETS must still converge
+FB=\/tmp/tmp.Dej4OknZzr; for d in /usr/bin /bin; do [ -d "\$d" ] && for f in "\$d"/*; do b=\"\$f"; [ "\$b" = rsync ] && continue; [ -e "\$FB/\$b" ] || ln -s "\$f" "\$FB/\$b"; done; done
+rm -rf "\$SRC" "\$DST"; mkdir -p "\$SRC"; printf 'r\n' > "\$SRC/f"; ln -s /etc/hostname "\$SRC/link"; mkdir -p "\$DST"; ln -s /different/target "\$DST/link"
+FBO=\env: ‘bash’: No such file or directory
+[ $? -eq 0 ] && [ "\" = /etc/hostname ] || fail "fallback copy (no rsync) did not converge the symlink target (A5/A7: same type is not equal — compare readlink targets)"
+rm -rf "\$FB"
 # docs consistency (run 015 S4 finding): service ExecStart location must be what README documents
 ESP=$(sed -n 's/^ExecStart=//p' hermes-context.service | head -1); ESP=${ESP#%h}
 [ -n "$ESP" ] || fail "no ExecStart in service unit"

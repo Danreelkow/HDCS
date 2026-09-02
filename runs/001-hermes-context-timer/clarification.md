@@ -1,13 +1,9 @@
 # Clarification needed — 001-hermes-context-timer
 
-## Gate output (after repair round)
-```
-GATE FAIL: README does not document the service ExecStart location: /.local/bin/sync-hermes-context.sh (docs must match the unit)
+S4 FAIL verdict (after feedback repair):
 
-```
-
-## Open questions recorded by S1
-- Q9: severity bar? -> A: A10 normal-operation FAILs only; exotic -> +open"
+VERDICT: FAIL
+EVIDENCE: In `sync-hermes-context.sh`, `fallback_copy()` (lines 208–227), entries with matching symlink types are treated as already equal by `same_type()`; unlike regular files, their `readlink` targets are never compared or replaced. Thus with rsync unavailable, a source symlink whose target differs from the destination symlink remains stale, violating A5/A7 fallback convergence and causing the later A9 verification (lines 241–252 and 109–114) to fail rather than produce the required mirror. The fallback dry-run branch (lines 133–141) has the same omission and can report no work for differing symlink targets.
 
 ## Packet
 ```yaml
