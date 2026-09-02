@@ -153,7 +153,9 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
 if [ "$MODE" = dry ]; then
   if { [ -e "$DST" ] || [ -L "$DST" ]; } && [ -d "$DST" ]; then
     if command -v rsync >/dev/null 2>&1; then
-      out=$(rsync -an --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
+      # --checksum in the plan too: a same-size/same-mtime byte change must be
+      # counted as work, matching what the real run will actually do
+      out=$(rsync -anc --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
       DEL=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
       SYNC=$(printf '%s\n' "$out" | grep -Ev '^(\.|\*deleting|$)' | grep -c . || true)
     else
@@ -286,7 +288,10 @@ pre_reconcile_types() {
 
 if command -v rsync >/dev/null 2>&1; then
   RSYNC=yes
-  if ! rsync -a --delete "$SRC/" "$STAGE/" ; then
+  # --checksum (with -a): a file whose bytes changed while size and mtime stayed
+  # identical is still copied — rsync's default quick-check would skip it, the
+  # stage would converge, and the final verify would fail instead of repair
+  if ! rsync -ac --delete "$SRC/" "$STAGE/" ; then
     fallback_copy "$SRC" "$STAGE"
     RSYNC=no
   fi
@@ -306,7 +311,12 @@ fi
 # --- touch DST ----------------------------------------------------------------
 pre_reconcile_types
 if [ "$RSYNC" = yes ]; then
-  if ! rsync -a --delete "$STAGE/" "$DST/" ; then
+  # --checksum here as well: the same quick-check skip on an existing DST file
+  # (changed bytes, same size/mtime) would leave DST un-repaired after the
+  # stage was verified, and verify_a9 would then exit nonzero instead of
+  # converging. With --checksum the apply itself repairs, keeping A5's
+  # converged end state as a normal-operation outcome, not a verify failure.
+  if ! rsync -ac --delete "$STAGE/" "$DST/" ; then
     fallback_copy "$STAGE" "$DST"
   fi
 else
@@ -393,7 +403,8 @@ Defaults (used when the variables are unset):
   `~/.cache/hermes-context/sync.log`.
 - `--dry-run`: prints `dry-run: sync=N delete=M` and performs zero writes of
   any kind — no stage dir, no log line, and an absent destination stays absent.
-  The plan includes differing symlink targets and differing file bytes.
+  The plan uses checksum comparison too, so differing file bytes count as work
+  even when size and mtime match.
 - `--verify`: read-only A9-class compare (contents, recursive structure,
   symlinks — never metadata, timestamps, or hardlinks; symlinks are never
   dereferenced). Fails when the destination is absent; exits nonzero on any
@@ -408,7 +419,11 @@ HERMES_CONTEXT_SRC=/tmp/fake-src HERMES_CONTEXT_DST=/tmp/fake-dst \
 
 ## Sync strategy
 
-- Primary: `rsync -a --delete` (staged, then applied to the destination).
+- Primary: `rsync -ac --delete` — `--checksum` ensures a file whose bytes
+  changed while keeping the same size and mtime is still propagated instead of
+  skipped by the quick check. Applied staged, then converged at the destination
+  (also with `--checksum`, so an existing but stale destination file is
+  repaired by the apply itself rather than left for verification to reject).
 - Fallback (rsync unavailable): `cp -a` plus a recursive reconcile that deletes
   stale subtrees and copies missing/differing entries. Type comparisons are
   lstat-based: a destination symlink-to-directory sitting where the source has

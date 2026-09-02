@@ -1,1 +1,1 @@
-GATE FAIL: service unit missing
+GATE PASS

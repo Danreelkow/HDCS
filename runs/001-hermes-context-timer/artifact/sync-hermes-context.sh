@@ -65,6 +65,25 @@ if [ -L "$DST" ]; then
   exit 1
 fi
 
+# --- A22/A12: symlinked ANCESTOR of DST -> refuse, never follow ---------------
+# Walk every real path component of DST (component tests, never string prefixes).
+# An ancestor that is a symlink REFUSES: if it resolves into SRC the path law
+# is A12 (identity containment via realpath), otherwise A22 — a symlinked DST
+# path is never followed or replaced, so no writes can land through the link.
+comp="$R_DST"
+while [ "$comp" != "/" ]; do
+  if [ -L "$comp" ]; then
+    RP=$(realpath -- "$comp")
+    if [ "$RP" = "$R_SRC" ] || is_inside "$RP" "$R_SRC"; then
+      echo "A12: DST component $comp is a symlink resolving into SRC ($RP)" >&2
+      exit 1
+    fi
+    echo "A22: DST component $comp is a symlink (-> $RP); refusing to follow or replace it" >&2
+    exit 1
+  fi
+  comp=$(dirname -- "$comp")
+done
+
 # --- A14/A15: DST vs owned concrete paths (log parent, entrypoint dir) --------
 for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   R_OWNED=$(realpath -m -- "$OWNED")
@@ -152,8 +171,9 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
 if [ "$MODE" = dry ]; then
   if { [ -e "$DST" ] || [ -L "$DST" ]; } && [ -d "$DST" ]; then
     if command -v rsync >/dev/null 2>&1; then
-      # --checksum so the plan reflects byte-level changes, not just size/mtime
-      out=$(rsync -ancn --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
+      # --checksum in the plan too: a same-size/same-mtime byte change must be
+      # counted as work, matching what the real run will actually do
+      out=$(rsync -anc --delete --itemize-changes "$SRC/" "$DST/" 2>/dev/null || true)
       DEL=$(printf '%s\n' "$out" | grep -c '^\*deleting' || true)
       SYNC=$(printf '%s\n' "$out" | grep -Ev '^(\.|\*deleting|$)' | grep -c . || true)
     else
@@ -286,9 +306,10 @@ pre_reconcile_types() {
 
 if command -v rsync >/dev/null 2>&1; then
   RSYNC=yes
-  # --checksum: size/mtime equality is NOT content equality (A5) — a DST file
-  # whose bytes changed while retaining size and mtime must still be re-copied
-  if ! rsync -a --checksum --delete "$SRC/" "$STAGE/" ; then
+  # --checksum (with -a): a file whose bytes changed while size and mtime stayed
+  # identical is still copied — rsync's default quick-check would skip it, the
+  # stage would converge, and the final verify would fail instead of repair
+  if ! rsync -ac --delete "$SRC/" "$STAGE/" ; then
     fallback_copy "$SRC" "$STAGE"
     RSYNC=no
   fi
@@ -308,9 +329,12 @@ fi
 # --- touch DST ----------------------------------------------------------------
 pre_reconcile_types
 if [ "$RSYNC" = yes ]; then
-  # --checksum here too: the same size/mtime-collision hazard applies when
-  # applying the verified stage onto an existing DST
-  if ! rsync -a --checksum --delete "$STAGE/" "$DST/" ; then
+  # --checksum here as well: the same quick-check skip on an existing DST file
+  # (changed bytes, same size/mtime) would leave DST un-repaired after the
+  # stage was verified, and verify_a9 would then exit nonzero instead of
+  # converging. With --checksum the apply itself repairs, keeping A5's
+  # converged end state as a normal-operation outcome, not a verify failure.
+  if ! rsync -ac --delete "$STAGE/" "$DST/" ; then
     fallback_copy "$STAGE" "$DST"
   fi
 else
@@ -329,3 +353,4 @@ printf '%s mode=sync rsync=%s src=%s dst=%s\n' \
 
 cleanup_stage
 exit 0
+
