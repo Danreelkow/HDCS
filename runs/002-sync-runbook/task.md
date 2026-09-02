@@ -5,8 +5,8 @@ sync-hermes-context.sh plus systemd user units. New operators have nothing that
 explains how to live with it. Write that document.
 
 Deliverable (single file): RUNBOOK.md — a runbook for a NEW operator with zero
-prior context. Required sections, in order: What this tool does; Install;
-Configure (change the source); Test before installing (--dry-run); Schedule
+prior context. Required sections, in order: What this tool does; Test before
+installing (--dry-run); Install; Configure (change the source); Schedule
 (systemd user timer); Verify a sync; Roll back a bad sync; Troubleshooting
 (refusals and what their A-number citations mean).
 
@@ -37,6 +37,11 @@ CLI and citation register (closed world):
   this register, describe the refusal condition without a citation.
 - Known-good source means the configured HERMES_CONTEXT_SRC: after removing a
   bad HERMES_CONTEXT_DST, re-syncing from it is the documented restore.
+
+Example rule: illustrative example paths for the OPERATOR's own files (e.g. a
+source directory under the home directory) are allowed when clearly marked as
+examples. Claims about the TOOL are still closed-world: no env var, flag,
+default, or behavior beyond this facts block may be asserted as the tool's.
 
 MUST_KEEP: documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly
 MUST_KEEP: includes a --dry-run test the operator can run before installing
