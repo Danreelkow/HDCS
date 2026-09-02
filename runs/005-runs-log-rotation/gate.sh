@@ -22,6 +22,8 @@ HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh --app
 [ -f "$R/001-old/gate-out.txt" ] && fail "stale file not rotated"
 [ -f "$R/003-boundary/gate-out.txt" ] && fail "boundary file (age == AGE_DAYS) not rotated (A5: >= law)"
 ARC=$(find "$A" -type f -name 'gate-out.txt*' | head -1); [ -n "$ARC" ] || fail "nothing archived"
+[ -f "$A/001-old/gate-out.txt" ] || [ -f "$A/001-old/gate-out.txt.1" ] || fail "archive flattened relative path (A5_mirror: RUNS_DIR/<rel> must archive to ARCHIVE_DIR/<rel>)"
+ls "$A"/gate-out.txt* >/dev/null 2>&1 && fail "archive has flat top-level entries (A5_mirror)"
 cmp -s "$ARC" /tmp/hdcs-rot-orig || fail "archived bytes differ (A5 lossless)"
 [ -f "$R/002-new/gate-out.txt" ] || fail "fresh file rotated (AGE_DAYS violated)"
 M1=$(find "$A" -type f | sort | cksum)
