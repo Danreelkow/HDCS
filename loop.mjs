@@ -31,6 +31,12 @@ const state = (fs.existsSync(stateFile) && !fresh) ? JSON.parse(fs.readFileSync(
 process.on('exit', () => { try { fs.writeFileSync(stateFile, JSON.stringify(state, null, 1)); } catch {} });
 const fileAt = f => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
 const digest = s => createHash('md5').update(s).digest('hex');
+// --- operator patch P4 (2026-09-02): lossless section extraction. Capture runs to the next FULL
+// section header (or end of string), then wrapper fences are stripped. The old fence-terminator
+// lookahead truncated any artifact whose body legitimately contains ``` fences (writing-class
+// artifacts) — caught by run 002: 103-line build extracted as 15 lines.
+const extractSections = s => [...s.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== [\w.\-/]+ ===|$)/g)]
+  .map(([, name, body]) => [name, body.replace(/^\s*```[\w.-]*\r?\n/, '').replace(/\r?\n?```\s*$/, '')]);
 
 function seat(name, model, sysFile, userText, maxTok = 32768, reasonCap = 65536) {
   const sys = path.join(HERE, 'prompts', sysFile);
@@ -122,7 +128,7 @@ let s3cached = false;
 if (s2Cached && state.gate_pass && build && state.s3_hash === digest(build) && fs.existsSync('gate.sh') && state.gate_at >= fileAt('gate.sh') && state.gate_at >= fileAt(path.join(HERE, 'prompts', 's3-system.txt'))) {
   fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
-  for (const [, name, body] of [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+  for (const [, name, body] of extractSections(build)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   let g = '', ok = true;
   try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
   catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
@@ -145,7 +151,7 @@ for (const attempt of s3attempts) {
   fs.writeFileSync('artifact-build.txt', build);
   fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
-  const sections = [...build.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)];
+  const sections = extractSections(build);
   for (const [, name, body] of sections) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
   log(`artifacts: ${sections.map(s => s[1]).join(', ') || 'NONE'}`);
   if (!fs.existsSync('gate.sh')) { outcomes.s3 = 'NO GATE (artifacts extracted)'; break; }
@@ -193,7 +199,7 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     fs.writeFileSync('artifact-build.txt', fb);
     fs.mkdirSync('artifact', { recursive: true });
   for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
-    for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+    for (const [, name, body] of extractSections(fb)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
     if (fs.existsSync('gate.sh')) {
       let g = '', ok = true;
       try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
