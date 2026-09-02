@@ -1,0 +1,9 @@
+{
+  "dry-run-default": ["dry-run", "dry run"],
+  "zero-writes-dry-run": ["no writes", "without writing", "zero-write"],
+  "no-logrotate": ["no logrotate", "without logrotate"],
+  "no-root": ["no root", "user-level", "unprivileged"],
+  "archive-outside-runs": ["outside the runs directory", "outside RUNS_DIR"],
+  "idempotent": ["idempotent", "second apply", "safe to run repeatedly"],
+  "env-override": ["HDCS_RUNS_DIR", "environment override"]
+}
