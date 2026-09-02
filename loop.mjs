@@ -95,6 +95,13 @@ const s1out = fs.readFileSync('s1-out.txt', 'utf8');
 const ctxM = s1out.match(/=== context\.hcdl ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/);
 if (ctxM) { fs.writeFileSync('context.hcdl', ctxM[1].trim() + '\n'); log('context.hcdl: ' + ctxM[1].trim().split('\n').length + ' lines'); }
 const shared = fs.existsSync('context.hcdl') ? '=== SHARED CONTEXT (hcdl register of record) ===\n' + fs.readFileSync('context.hcdl', 'utf8') + '\n' : '';
+// --- operator patch P1 (2026-09-02): source/ verbatim channel — lossless raw sources to S2/S3/S4 ---
+const sourcesBlock = (() => {
+  const srcDir = path.join(taskDir, 'source');
+  if (!fs.existsSync(srcDir)) return '';
+  const files = fs.readdirSync(srcDir).filter(f => !f.startsWith('.')).sort();
+  return files.length ? `\n\n=== RAW SOURCES (verbatim, operator-provided — do not truncate or paraphrase) ===\n${files.map(f => `=== source/${f} (verbatim) ===\n${fs.readFileSync(path.join(srcDir, f), 'utf8')}`).join('\n\n')}` : '';
+})();
 
 // --- S2 (checkpointed: cached while packet/prompts unchanged) ---
 const s2valid = s1replayed && state.s2_at && fileAt('brief.md') <= state.s2_at && fileAt(path.join(HERE, 'prompts', 's2-system.txt')) <= state.s2_at && fs.existsSync('brief.md');
@@ -103,7 +110,7 @@ let brief;
 if (s2Cached) { brief = fs.readFileSync('brief.md', 'utf8'); outcomes.s2 = 'BRIEF cached'; log('s2: CACHED (packet unchanged — zero spend)'); }
 else {
 checkBudget('s2');
-brief = seat('s2', seats.s2, 's2-system.txt', `${shared}=== hdcs/1 PACKET ===\n${packet}`, 32768);
+brief = seat('s2', seats.s2, 's2-system.txt', `${shared}=== hdcs/1 PACKET ===\n${packet}${sourcesBlock}`, 32768);
 fs.writeFileSync('brief.md', brief);
 state.s2_at = Date.now();
 outcomes.s2 = 'BRIEF ' + brief.length + ' chars';
@@ -130,8 +137,8 @@ const gateFails = [];
 const s4evidence = (!gateFails.length && fs.existsSync('s4-verdict.txt')) ? `\n\nS4 JUDGE VERDICT from the previous lap (fix its findings — the gate baseline is green, KEEP it green):\n${fs.readFileSync('s4-verdict.txt', 'utf8')}` : '';
 for (const attempt of s3attempts) {
   const input = attempt === 's3-repair'
-    ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}`
-    : `${shared}GATE OUTPUTS (ensemble attempts):\n${(gateFails.length ? gateFails.join('\n---\n') : 'GATE PASS (baseline is green)')}${s4evidence}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed; the judge names specific lines — REWRITE those lines completely, then re-read your output against the verdict):\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one). BEFORE answering, validate yourself: every section complete and balanced (the script must pass bash -n), no truncation, no placeholders — a malformed section is worse than no answer.`;
+    ? `${shared}ACCEPTANCE CONTRACT (gate.sh — build to this exactly: every env var name, file name, behavior):\n${fs.existsSync('gate.sh') ? fs.readFileSync('gate.sh', 'utf8') : '(no mechanical gate)'}\n\nBUILD BRIEF:\n${brief}${sourcesBlock}`
+    : `${shared}GATE OUTPUTS (ensemble attempts):\n${(gateFails.length ? gateFails.join('\n---\n') : 'GATE PASS (baseline is green)')}${s4evidence}\n\nTHE ORIGINAL BUILD BRIEF (honor it):\n${brief}${sourcesBlock}\n\nYOUR PREVIOUS ARTIFACTS (keep everything that already passed; the judge names specific lines — REWRITE those lines completely, then re-read your output against the verdict):\n${build}\n\nReturn corrected sections (same format: === <filename> ===), fixing every gate failure — a stated contract applies to ALL instances (if SRC is renamed, DST and every unit/README reference rename together, never just the cited one). BEFORE answering, validate yourself: every section complete and balanced (the script must pass bash -n), no truncation, no placeholders — a malformed section is worse than no answer.`;
   build = seat(attempt, seats.s3, 's3-system.txt', input, 32768);
   if (!build.trim()) { outcomes.s3 = 'FAIL'; state.gate_pass = false; log(`${attempt}: empty response — previous artifacts left untouched on disk`); break; }
   fs.writeFileSync('artifact-build.txt', build);
@@ -171,7 +178,7 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     checkBudget(s4round ? 's4-reverify' : 's4');
     const artifacts = fs.existsSync('artifact') ? fs.readdirSync('artifact').join(', ') : '';
     const gateOut = fs.existsSync('gate-out.txt') ? fs.readFileSync('gate-out.txt', 'utf8') : '(no mechanical gate ran)';
-    s4verdict = seat(s4round ? 's4-reverify' : 's4', seats.s4, 's4-system.txt', `${shared}hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}`, 32768);
+    s4verdict = seat(s4round ? 's4-reverify' : 's4', seats.s4, 's4-system.txt', `${shared}hdcs/1 PACKET:\n${packet}\n\nMECHANICAL GATE OUTPUT:\n${gateOut}\n\nARTIFACT FILES: ${artifacts}\n\nARTIFACT CONTENTS:\n${fs.existsSync('artifact-build.txt') ? fs.readFileSync('artifact-build.txt', 'utf8') : ''}${sourcesBlock}`, 32768);
     fs.writeFileSync('s4-verdict.txt', s4verdict);
     outcomes.s4 = /VERDICT:\s*PASS/i.test(s4verdict) ? 'PASS' : (/VERDICT:\s*FAIL/i.test(s4verdict) ? 'FAIL' : 'UNPARSED');
     log(`S4: ${outcomes.s4}`);
@@ -184,21 +191,23 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
     fs.writeFileSync('artifact-build.txt', fb);
     for (const f of fs.readdirSync('artifact')) fs.rmSync(path.join('artifact', f), { recursive: true, force: true });
     for (const [, name, body] of [...fb.matchAll(/=== ([\w.\-/]+) ===\r?\n([\s\S]*?)(?=\n=== |\n```|$)/g)]) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
-    let g = '', ok = true;
-    try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
-    catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
-    fs.writeFileSync('gate-out.txt', g);
-    log('gate: ' + g.trim().split('\n').pop());
-    if (!(ok && /GATE PASS/.test(g))) {
-      outcomes.s3 = 'FAIL'; state.gate_pass = false;
-      log('feedback repair broke the mechanical gate');
-      if (fs.existsSync('artifact-build.gatepass.txt')) {
-        fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
-        state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
-        log('restored gate-passing snapshot — next lap repairs from the clean baseline with S4 evidence');
+    if (fs.existsSync('gate.sh')) {
+      let g = '', ok = true;
+      try { g = execFileSync('bash', ['gate.sh'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }); }
+      catch (e) { ok = false; g = [e.stdout, e.stderr].filter(Boolean).join(''); }
+      fs.writeFileSync('gate-out.txt', g);
+      log('gate: ' + g.trim().split('\n').pop());
+      if (!(ok && /GATE PASS/.test(g))) {
+        outcomes.s3 = 'FAIL'; state.gate_pass = false;
+        log('feedback repair broke the mechanical gate');
+        if (fs.existsSync('artifact-build.gatepass.txt')) {
+          fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
+          state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
+          log('restored gate-passing snapshot — next lap repairs from the clean baseline with S4 evidence');
+        }
+        break;
       }
-      break;
-    }
+    } else log('no gate: feedback repair accepted, S4 re-judges');
   }
   if (outcomes.s4 === 'PASS' && !s4valid) { state.s4_pass = true; state.s4_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8')); }
   else if (outcomes.s4 !== 'PASS') state.s4_pass = false;
