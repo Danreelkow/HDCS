@@ -1,0 +1,10 @@
+[Unit]
+Description=Hermes context one-way sync (host to workspace)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/sync-hermes-context.sh
+
+[Install]
+WantedBy=default.target
+

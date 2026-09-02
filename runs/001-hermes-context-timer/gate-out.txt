@@ -1,1 +1,1 @@
-GATE FAIL: service unit missing
+GATE FAIL: dry-run exited nonzero: refusing: A14/A15: stage parent (/tmp) is inside DST (/tmp/hdcs-gate-dst)
