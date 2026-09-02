@@ -1,0 +1,53 @@
+### Repairing Backup Doctor Subtree Clean Check
+
+The goal is to fix the backup-doctor.sh script to ensure that the subtree-clean check accurately reflects the disk state of the audited subtree. This involves using specific Git commands to query the enclosing repository and determine the status of the subtree.
+
+**Objective:**
+Adjust the backup-doctor.sh script to ensure that the subtree-clean check reflects the true state of the audited subtree, using Git commands to scope the query to the enclosing repository.
+
+**Requirements:**
+
+- **Backup Doctor Identity:** The script should act as a backup protocol or health checker.
+- **PASS/FAIL Report Lines:** The script must report PASS or FAIL for each check.
+- **Exit Verdict:** The script should return an exit code of 0 or 1.
+- **Read-Only Checks:** The script should perform read-only operations and avoid network access.
+- **Alternate Root Argument:** The script should use the starting directory or fake root as an argument.
+
+**Key Points:**
+
+- **Fixture A:** If the audited subtree is fully committed but the parent repository is dirty outside the subtree, the subtree-clean check should PASS, and the overall exit code should be 0.
+- **Fixture B:** If there is genuine uncommitted change inside the audited subtree, the check should FAIL, and the exit code should be 1.
+- **Defect:** The issue is that executing `git status` in a non-repository directory walks up to the enclosing repository and misattributes unrelated dirt.
+
+**Resolved Questions:**
+
+1. **Should a clean committed subtree inside a dirty enclosing repo PASS or be refused?** 
+   - Answer: PASS — the scope of the query is limited to the subtree, and the verdict depends on the subtree's disk truth. It should only FAIL if the subtree is not within any repository.
+   
+2. **May the repair alter other checks or CLI contract?**
+   - Answer: No — all passing checks, the positional root argument, and read-only discipline remain unchanged.
+
+3. **Exit code semantics?**
+   - Answer: The script should return exit code 0 if all checks PASS and exit code 1 if any check FAILS. The exit code should not be a failure count.
+
+**Workflow:**
+
+- **Phases:** Plan, scoped-build, verify, deliver.
+- **Builders:** Dynamic.
+- **Verifier:** Decorrelated.
+- **Gate:** Ready or Not Ready.
+- **Fix Cycles:** Maximum of 2.
+
+**Constraints:**
+
+- For each subtree check, use `git -C <enclosing_repo> status --porcelain -- <subtree>` to avoid unscoped parent-walk status.
+- If there is no enclosing repository, fail with the message "A1: git query unscoped — parent-repo state is not subtree state."
+- The exit code must be either 0 or 1, not a failure count.
+- The CLI should remain byte-compatible, perform read-only operations, and use bounded subprocesses.
+
+**Budgets:**
+
+- Estimated tokens: 60
+- Lines: 60
+- Fix cycles: 2
+- Questions: 2

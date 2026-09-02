@@ -1,0 +1,36 @@
+{
+  "seat": "s5-fallback",
+  "model": "z-ai/glm-5.3-flash",
+  "http": 200,
+  "ms": 12555,
+  "usage": {
+    "prompt_tokens": 959,
+    "completion_tokens": 540,
+    "total_tokens": 1499,
+    "cost": 0.000206925,
+    "is_byok": false,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost_details": {
+      "upstream_inference_cost": 0.000206925,
+      "upstream_inference_prompt_cost": 0.000071925,
+      "upstream_inference_completions_cost": 0.000135
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0,
+      "audio_tokens": 0
+    }
+  },
+  "finish": "stop",
+  "error": null,
+  "system": "You are the S5 seat (egress). The loop ran in a dense technical register; the human reads only plain English. Reverse-translate: hcdl -> plain idiomatic English.\n1. LOSSLESS — every requirement, constraint, path, and resolved answer must survive in plain words.\n2. ZERO notation — no math symbols, no arrows, no :=, no state markers. Plain sentences only.\n3. Plain prose, under 40 lines, simple headings or short paragraphs.\n4. No preamble, no meta-commentary — just the translation.\n\n## REVERSE-GATE CONTRACT (hard requirement)\nYour debrief is mechanically checked for LOSSLESSNESS: every requirement name in the input (e.g. 'no-writes-in-dry-run', 'mirror', 'recursive') must appear VERBATIM — never paraphrase a named requirement. Keep the load-bearing claims in hcdl notation (∀/∃/->/= where natural, at least a few register tokens); plain prose wraps the register, it does not replace it.\n",
+  "user": "LOSSLESS TERMS — your debrief is mechanically probed; EACH requirement below must appear using one of its acceptable forms, verbatim:\n- backup-doctor identity — acceptable forms: backup-doctor / backup doctor / health checker / backup protocol\n- PASS FAIL report lines — acceptable forms: PASS / FAIL / one line per check\n- exit verdict 0 or 1 — acceptable forms: exit 0 / exit 1 / exit code\n- read-only checks — acceptable forms: read-only / readonly / never fix / no network\n- alternate root argument — acceptable forms: root / starting directory / fake root / argument\n\n=== hdcs/1 PACKET (reverse-translate this) ===\nreg: {domain: cs-programming/shell-bash, canon: \"exact identifiers — git -C, status --porcelain, rev-parse --show-toplevel, exit codes; no filler\"}\nintent: \"repair backup-doctor.sh subtree-clean check so verdict reflects audited subtree disk truth -> scope git query to enclosing repo via git -C <parent> status --porcelain -- <subtree>; clean committed subtree PASSes despite dirty parent (FIXTURE A exit 0), genuine in-subtree dirt FAILs (FIXTURE B exit 1); all other checks and CLI contract byte-preserved\"\nmust_keep:\n  - \"FIXTURE A (trap): audited subtree fully committed, but its PARENT repo dirty OUTSIDE the subtree -> the subtree-clean check must PASS; overall exit 0.\"\n  - \"FIXTURE B: genuine uncommitted change INSIDE the audited subtree -> check FAILs; exit 1.\"\n  - \"The defect is structural: git status executed in a non-repo dir walks UP to the enclosing repository and misattributes unrelated dirt\"\nresolved:\n  - \"Q1: should a clean committed subtree inside a dirty enclosing repo PASS or be refused? -> A: PASS — scope query to subtree, verdict := subtree disk truth; FAIL only when subtree is inside NO repository at all.\"\n  - \"Q2: may repair alter other checks or CLI contract? -> A: no — all passing checks, positional root arg, BACKUP_DOCTOR_TMP_ROOT, DSH_HOME, read-only discipline preserved.\"\n  - \"Q3: exit code semantics? -> A: exit 0 iff all checks PASS, exit 1 iff any FAIL; verdict never a failure count.\"\nworkflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}\nhandoff: {state: \"S_0 + Delta -> S_1\", report: [+done, -resolved, +open, +validation]}\nconstraints:\n  - 'A1: ∀ subtree check -> git -C <enclosing_repo> status --porcelain -- <subtree>; ¬unscoped parent-walk status'\n  - 'A1-refusal: no enclosing repo -> fail with message \"A1: git query unscoped — parent-repo state is not subtree state\"'\n  - 'A3-refusal: exit ∉ {0,1} -> fail; exit code must be 0 or 1, not a failure count'\n  - 'A2: no_resurrect(a2-contract) — CLI byte-compatible, read-only, bounded subprocesses'\npaths:\n  - \"backup-doctor.sh (repaired, at artifact root; source verbatim in source/)\"\nbudgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}",
+  "text": "# Backup-doctor repair: plain-English debrief\n\n**What was wrong.** The backup doctor script's subtree-clean check was structurally broken. When it ran `git status` from a directory that isn't the repository root, git quietly walks up the directory tree and reports on the whole enclosing repository instead of just the folder being checked. So unrelated dirt elsewhere in the repo made a perfectly committed subtree look dirty.\n\n**The fix.** Scope every subtree check to the enclosing repo with the exact command `git -C <enclosing_repo> status --porcelain -- <subtree>`. The verdict must reflect only the audited subtree's disk truth: no unscoped parent-walk status anywhere in the check. The verdict is never a count of how many things are dirty — it is one clean judgment about the subtree.\n\n**The two fixtures.**\n- FIXTURE A (the trap): the audited subtree is fully committed, but its parent repository has unrelated changes outside the subtree. The check must PASS, and the overall run must exit 0.\n- FIXTURE B: there is a genuine uncommitted change inside the audited subtree. The check FAILs, and the run must exit 1.\n\n**When to refuse.** If the subtree sits inside no repository at all, the check cannot judge it — fail with the message \"A1: git query unscoped — parent-repo state is not subtree state\". And if the script would ever exit with anything other than 0 or 1, that's a bug: the exit code must be 0 or 1, never a failure count.\n\n**What must not change.** The repair may not touch anything else. All other checks keep passing exactly as before. The CLI stays byte-compatible: the positional root argument (the alternate starting directory to audit, such as a fake root in tests) works as-is, and the environment variables BACKUP_DOCTOR_TMP_ROOT and DSH_HOME are untouched. The script remains strictly read-only — it never fixes anything, never writes, no network. Subprocesses stay bounded.\n\n**Exit semantics in one line.** exit 0 when all checks PASS, exit 1 when any check FAILs — one PASS or FAIL line per check, and the overall verdict is that, not a tally.\n\n**Deliverable.** The repaired backup-doctor.sh at the artifact root, with the original source preserved verbatim under source/. Workflow ran plan, scoped-build, verify, deliver with a decorrelated verifier, at most two fix cycles, and the handoff report records what was done, what was resolved, what stays open, and validation results.",
+  "reasoning": null,
+  "reasoning_details": null
+}

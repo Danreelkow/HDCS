@@ -1,0 +1,17 @@
+# Backup-doctor repair: plain-English debrief
+
+**What was wrong.** The backup doctor script's subtree-clean check was structurally broken. When it ran `git status` from a directory that isn't the repository root, git quietly walks up the directory tree and reports on the whole enclosing repository instead of just the folder being checked. So unrelated dirt elsewhere in the repo made a perfectly committed subtree look dirty.
+
+**The fix.** Scope every subtree check to the enclosing repo with the exact command `git -C <enclosing_repo> status --porcelain -- <subtree>`. The verdict must reflect only the audited subtree's disk truth: no unscoped parent-walk status anywhere in the check. The verdict is never a count of how many things are dirty — it is one clean judgment about the subtree.
+
+**The two fixtures.**
+- FIXTURE A (the trap): the audited subtree is fully committed, but its parent repository has unrelated changes outside the subtree. The check must PASS, and the overall run must exit 0.
+- FIXTURE B: there is a genuine uncommitted change inside the audited subtree. The check FAILs, and the run must exit 1.
+
+**When to refuse.** If the subtree sits inside no repository at all, the check cannot judge it — fail with the message "A1: git query unscoped — parent-repo state is not subtree state". And if the script would ever exit with anything other than 0 or 1, that's a bug: the exit code must be 0 or 1, never a failure count.
+
+**What must not change.** The repair may not touch anything else. All other checks keep passing exactly as before. The CLI stays byte-compatible: the positional root argument (the alternate starting directory to audit, such as a fake root in tests) works as-is, and the environment variables BACKUP_DOCTOR_TMP_ROOT and DSH_HOME are untouched. The script remains strictly read-only — it never fixes anything, never writes, no network. Subprocesses stay bounded.
+
+**Exit semantics in one line.** exit 0 when all checks PASS, exit 1 when any check FAILs — one PASS or FAIL line per check, and the overall verdict is that, not a tally.
+
+**Deliverable.** The repaired backup-doctor.sh at the artifact root, with the original source preserved verbatim under source/. Workflow ran plan, scoped-build, verify, deliver with a decorrelated verifier, at most two fix cycles, and the handoff report records what was done, what was resolved, what stays open, and validation results.

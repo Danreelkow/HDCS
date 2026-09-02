@@ -1,0 +1,1 @@
+PROMOTED — finding class repeated 2x: "a1" | promote-flow: fixture locks rejected (LOCK3 FAIL: fixture passed the canary — it cannot catch the defect (wall, not gate)) → answers.md.proposed landed (law-drafter; A29: operator merges)

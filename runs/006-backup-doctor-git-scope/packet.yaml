@@ -1,0 +1,20 @@
+reg: {domain: cs-programming/shell-bash, canon: "exact identifiers — git -C, status --porcelain, rev-parse --show-toplevel, exit codes; no filler"}
+intent: "repair backup-doctor.sh subtree-clean check so verdict reflects audited subtree disk truth -> scope git query to enclosing repo via git -C <parent> status --porcelain -- <subtree>; clean committed subtree PASSes despite dirty parent (FIXTURE A exit 0), genuine in-subtree dirt FAILs (FIXTURE B exit 1); all other checks and CLI contract byte-preserved"
+must_keep:
+  - "FIXTURE A (trap): audited subtree fully committed, but its PARENT repo dirty OUTSIDE the subtree -> the subtree-clean check must PASS; overall exit 0."
+  - "FIXTURE B: genuine uncommitted change INSIDE the audited subtree -> check FAILs; exit 1."
+  - "The defect is structural: git status executed in a non-repo dir walks UP to the enclosing repository and misattributes unrelated dirt"
+resolved:
+  - "Q1: should a clean committed subtree inside a dirty enclosing repo PASS or be refused? -> A: PASS — scope query to subtree, verdict := subtree disk truth; FAIL only when subtree is inside NO repository at all."
+  - "Q2: may repair alter other checks or CLI contract? -> A: no — all passing checks, positional root arg, BACKUP_DOCTOR_TMP_ROOT, DSH_HOME, read-only discipline preserved."
+  - "Q3: exit code semantics? -> A: exit 0 iff all checks PASS, exit 1 iff any FAIL; verdict never a failure count."
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: "S_0 + Delta -> S_1", report: [+done, -resolved, +open, +validation]}
+constraints:
+  - 'A1: ∀ subtree check -> git -C <enclosing_repo> status --porcelain -- <subtree>; ¬unscoped parent-walk status'
+  - 'A1-refusal: no enclosing repo -> fail with message "A1: git query unscoped — parent-repo state is not subtree state"'
+  - 'A3-refusal: exit ∉ {0,1} -> fail; exit code must be 0 or 1, not a failure count'
+  - 'A2: no_resurrect(a2-contract) — CLI byte-compatible, read-only, bounded subprocesses'
+paths:
+  - "backup-doctor.sh (repaired, at artifact root; source verbatim in source/)"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}

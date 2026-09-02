@@ -1,0 +1,6 @@
+{
+  "task": "006-backup-doctor-git-scope",
+  "budget": 0.12,
+  "maxLaps": 3,
+  "laps": 1
+}

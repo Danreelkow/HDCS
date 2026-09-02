@@ -1,0 +1,7 @@
+{
+  "backup-doctor identity": ["backup-doctor", "backup doctor", "health checker", "backup protocol"],
+  "PASS FAIL report lines": ["PASS", "FAIL", "one line per check"],
+  "exit verdict 0 or 1": ["exit 0", "exit 1", "exit code"],
+  "read-only checks": ["read-only", "readonly", "never fix", "no network"],
+  "alternate root argument": ["root", "starting directory", "fake root", "argument"]
+}

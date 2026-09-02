@@ -245,7 +245,10 @@ if (outcomes.route === 'NEEDS-CLARIFICATION') {
   log('egress skipped: nothing to debrief until clarification');
 } else {
   checkBudget('s5');
-  const s5probes = JSON.parse(fs.readFileSync(path.join(taskDir, 'probes.json'), 'utf8'));
+  // P3 (2026-09-02, live-found on 006): probes.json is operator-provided; a task without it
+  // must still debrief — the term gate just verifies nothing extra.
+  const probesPath = path.join(taskDir, 'probes.json');
+  const s5probes = fs.existsSync(probesPath) ? JSON.parse(fs.readFileSync(probesPath, 'utf8')) : {};
   const s5terms = Object.entries(s5probes).map(([k, v]) => `- ${k} — acceptable forms: ${v.join(' / ')}`).join('\n');
   let s5model = seats.s5;
   for (const [attempt, m] of [['s5', s5model], ['s5-fallback', seats.s5_fallback]]) {
@@ -263,4 +266,8 @@ if (outcomes.route === 'NEEDS-CLARIFICATION') {
 log('final artifact dir: ' + (fs.existsSync('artifact') ? (fs.readdirSync('artifact').join(', ') || 'EMPTY') : 'MISSING'));
 report();
 if (outcomes.route === 'NEEDS-CLARIFICATION') process.exit(2);
-process.exit(Object.values(outcomes).some(v => v.startsWith('FAIL')) ? 1 : 0);
+// P2 (2026-09-02, live-found on 006): grade the FINAL state, not historical outcome strings —
+// an S4 round-2 pass after a feedback repair left a stale outcomes.s3='FAIL' and exited 1 on a
+// delivered artifact. Delivery = route DELIVERED or gate+s4 both true in state.
+const delivered = outcomes.route === 'DELIVERED' || (state.gate_pass === true && state.s4_pass === true);
+process.exit(delivered ? 0 : 1);

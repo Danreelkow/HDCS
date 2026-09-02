@@ -31,8 +31,13 @@ let gateFailLine = '';
 try {
   gateFailLine = (fs.readFileSync(gateOutPath, 'utf8').split('\n').find(l => /GATE FAIL/.test(l)) || '').trim();
 } catch {}
+// P4 (2026-09-02, live-found on 006): gate-out.txt accumulates across laps — a stale GATE FAIL
+// line must only be trusted when the FINAL state says the gate actually failed (kernel P2 now
+// grades exit by final state: exit 1 + gate_pass true = the gate did NOT fail this lap).
+let gatePassFinal = null;
+try { gatePassFinal = JSON.parse(fs.readFileSync(path.join(RUNS, task, 'state.json'), 'utf8')).gate_pass; } catch {}
 let evLine = '';
-if (code === 1 && gateFailLine) {
+if (code === 1 && gateFailLine && gatePassFinal !== true) {
   evLine = gateFailLine;
 } else {
   const verdictPath = path.join(RUNS, task, 's4-verdict.txt');

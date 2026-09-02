@@ -1,0 +1,7 @@
+A1_scope: ∀ subtree-check -> git -C <enclosing_repo> status --porcelain -- <subtree>; ¬parent-walk status in non-repo cwd
+A1_mirror: clean committed subtree ∧ dirty enclosing repo (dirt outside subtree) -> PASS; overall exit 0 (FIXTURE A)
+A1_neg: dirt INSIDE audited subtree -> FAIL, exit 1 (FIXTURE B)
+A1_refuse: subtree inside NO repo -> FAIL "A1: git query unscoped — parent-repo state is not subtree state"
+A2_contract: no_resurrect(a2-contract); ∀ existing check, positional root arg, BACKUP_DOCTOR_TMP_ROOT, DSH_HOME, read-only discipline byte-preserved
+A3_exit: exit 0 iff ∀ checks PASS; exit 1 iff ∃ check FAIL; ¬failure-count semantics
+open: ∅
