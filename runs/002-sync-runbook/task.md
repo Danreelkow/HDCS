@@ -26,15 +26,26 @@ install -D step). The rollback section must give a concrete data-restore action
 for a bad sync (remove or re-sync HERMES_CONTEXT_DST from a known-good source),
 not merely disabling the timer.
 
-CLI and citation register (closed world):
-- The tool's own flags are exactly --dry-run and --verify. The strings
-  --checksum / --delete / --itemize-changes in the source are rsync's internal
-  invocation flags, not user-facing tool flags; do not teach them.
-- Refusal A-number register (cite only these, only where true): A8 set-but-empty
-  env var; A9 source/destination identity, ancestry, or symlink traversal; A10
-  degenerate paths; A14 log-path conflict; A14c staging overlap; A22 destination
-  is a symlink; A23 production default paths. If a refusal's citation is not in
-  this register, describe the refusal condition without a citation.
+CLI and citation register (closed world, extracted verbatim from the tool):
+- The tool's own flags are exactly --dry-run and --verify (anything else is a
+  usage error, exit 2). The strings --checksum / --delete / --itemize-changes
+  in the source are rsync's internal invocation flags, not tool flags.
+- Behavior: a real sync is a one-way mirror that converges HERMES_CONTEXT_DST
+  to HERMES_CONTEXT_SRC (recursive, removes stale extras in DST, preserves
+  entry types and symlink targets, then re-verifies); --dry-run prints the
+  plan and performs zero writes; --verify compares and exits 0 iff DST is an
+  exact mirror, nonzero with an A9 citation otherwise; success exits 0.
+- Refusal/exit citation register (cite only these, only where true):
+  A23 set-but-empty env var, and unset falls back to the production defaults;
+  A18 degenerate paths (empty, '.', resolving to '/');
+  A12 SRC/DST same path, ancestor/descendant relation, or a symlink path
+  component it refuses to follow or replace;
+  A13 staging verification failed (DST left untouched);
+  A14 staging path conflicts, including TMPDIR set but empty (TMPDIR may set
+  the staging parent);
+  A9 mirror-mismatch findings (content, type, symlink-target, stale extras).
+  If a refusal's citation is not in this register, describe the condition
+  without a citation.
 - Known-good source means the configured HERMES_CONTEXT_SRC: after removing a
   bad HERMES_CONTEXT_DST, re-syncing from it is the documented restore.
 
