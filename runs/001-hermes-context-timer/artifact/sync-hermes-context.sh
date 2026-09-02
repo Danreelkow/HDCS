@@ -109,11 +109,18 @@ while [ "$comp" != "/" ]; do
   comp=$(dirname -- "$comp")
 done
 
-# --- A14/A15: DST vs owned concrete paths (log parent, entrypoint dir) --------
+# --- A14/A15: SRC and DST vs owned concrete paths (log parent, entrypoint) ----
+# BOTH endpoints are guarded: real-run logging (mkdir -p "$LOG_PARENT" and
+# append to "$LOG_FILE") would write into SRC if SRC overlapped an owned
+# path, violating A2 (sync never writes to SRC). The log FILE's PARENT is an
+# owned path (A14), and the entrypoint dir is likewise concrete-owned.
 for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   R_OWNED=$(realpath -m -- "$OWNED")
   if contains_bi "$R_DST" "$R_OWNED"; then
     echo "A14: DST ($R_DST) overlaps owned path ($R_OWNED)" >&2; exit 1
+  fi
+  if contains_bi "$R_SRC" "$R_OWNED"; then
+    echo "A14: SRC ($R_SRC) overlaps owned path ($R_OWNED)" >&2; exit 1
   fi
 done
 
@@ -157,11 +164,12 @@ same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
 # symlink still fails. Empty rsync itemize diff AND full lstat walk must pass.
 # rsync flags: -r recursive, -l compare/copy SYMLINKS AS SYMLINKS (without -l
 # symlinks are skipped and legit mirrors diff), -c checksum, -n dry, --delete
-# so stale destination entries are reported.
+# so stale destination entries are reported. NO -p: A9 excludes metadata, so
+# permission-only differences must NOT be reported as mismatches.
 verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
-  local s=$1 d=$2 rel p out dp
+  local s=$1 d=$2 rel p out dp wr
   if command -v rsync >/dev/null 2>&1; then
-    out=$(rsync -rlpcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
+    out=$(rsync -rlcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
     if [ -n "$out" ]; then
       echo "A9: rsync content diff detected:" >&2
       printf '%s\n' "$out" >&2

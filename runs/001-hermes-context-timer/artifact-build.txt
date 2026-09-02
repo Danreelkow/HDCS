@@ -110,11 +110,18 @@ while [ "$comp" != "/" ]; do
   comp=$(dirname -- "$comp")
 done
 
-# --- A14/A15: DST vs owned concrete paths (log parent, entrypoint dir) --------
+# --- A14/A15: SRC and DST vs owned concrete paths (log parent, entrypoint) ----
+# BOTH endpoints are guarded: real-run logging (mkdir -p "$LOG_PARENT" and
+# append to "$LOG_FILE") would write into SRC if SRC overlapped an owned
+# path, violating A2 (sync never writes to SRC). The log FILE's PARENT is an
+# owned path (A14), and the entrypoint dir is likewise concrete-owned.
 for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   R_OWNED=$(realpath -m -- "$OWNED")
   if contains_bi "$R_DST" "$R_OWNED"; then
     echo "A14: DST ($R_DST) overlaps owned path ($R_OWNED)" >&2; exit 1
+  fi
+  if contains_bi "$R_SRC" "$R_OWNED"; then
+    echo "A14: SRC ($R_SRC) overlaps owned path ($R_OWNED)" >&2; exit 1
   fi
 done
 
@@ -158,11 +165,12 @@ same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
 # symlink still fails. Empty rsync itemize diff AND full lstat walk must pass.
 # rsync flags: -r recursive, -l compare/copy SYMLINKS AS SYMLINKS (without -l
 # symlinks are skipped and legit mirrors diff), -c checksum, -n dry, --delete
-# so stale destination entries are reported.
+# so stale destination entries are reported. NO -p: A9 excludes metadata, so
+# permission-only differences must NOT be reported as mismatches.
 verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
-  local s=$1 d=$2 rel p out dp
+  local s=$1 d=$2 rel p out dp wr
   if command -v rsync >/dev/null 2>&1; then
-    out=$(rsync -rlpcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
+    out=$(rsync -rlcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
     if [ -n "$out" ]; then
       echo "A9: rsync content diff detected:" >&2
       printf '%s\n' "$out" >&2
@@ -411,6 +419,8 @@ WantedBy=default.target
 
 One-way mirror of the hermes context from the host source directory into the
 workspace destination (`A2`: host -> workspace only, never a writeback).
+The source path is /opt/data/workspace/hermes-context/ and the destination is
+/workspace/hermes-context/ by default.
 
 ## Install
 
@@ -421,8 +431,9 @@ workspace destination (`A2`: host -> workspace only, never a writeback).
 3. `systemctl --user daemon-reload`
 4. `systemctl --user enable --now hermes-context.timer`
 
-The timer fires on `OnCalendar=*-*-* 00/6:00:00` (every 6 hours, `Persistent=true`)
-and starts `hermes-context.service`, which runs the sync script as a oneshot
+These are systemd user units, no root required. The timer fires on
+`OnCalendar=*-*-* 00/6:00:00` (every 6 hours, `Persistent=true`) and starts
+`hermes-context.service`, which runs the sync script as a oneshot
 (`ExecStart=%h/.local/bin/sync-hermes-context.sh` — `%h` expands to your home
 directory, i.e. the same `~/.local/bin/sync-hermes-context.sh` path above).
 
@@ -448,14 +459,15 @@ Defaults (used when the variables are unset):
   (A13/A9-class compare), then converge the destination (`A11`: stage ->
   verify -> touch DST). One UTC log line is appended per real run to
   `~/.cache/hermes-context/sync.log`.
-- `--dry-run`: prints `dry-run: sync=N delete=M` and performs zero writes of
-  any kind — no stage dir, no log line, and an absent destination stays absent.
-  The plan uses checksum comparison too, so differing file bytes count as work
-  even when size and mtime match.
+- `--dry-run`: a dry-run mode that performs no writes — it prints
+  `dry-run: sync=N delete=M` and creates nothing: no stage dir, no log line,
+  and an absent destination stays absent. The plan uses checksum comparison
+  too, so differing file bytes count as work even when size and mtime match.
 - `--verify`: read-only A9-class compare (contents, recursive structure,
   symlinks — never metadata, timestamps, or hardlinks; symlinks are never
-  dereferenced). Fails when the destination is absent; exits nonzero on any
-  mismatch.
+  dereferenced; permission-only differences do NOT fail verification because
+  the A9 mirror class excludes metadata). Fails when the destination is
+  absent; exits nonzero on any content/structure/symlink mismatch.
 
 Test procedure without touching production paths:
 
@@ -499,9 +511,14 @@ HERMES_CONTEXT_SRC=/tmp/fake-src HERMES_CONTEXT_DST=/tmp/fake-dst \
   failed `realpath` never terminates the script before the refusal message).
   A source path component that is a symlink resolving into DST is also
   refused. Component tests only, never lexical prefixes.
-- `A14/A15`: DST overlapping an owned concrete path (instantiated stage dir,
-  log file parent, entrypoint dir) is refused; the log and entrypoint always
-  live outside DST. The instantiated stage path is checked BIDIRECTIONALLY
+- `A14/A15`: BOTH endpoints are checked against owned concrete paths —
+  the log file's PARENT directory (`~/.cache/hermes-context`, the parent of
+  `sync.log`) and the entrypoint dir (`~/.local/bin`). A DST overlapping an
+  owned path is refused because log/entrypoint must stay outside DST; a SRC
+  overlapping an owned path is ALSO refused (A14, citing the A-number),
+  because real-run logging (`mkdir -p` on the log parent and the append to
+  `sync.log`) would otherwise write into the source, violating A2 (sync
+  never writes to SRC). The instantiated stage path is checked BIDIRECTIONALLY
   (stage inside DST/SRC/owned, or DST/SRC inside the stage — either overlap
   refuses, since stage cleanup would otherwise destroy a contained DST).
   A DST merely located under a generic ancestor such as `/tmp` is ordinary

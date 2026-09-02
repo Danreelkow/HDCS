@@ -1,56 +1,76 @@
-### One-Way Sync Setup
+### Reverse-Gate Contract
 
-Create a one-way synchronization from SRC to DST while keeping /workspace/hermes-context an exact A9-class mirror. This means mirroring the contents, structure, and symlinks recursively. Use rsync with the --delete option to achieve this, and fall back to cp -a if rsync is not available. The synchronization should be scheduled using a systemd user timer to run every 6 hours. The script should be standalone and capable of running without systemd if needed. Perform a dry-run mode that does not make any changes, including logging and creating the destination directory. Use a closed guard set to prevent certain actions, including specific environment variables and path interactions. Ensure that the source path is /opt/data/workspace/hermes-context/ and that the dry-run mode performs no writes. Systemd user units should not require root access.
+This setup involves a standing sync service that mirrors the source directory `/opt/data/workspace/hermes-context/` to the destination directory `/workspace/hermes-context/` every 6 hours using a systemd user timer. The script is designed to be standalone and uses rsync as the primary tool for synchronization, with `cp -a` as a fallback.
 
-### Requirements to Maintain:
+**Key Details:**
 
-- Source path must be /opt/data/workspace/hermes-context/.
-- Dry-run mode that performs no writes.
-- Systemd user units, no root required.
+- **Source Path:** `/opt/data/workspace/hermes-context/`
+- **Destination Path:** `/workspace/hermes-context/`
+- **Dry-Run Mode:** Performs no writes
+- **Systemd User Units:** No root access required
 
-### Resolved Details:
+**Requirements:**
 
-- Source and destination paths are set to /opt/data/workspace/hermes-context/ and /workspace/hermes-context/ respectively.
-- Sync direction is one-way from host to workspace, with no write-back.
-- Use user-level systemctl --user for scheduling; script is standalone if no systemd.
-- If rsync is not available, use cp -a for synchronization, but avoid nesting.
-- Ensure an exact mirror with contents, structure, and symlinks recursively mirrored, and fail if there is a mismatch.
-- Dry-run mode must result in zero writes, no logs, and no creation of the destination directory.
-- Mirror only up to levels 1-3 (contents, structure, symlinks); fail verification on mismatch.
-- Fail only for normal operation defects; exotic environments have known limitations.
-- Guard against destructive misconfiguration by ensuring source and destination are not the same and by not deleting the destination before a verified copy.
-- Use realpath to ensure identity and prevent symlinks into the source.
-- Verify the copy by comparing content and touch the destination after verification.
-- Handle environment variable interactions carefully, avoiding beyond-guard combinations.
-- Ensure the destination directory is created in real runs but not in dry-runs.
-- Use a mandated mechanism for environment parameter scope; defaults are production values.
-- Refuse degenerate paths like '', '.', '/' and ensure destination symlinks are not outside the source.
-- No additional ownership requirements beyond OS write permission.
-- Address any remaining ambiguities as open issues.
+- The source path must be `/opt/data/workspace/hermes-context/`.
+- The dry-run mode must perform no writes.
+- Systemd user units are used, and no root access is needed.
 
-### Workflow:
+**Resolved Points:**
 
-- Plan, scoped-build, verify, deliver phases.
-- Dynamic builders and decorrelated verifier.
-- Ready or not ready gate.
-- Max fix cycles: 2.
+1. **Source Path:** The canonical source path is `/opt/data/workspace/hermes-context/`.
+2. **Sync Direction:** The sync is one-way from the host to the workspace with no writeback to the source.
+3. **Units:** Systemctl user units are used, no root access required.
+4. **Rsync Availability:** Rsync is detected, and `cp -a` is used as a fallback.
+5. **Stale Files:** Stale files at the destination are deleted to ensure an exact mirror.
+6. **Dry-Run Logs:** Dry-run logs are stored outside the destination directory.
+7. **Mirror Equivalence:** The mirror includes contents, structure, and symlinks but excludes metadata, timestamps, and hardlinks.
+8. **Severity Bar:** Data loss or corruption in normal operation is a fail; exotic cases are noted as known limitations.
+9. **Destructive Misconfiguration:** Realpath identity is guarded to prevent misconfigurations.
+10. **Environment Variables:** Internal paths are guarded to prevent boundary issues.
+11. **Destination Absent:** If the destination is absent, it is created in a real run; dry-run does not create it.
+12. **Environment Override:** Environment overrides are the contract; deployed paths are production values.
+13. **Ownership Checks:** No ownership checks beyond the OS.
+14. **Staging Order:** Staging order is validated to prevent name collisions.
+15. **Exotic Filenames:** Exotic filenames are noted as known limitations.
 
-### Constraints:
+**Workflow:**
 
-- Maintain an exact mirror with contents, structure, and symlinks recursively.
-- Do not delete the destination before a verified copy.
-- Guard set closed with specific identity, owned-concrete-paths, and degenerate path rules.
-- Dry-run mode results in zero writes, no logs, and no destination creation.
-- Logs are excluded from the destination; entrypoints are excluded from the mirrored tree.
-- No resurrecting prior defects; accumulate-only fallback and probe-only dry-run gate.
+- **Phases:** Plan, scoped-build, verify, deliver.
+- **Builders:** Dynamic.
+- **Verifier:** Decorrelated.
+- **Gate:** Ready or Not Ready.
+- **Fix Cycles:** Maximum of 2.
 
-### Paths:
+**Handoff:**
 
-- Destination: /workspace/hermes-context/
-- Source: /opt/data/workspace/hermes-context/
-- Entrypoint install: ~/.local/bin or /workspace/hdcs/bin
-- Log file parent: ~/.cache/
+- **State:** Initial state plus changes to final state.
+- **Report:** Includes done, unresolved, open, and validation status.
 
-### Budgets:
+**Constraints:**
 
-- Estimate tokens, 60 lines, 2 fix cycles, 2 questions
+- Source path must be kept verbatim.
+- Dry-run mode must perform no writes.
+- Systemd user units must be used without root access.
+- Sync never writes to the source.
+- Both sync paths must converge to an identical end state.
+- Dry-run must result in zero writes; destination must be nonexistent if absent after dry-run.
+- Log directory and install paths must always be outside the destination.
+- Staging order must be stage -> content-verify -> touch DST.
+- Refuse source/destination identity, ancestor/descendant, degenerate paths, and destination-level symlinks.
+- Concrete owned-path guard must be boundary-aware.
+- No invented ownership scope; law list closed to amendment only.
+- Script working names must not collide with source contents.
+
+**Artifacts:**
+
+- `sync-hermes-context.sh`
+- `hermes-context.service`
+- `hermes-context.timer`
+- `README.md`
+
+**Budgets:**
+
+- Tokens: Estimate
+- Lines: 60
+- Fix Cycles: 2
+- Questions: 2

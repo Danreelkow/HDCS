@@ -1,26 +1,26 @@
-**The job**
-Build a standing one-way sync, SRC->DST, keeping /workspace/hermes-context an exact A9-class mirror of /opt/data/workspace/hermes-context/: contents+structure+symlinks, recursive, stale-deleted (A5, A7). The source path is /opt/data/workspace/hermes-context/ (MUST_KEEP); destination default /workspace/hermes-context/ (A1). Engine: rsync --delete; rsync may be absent, so a cp -a fallback must converge, recursively and on both sync paths, to the identical end state — a contents-of-source sync (src/->dst), no nesting (A4). One-way, host->workspace, no write-back (A2).
+# Debrief: Hermes Context Sync Tool
 
-**Deliverables**
-One artifact dir: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, README.md. Scheduling: systemd user units, no root required — a systemctl --user timer firing every 6 hours via OnCalendar, ExecStart runs the script (A3). The script must also run standalone when systemd is absent. Configuration goes through HERMES_CONTEXT_SRC, HERMES_CONTEXT_DST, HERMES_CONTEXT_LOG; the env-var mechanism is mandated, and shipped defaults are production values, not scope limits (A17).
+## What this is
+A small deploy tool that keeps a copy of your hermes-context folder in sync. The source path is /opt/data/workspace/hermes-context/ and the destination is /workspace/hermes-context/. It runs automatically every six hours using systemd user units, so no root required. The script also works standalone if systemd isn't available.
 
-**Dry run**
---dry-run is a dry-run mode that performs no writes: no log, no DST creation, DST left byte-identical or nonexistent (A6, A16). A real run may mkdir -p DST; DST must not be required to pre-exist.
+## How it syncs
+The sync is rsync-based, with a cp -a fallback if rsync isn't installed. Both paths are idempotent — safe to run repeatedly — and both converge to the exact same end state: the destination becomes a mirror of the source, recursively, including contents, structure, and symlinks. Stale files at the destination are deleted so it's an exact mirror. Metadata like timestamps and hardlinks are not compared. A verification step checks the mirror and exits with an error if anything doesn't match.
 
-**Order law**
-stage -> content-verify -> mutate (A13): stage the copy in a mktemp -d area, content-compare it against the A9 class (levels 1–3 only — contents, structure, symlinks; verify FAILs nonzero on mismatch), and only a verified copy may touch DST. Never rm -rf DST before a verified copy exists (A11). The log always lives under ~/.cache/... and never inside DST; entrypoints install at ~/.local/bin or /workspace/hdcs/bin, outside the mirrored tree (A8).
+## Dry-run behavior
+There's a dry-run mode that performs no writes — zero changes of any kind. If the destination doesn't exist, a dry run leaves it nonexistent; only a real run creates it with mkdir -p. Logs always go to ~/.cache/hermes-context/, never inside the destination, so even a dry run writes nothing there.
 
-**Guards — closed list; every refusal cites its A-number (A19)**
-- A11: refuse SRC==DST.
-- A12: realpath-based identity/ancestry checks; refuse a symlink into SRC.
-- A14/A15: a generalized owned-concrete-path guard over env-var combinations; beyond-guard combos are documented limitations, and no over-broad parent-wall refusals.
-- A18: refuse empty string, '.', and '/' via component tests; refuse a DST symlink pointing outside SRC; a symlinked DST is replaced by a real tree.
+## Safety guards
+The sync is one-way, host to workspace; it never writes back to the source. The script refuses dangerous configurations: if source and destination are the same path, one contains the other (ancestor or descendant), or paths are degenerate (empty, ".", "/"), it refuses. Destination-level symlinks are also refused. Every refusal cites a rule from a closed list — no invented ownership checks beyond what the OS provides.
 
-**Severity and scope**
-FAIL covers normal-operation defects only; exotic environments go to KNOWN_LIMITATIONS (A10). No ownership requirements beyond ordinary OS write permission; the path-law list is closed, and inventing extra scope — including ownership — is out (A19).
+The write order is: stage into a temporary directory (mktemp -d under a validated parent), verify the content, then touch the destination. This applies to both the rsync path and the cp fallback. Temporary bookkeeping files never overwrite mirror files, and no fixed working names collide with source contents.
 
-**no_resurrect — prior defects that must not return**
-accumulate-only fallback (A5); probe-only dry-run gate (A6, A16); metadata-in-scope verify (A9); over-broad parent-wall refusals (A15); "DST must pre-exist" (A16); invented scope including ownership (A19).
+Environment variables can override the deployed defaults — that's the contract; deployed paths are the production values. Unset variables fall back to defaults; set-but-empty values are refused. Environment overrides pointing at script-internal paths are guarded with a boundary-aware owned-path check; adversarial combinations beyond that guard are documented as known limitations, not failures.
 
-**Process**
-Phases: plan, scoped-build, verify, deliver. Builders are chosen dynamically; the verifier is decorrelated from them; gate is READY|NOT_READY; at most 2 fix cycles and 2 questions; roughly 60 lines, token budget an estimate. Handoff: the next seat receives state S_1 (S_0 plus this packet's delta) with a report of work done (+done), answers locked (-resolved), open items (+open), and validation (+validation). Remaining ambiguities (Q17): OPEN.
+## Failure severity
+Only normal-operation data loss or corruption counts as a failure. Exotic filenames and other edge cases go into known limitations instead.
+
+## Deliverables
+Four files: sync-hermes-context.sh, hermes-context.service, hermes-context.timer, and README.md. Installed to ~/.local/bin (or /workspace/hdcs/bin) and ~/.config/systemd/user/.
+
+## Process
+Work ran in four phases — plan, scoped build, verify, deliver — with an independent verifier and up to two fix cycles before a READY/NOT_READY gate.

@@ -2,7 +2,8 @@
  "s1_at": 1788311381843,
  "s2_at": 1788311409377,
  "gate_pass": true,
- "gate_at": 1788311517260,
- "s3_hash": "89930d02af8885ba5b7cff089da9f7c2",
- "s4_pass": false
+ "gate_at": 1788311807648,
+ "s3_hash": "c29e8597091e274424547f4106e51646",
+ "s4_pass": true,
+ "s4_hash": "038fbf86151ccfd5227d462e4627942d"
 }
