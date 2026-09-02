@@ -13,7 +13,9 @@ workspace destination (`A2`: host -> workspace only, never a writeback).
 4. `systemctl --user enable --now hermes-context.timer`
 
 The timer fires on `OnCalendar=*-*-* 00/6:00:00` (every 6 hours, `Persistent=true`)
-and starts `hermes-context.service`, which runs the sync script as a oneshot.
+and starts `hermes-context.service`, which runs the sync script as a oneshot
+(`ExecStart=%h/.local/bin/sync-hermes-context.sh` — `%h` expands to your home
+directory, i.e. the same `~/.local/bin/sync-hermes-context.sh` path above).
 
 ## Environment overrides
 

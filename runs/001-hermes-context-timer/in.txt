@@ -83,7 +83,6 @@ ARTIFACT CONTENTS:
 # ExecStart=%h/.local/bin/sync-hermes-context.sh and the README install section).
 # Modes: default = real sync; --dry-run = plan only, zero writes; --verify = A9-class
 # compare only (exit 0 iff exact mirror).
-# Refusal law (A19): every refusal cites only A12 | A14/A15 | A18 | A22 | A23.
 set -euo pipefail
 
 MODE=sync
@@ -153,9 +152,28 @@ for OWNED in "$LOG_PARENT" "$ENTRYPOINT_DIR"; do
   fi
 done
 
-# lstat-based entry equality: type AND, for symlinks, the exact readlink TARGET
-# (same type is NOT equal — differing symlink targets are a real difference that
-# the fallback reconcile must replace, and the dry-run plan must count).
+# walk_root: when the traversal root is itself a symlink, find(1) with -P does
+# not descend through a command-line symlink; "$root/." is the same directory
+# resolved, so every traversal below uses walk_root + strip_root and stays
+# lossless for a symlinked source (A12 permits source symlinks).
+walk_root() { # $1 = root path -> prints a find(1)-traversable form
+  if [ -L "$1" ]; then printf '%s/.' "$1"; else printf '%s' "$1"; fi
+}
+strip_root() { # $1 = root, $2 = find-printed path -> prints path relative to root
+  local r=$1 p=$2
+  if [ "${p#"$r/./"}" != "$p" ]; then
+    printf '%s' "${p#"$r/./"}"
+  else
+    printf '%s' "${p#"$r"/}"
+  fi
+}
+
+# lstat-based entry equality: type AND, for symlinks, the exact readlink TARGET.
+# LSTAT-based, never -d/-f on the link itself: a DST symlink-to-directory is a
+# SYMLINK first ([ -L ] checked before [ -d ]), so same_type returns false for
+# (SRC dir, DST symlink-to-dir) and for (SRC symlink, DST real dir) — the
+# fallback reconcile then removes and replaces such entries instead of
+# following the link and writing outside DST.
 same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
   local s=$1 d=$2
   if [ -L "$s" ]; then
@@ -173,7 +191,7 @@ same_type() { # $1 src path, $2 dst path — returns 0 iff entries are A9-equal
 # Never dereferences symlinks: a regular file holding the target bytes of a SRC
 # symlink still fails. Empty rsync itemize diff AND full lstat walk must pass.
 verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
-  local s=$1 d=$2 rel sp dp out
+  local s=$1 d=$2 rel sp dp out wr
   if command -v rsync >/dev/null 2>&1; then
     out=$(rsync -rcn --delete --itemize-changes "$s/" "$d/" 2>/dev/null || true)
     if [ -n "$out" ]; then
@@ -182,8 +200,9 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
       return 1
     fi
   fi
+  wr=$(walk_root "$s")
   while IFS= read -r -d '' p; do
-    rel=${p#"$s"/}
+    rel=$(strip_root "$s" "$p")
     dp="$d/$rel"
     if [ -L "$p" ]; then
       [ -L "$dp" ] || { echo "A9: type mismatch (symlink vs other): $rel" >&2; return 1; }
@@ -199,7 +218,7 @@ verify_a9() { # $1 = source, $2 = destination; return 1 on any mismatch
       fi
       cmp -s -- "$p" "$dp" || { echo "A9: content mismatch: $rel" >&2; return 1; }
     fi
-  done < <(find "$s" -mindepth 1 -print0)
+  done < <(find "$wr" -mindepth 1 -print0)
   while IFS= read -r -d '' p; do
     rel=${p#"$d"/}
     { [ -e "$s/$rel" ] || [ -L "$s/$rel" ]; } || \
@@ -220,13 +239,13 @@ if [ "$MODE" = dry ]; then
       # plus differing file bytes, count as syncs; stale DST entries as deletes
       SYNC=0; DEL=0
       while IFS= read -r -d '' p; do
-        rel=${p#"$SRC"/}
+        rel=$(strip_root "$SRC" "$p")
         dp="$DST/$rel"
         if ! same_type "$p" "$dp"; then SYNC=$((SYNC + 1))
         elif [ -f "$p" ] && [ ! -L "$p" ] && ! cmp -s -- "$p" "$dp"; then
           SYNC=$((SYNC + 1))
         fi
-      done < <(find "$SRC" -mindepth 1 -print0)
+      done < <(find "$(walk_root "$SRC")" -mindepth 1 -print0)
       while IFS= read -r -d '' p; do
         rel=${p#"$DST"/}
         { [ -e "$SRC/$rel" ] || [ -L "$SRC/$rel" ]; } || DEL=$((DEL + 1))
@@ -234,7 +253,7 @@ if [ "$MODE" = dry ]; then
     fi
   else
     # DST absent: whole tree would be created
-    SYNC=$(find "$SRC" -mindepth 1 \( -type f -o -type d -o -type l \) -print | wc -l)
+    SYNC=$(find "$(walk_root "$SRC")" -mindepth 1 \( -type f -o -type d -o -type l \) -print | wc -l)
     DEL=0
   fi
   echo "dry-run: sync=$SYNC delete=$DEL"
@@ -243,8 +262,8 @@ fi
 
 # --- verify branch: fail when DST absent; OK only on exact mirror -------------
 if [ "$MODE" = verify ]; then
-  if [ ! -d "$DST" ]; then
-    echo "verify: FAIL — DST does not exist ($DST)" >&2; exit 1
+  if [ ! -d "$DST" ] || [ -L "$DST" ]; then
+    echo "verify: FAIL — DST does not exist as a real directory ($DST)" >&2; exit 1
   fi
   if verify_a9 "$SRC" "$DST"; then
     echo "verify: OK — DST is an exact A9-class mirror of SRC"
@@ -291,7 +310,7 @@ done
 cleanup_stage() { rm -rf -- "$STAGE"; }
 
 fallback_copy() { # $1 = source root, $2 = dest root (A9 mirror without rsync)
-  local s=$1 d=$2 rel sp dp
+  local s=$1 d=$2 rel sp dp wr
   # the destination root always exists after a fallback run — even when the
   # source is empty, the mirror is an (empty) directory, never an absent path
   mkdir -p -- "$d"
@@ -300,11 +319,13 @@ fallback_copy() { # $1 = source root, $2 = dest root (A9 mirror without rsync)
     rel=${p#"$d"/}
     { [ -e "$s/$rel" ] || [ -L "$s/$rel" ]; } || rm -rf -- "$p"
   done < <(find "$d" -mindepth 1 -print0)
-  # copy missing/differing entries; same_type includes symlink-TARGET comparison,
-  # so a destination symlink whose target differs from the source symlink is
-  # removed and replaced by the exact source entry (never followed)
+  # copy missing/differing entries; same_type is lstat-based and includes the
+  # symlink-TARGET comparison, so a DST symlink-to-dir over a SRC dir (or a DST
+  # symlink whose target differs from the SRC symlink) is REMOVED and replaced
+  # by the exact source entry — never followed, never written through
+  wr=$(walk_root "$s")
   while IFS= read -r -d '' p; do
-    rel=${p#"$s"/}; sp="$s/$rel"; dp="$d/$rel"
+    rel=$(strip_root "$s" "$p"); sp="$s/$rel"; dp="$d/$rel"
     if [ ! -e "$dp" ] && [ ! -L "$dp" ]; then
       mkdir -p -- "$d/$(dirname "$rel")" 2>/dev/null || true
       cp -a -- "$sp" "$dp"
@@ -313,19 +334,20 @@ fallback_copy() { # $1 = source root, $2 = dest root (A9 mirror without rsync)
     elif [ -f "$sp" ] && [ ! -L "$sp" ] && ! cmp -s -- "$sp" "$dp"; then
       cp -a -- "$sp" "$dp"
     fi
-  done < <(find "$s" -mindepth 1 -print0)
+  done < <(find "$wr" -mindepth 1 -print0)
 }
 
 # remove DST entries whose type or symlink target differs from SRC
-# (file<->dir, symlink<->file, or symlink->differing-target) — done only AFTER
-# the stage has been built and verified (A11)
+# (file<->dir, symlink<->file, dir<->symlink-to-dir, or symlink->differing-target)
+# — done only AFTER the stage has been built and verified (A11)
 pre_reconcile_types() {
+  local rel
   while IFS= read -r -d '' p; do
-    rel=${p#"$SRC"/}
+    rel=$(strip_root "$SRC" "$p")
     if { [ -e "$DST/$rel" ] || [ -L "$DST/$rel" ]; } && ! same_type "$p" "$DST/$rel"; then
       rm -rf -- "$DST/$rel"
     fi
-  done < <(find "$SRC" -mindepth 1 -print0)
+  done < <(find "$(walk_root "$SRC")" -mindepth 1 -print0)
 }
 
 if command -v rsync >/dev/null 2>&1; then
@@ -409,7 +431,9 @@ workspace destination (`A2`: host -> workspace only, never a writeback).
 4. `systemctl --user enable --now hermes-context.timer`
 
 The timer fires on `OnCalendar=*-*-* 00/6:00:00` (every 6 hours, `Persistent=true`)
-and starts `hermes-context.service`, which runs the sync script as a oneshot.
+and starts `hermes-context.service`, which runs the sync script as a oneshot
+(`ExecStart=%h/.local/bin/sync-hermes-context.sh` — `%h` expands to your home
+directory, i.e. the same `~/.local/bin/sync-hermes-context.sh` path above).
 
 ## Environment overrides
 
@@ -452,25 +476,32 @@ HERMES_CONTEXT_SRC=/tmp/fake-src HERMES_CONTEXT_DST=/tmp/fake-dst \
 
 - Primary: `rsync -a --delete` (staged, then applied to the destination).
 - Fallback (rsync unavailable): `cp -a` plus a recursive reconcile that deletes
-  stale subtrees and copies missing/differing entries; type conflicts
-  (file<->dir, symlink<->file) are removed before copying, never followed, and
-  symlinks are compared by their exact readlink targets — a destination symlink
-  whose target differs from the source symlink is replaced, so the fallback
-  converges to the same mirror as rsync. The fallback always creates the
-  destination root (an empty source converges to an empty destination
-  directory, never an absent path).
+  stale subtrees and copies missing/differing entries. Type comparisons are
+  lstat-based: a destination symlink-to-directory sitting where the source has
+  a real directory (and the inverse) is removed and replaced, never followed,
+  so copies never land outside the destination. Symlinks are compared by their
+  exact readlink targets — a destination symlink whose target differs from the
+  source symlink is replaced, so the fallback converges to the same mirror as
+  rsync. The fallback always creates the destination root (an empty source
+  converges to an empty destination directory, never an absent path).
+- A symlinked source root is fully supported: traversal uses the resolved
+  root (`SRC/.` form) so `find` descends into it, while rsync dereferences the
+  trailing-slash root naturally. Only the root symlink is resolved; symlinks
+  inside the tree are always compared by their exact readlink targets.
 - Both strategies produce the same end state: the destination is a recursive
   A9-class mirror of the source.
 
 ## Guard rails (refusals)
 
 - `A12`: SRC == DST (realpath identity), or ancestor/descendant relation,
-  or a symlinked DST ancestor resolving into SRC — refused.
+  or a symlinked DST ancestor resolving into SRC — refused. A symlinked
+  SOURCE root is permitted.
 - `A22`: DST itself is a symlink — refused and left untouched; sync never
   replaces a user-placed symlink.
-- `A14/A15`: DST overlapping an owned concrete path (stage dir, log file
-  parent, entrypoint dir) is refused; the log and entrypoint always live
-  outside DST.
+- `A14/A15`: DST overlapping an owned concrete path (instantiated stage dir,
+  log file parent, entrypoint dir) is refused; the log and entrypoint always
+  live outside DST. A DST merely located under a generic ancestor such as
+  `/tmp` is ordinary and syncs normally.
 - `A18`: degenerate values (`/`, empty, `.`) for either endpoint are refused.
 
 ## KNOWN_LIMITATIONS

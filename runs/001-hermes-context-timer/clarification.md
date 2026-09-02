@@ -3,7 +3,7 @@
 S4 FAIL verdict (after feedback repair):
 
 VERDICT: FAIL
-EVIDENCE: `sync-hermes-context.sh:81-83` defines `same_type()` so a source directory and a destination symlink-to-directory are treated as equal (`[ -d "$d" ]` succeeds without rejecting `[ -L "$d" ]`). In the fallback path (`fallback_copy`, approximately lines 178-201), that symlink is therefore neither removed nor replaced; subsequent copies can follow it, violating A5/A9 recursive structure-and-symlink equivalence and potentially writing outside DST. Additionally, `sync-hermes-context.sh:5` claims refusals cite only A12/A14/A15/A18/A22/A23, while `:20-21` emits A23 and `:59-61` emits A22; this conflicts with the packet’s A19 closed refusal law, which permits only A12, A14/A15, or A18 refusal citations.
+EVIDENCE: In `sync-hermes-context.sh` lines 191–194, the instantiated staging path is checked only with `is_inside "$R_STAGE" "$R_DST"` and `is_inside "$R_STAGE" "$R_SRC"`. This detects stage-inside-DST/SRC, but not DST-inside-stage/SRC-inside-stage. A20/A14/A15 require component-boundary bidirectional overlap checks for the concrete instantiated stage directory. Thus an override such as `TMPDIR=/tmp` with `HERMES_CONTEXT_DST=/tmp/hermes-context-stage.ABC/subdir` can allow the owned stage directory to contain DST, violating the required refusal guard before destructive operations.
 
 ## Packet
 ```yaml
