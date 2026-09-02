@@ -1,105 +1,134 @@
 #!/usr/bin/env bash
-# rotate-hdcs-runs.sh — rotate stale *.txt files from RUNS_DIR into ARCHIVE_DIR.
-# Pure bash + coreutils (A2). Default mode is DRY-RUN (zero writes, A1);
-# --apply is the sole writing mode. Path law refusals cite A4.
+# rotate-hdcs-runs.sh — rotate stale files out of RUNS_DIR into ARCHIVE_DIR.
+# Pure bash + coreutils. --apply is the sole writer (A1); default mode is dry-run.
+# Usage: rotate-hdcs-runs.sh [--apply]
+# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR (set-but-empty refused, A4).
+# Exit codes: 0 success/zero-action; >=1 any refusal/failure.
+
 set -u
 
-CONF="$(dirname "$(realpath "$0")")/hdcs-runs-rotation.conf"
-[ -f "$CONF" ] || CONF="hdcs-runs-rotation.conf"
+die() { echo "ERROR: $*" >&2; exit 1; }
 
-# (a) parse conf via source-safe read: exactly the five KEY=VALUE keys, no extras
-declare -A C=()
-while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in ''|\#*) continue ;; esac
-  k="${line%%=*}"; v="${line#*=}"
-  [ "$k" != "$line" ] || { echo "conf parse error: $line" >&2; exit 1; }
-  case "$k" in
-    RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) ;;
-    *) echo "conf: unknown key '$k' — exactly five keys required" >&2; exit 1 ;;
-  esac
-  C["$k"]="$v"
-done < "$CONF"
-for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
-  [ -n "${C[$k]:-}" ] || { echo "conf missing key $k" >&2; exit 1; }
-done
-[ "${#C[@]}" -eq 5 ] || { echo "conf must have exactly 5 keys, found ${#C[@]}" >&2; exit 1; }
+CONF_PATH="$(cd "$(dirname "$0")" && pwd)/hdcs-runs-rotation.conf"
 
-RUNS_DIR="${C[RUNS_DIR]}"
-ARCHIVE_DIR="${C[ARCHIVE_DIR]}"
-AGE_DAYS="${C[AGE_DAYS]}"
-PATTERN="${C[PATTERN]}"
-KEEP="${C[KEEP]}"
+# ---- conf parsing (exactly the 5-key schema) -------------------------------
+declare -A CONF=()
+parse_conf() {
+    local f="$1" line key val
+    [ -r "$f" ] || return 1
+    while IFS= read -r line; do
+        case "$line" in ''|'#'*) continue ;; esac
+        key="${line%%=*}"
+        val="${line#*=}"
+        [ "$key" = "$line" ] && return 1
+        case "$key" in
+            RUNS_DIR|ARCHIVE_DIR|AGE_DAYS|PATTERN|KEEP) CONF["$key"]="$val" ;;
+            *) return 1 ;;
+        esac
+    done < "$f"
+    for key in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+        [ -n "${CONF[$key]+x}" ] || return 1
+    done
+    return 0
+}
+parse_conf "$CONF_PATH" || die "malformed config $CONF_PATH (schema: RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP)"
 
-# (b) env override; set-but-empty = refusal citing A4, zero writes
-if [ "${HDCS_RUNS_DIR+set}" = "set" ]; then
-  [ -n "$HDCS_RUNS_DIR" ] || { echo "A4: HDCS_RUNS_DIR set but empty — refusing" >&2; exit 1; }
-  RUNS_DIR="$HDCS_RUNS_DIR"
+# ---- resolve env > conf; set-but-empty -> refuse (A4) ----------------------
+if [ -n "${HDCS_RUNS_DIR+x}" ]; then
+    [ -n "$HDCS_RUNS_DIR" ] || die "A4: HDCS_RUNS_DIR is set but empty; refusing"
+    RUNS_DIR="$HDCS_RUNS_DIR"
+else
+    RUNS_DIR="${CONF[RUNS_DIR]}"
 fi
-if [ "${HDCS_ARCHIVE_DIR+set}" = "set" ]; then
-  [ -n "$HDCS_ARCHIVE_DIR" ] || { echo "A4: HDCS_ARCHIVE_DIR set but empty — refusing" >&2; exit 1; }
-  ARCHIVE_DIR="$HDCS_ARCHIVE_DIR"
+if [ -n "${HDCS_ARCHIVE_DIR+x}" ]; then
+    [ -n "$HDCS_ARCHIVE_DIR" ] || die "A4: HDCS_ARCHIVE_DIR is set but empty; refusing"
+    ARCHIVE_DIR="$HDCS_ARCHIVE_DIR"
+else
+    ARCHIVE_DIR="${CONF[ARCHIVE_DIR]}"
 fi
+AGE_DAYS="${CONF[AGE_DAYS]}"
+PATTERN="${CONF[PATTERN]}"
+KEEP="${CONF[KEEP]}"
 
-# (c) path law: degenerate paths, realpath, equality, containment (A4)
+# ---- A4 path law: refuses precede ANY write --------------------------------
 for p in "$RUNS_DIR" "$ARCHIVE_DIR"; do
-  case "$p" in ''|'.'|'/') echo "A4: degenerate path '$p' — refusing" >&2; exit 1 ;; esac
+    case "$p" in
+        ''|'.'|'/') die "A4: degenerate path '$p' refused" ;;
+    esac
 done
-R="$(realpath -m -- "$RUNS_DIR")"
-A="$(realpath -m -- "$ARCHIVE_DIR")"
-[ "$R" = "$A" ] && { echo "A4: RUNS_DIR == ARCHIVE_DIR ($R) — refusing" >&2; exit 1; }
-case "$R/" in "$A"/*) echo "A4: ARCHIVE_DIR contains RUNS_DIR — refusing" >&2; exit 1 ;; esac
-case "$A/" in "$R"/*) echo "A4: RUNS_DIR contains ARCHIVE_DIR — refusing" >&2; exit 1 ;; esac
+[ "$AGE_DAYS" -ge 0 ] 2>/dev/null || die "A4: AGE_DAYS must be a nonnegative integer"
+case "$KEEP" in
+    ''|*[!0-9-]*) die "A4: KEEP must be an integer" ;;
+esac
 
-MODE="DRY-RUN"
-[ "${1:-}" = "--apply" ] && MODE="APPLY"
+RUNS_R="$(realpath -m -- "$RUNS_DIR")"  || die "A4: cannot resolve RUNS_DIR '$RUNS_DIR'"
+ARCH_R="$(realpath -m -- "$ARCHIVE_DIR")" || die "A4: cannot resolve ARCHIVE_DIR '$ARCHIVE_DIR'"
 
-# (d) candidates: files matching PATTERN with mtime >= AGE_DAYS
-mapfile -t CANDS < <(find "$R" -type f -name "$PATTERN" -mtime +"$((AGE_DAYS-1))" 2>/dev/null | sort)
+if [ "$RUNS_R" = "$ARCH_R" ]; then
+    die "A4: RUNS_DIR and ARCHIVE_DIR resolve to the same path ($RUNS_R); refusing"
+fi
+case "$ARCH_R/" in "$RUNS_R"/*) die "A4: ARCHIVE_DIR ($ARCH_R) is inside RUNS_DIR ($RUNS_R); refusing" ;; esac
+case "$RUNS_R/" in "$ARCH_R"/*) die "A4: RUNS_DIR ($RUNS_R) is inside ARCHIVE_DIR ($ARCH_R); refusing" ;; esac
 
-if [ "$MODE" = "DRY-RUN" ]; then
-  echo "DRY-RUN plan: ${#CANDS[@]} file(s) would be rotated from $R to $A"
-  for f in "${CANDS[@]}"; do
-    echo "  would rotate: ${f#"$R"/}"
-  done
-  echo "DRY-RUN: no files moved, nothing created (A1)"
-  exit 0
+# ---- plan (read-only; safe in both modes) ----------------------------------
+# A5_move_once: select files with age >= AGE_DAYS EXACTLY. GNU find's rounded
+# -mtime +N skips files whose age falls inside the N-day bucket, so instead we
+# select files whose mtime is at or before (now - AGE_DAYS days).
+mapfile -t STALE < <(find "$RUNS_R" -type f -name "$PATTERN" ! -newermt "$AGE_DAYS days ago" | sort)
+
+# ---- dry-run (default): print plan, create nothing (A1) --------------------
+if [ "${1-}" != "--apply" ]; then
+    if [ "${#STALE[@]}" -eq 0 ]; then
+        echo "dry-run: nothing to rotate"
+        exit 0
+    fi
+    for src in "${STALE[@]}"; do
+        base="$(basename -- "$src")"
+        echo "$src -> $ARCHIVE_DIR/$base.1"
+    done
+    echo "dry-run: ${#STALE[@]} file(s) would be rotated (no changes made)"
+    exit 0
 fi
 
-# (e) --apply
-[ -d "$R" ] || { echo "RUNS_DIR $R does not exist" >&2; exit 1; }
-mkdir -p -- "$A" || { echo "cannot create ARCHIVE_DIR $A" >&2; exit 1; }
-
-MANIFEST="$A/.hdcs-rotation-manifest"
+# ---- --apply: sole writer (A1) ---------------------------------------------
+mkdir -p -- "$ARCH_R" || die "cannot create ARCHIVE_DIR $ARCH_R"
 
 moved=0
-for f in "${CANDS[@]}"; do
-  rel="${f#"$R"/}"
-  dest="$A/$rel"
-  dest_dir="$(dirname -- "$dest")"
-  mkdir -p -- "$dest_dir" || { echo "cannot create $dest_dir" >&2; exit 1; }
-  target="$dest"
-  if [ -e "$target" ]; then
+for src in "${STALE[@]}"; do
+    base="$(basename -- "$src")"
+    dest="$ARCH_R/$base.1"
     n=1
-    while [ -e "$dest.$n" ]; do n=$((n+1)); done
-    target="$dest.$n"
-  fi
-  # lossless: copy, cmp, then remove source (A5)
-  cp -p -- "$f" "$target" || { echo "copy failed: $f" >&2; exit 1; }
-  if cmp -s -- "$f" "$target"; then
-    rm -f -- "$f" || { echo "remove failed: $f" >&2; exit 1; }
-    echo "rotated: $rel -> ${target#"$A"/}"
-    moved=$((moved+1))
-  else
-    echo "A5: byte mismatch for $rel — keeping source, removing bad copy" >&2
-    rm -f -- "$target"
-    exit 1
-  fi
+    while [ -e "$dest" ]; do
+        n=$((n + 1))
+        dest="$ARCH_R/$base.$n"
+    done
+    # lossless check (A5_bytes): snapshot bytes, move, cmp-verify
+    tmp="$(mktemp)" || die "mktemp failed"
+    cp -- "$src" "$tmp" || { rm -f -- "$tmp"; die "snapshot failed for $src"; }
+    if mv -- "$src" "$dest" && cmp -s -- "$tmp" "$dest"; then
+        rm -f -- "$tmp"
+        echo "rotated: $src -> $dest"
+        moved=$((moved + 1))
+    else
+        rc=$?
+        cmp -s -- "$tmp" "$src" && mv -- "$src" "$src" 2>/dev/null
+        rm -f -- "$tmp"
+        die "rotation of $src failed (bytes not verified); source left in place"
+    fi
 done
 
-# refresh archive manifest (cksum listing) so verify can check archive identity
-find "$A" -type f ! -name '.hdcs-rotation-manifest' -print0 2>/dev/null \
-  | LC_ALL=C sort -z | xargs -0 -r cksum > "$MANIFEST" || { echo "manifest write failed" >&2; exit 1; }
+# ---- KEEP pruning: oldest archived entries beyond KEEP are removed ---------
+if [ "$KEEP" -ge 0 ]; then
+    while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        rm -f -- "$old"
+        echo "pruned (KEEP=$KEEP): $old"
+    done < <(find "$ARCH_R" -maxdepth 1 -type f -name "$PATTERN.*" -printf '%T@ %p\n' 2>/dev/null \
+             | sort -rn | awk -v k="$KEEP" 'NR > k { $1=""; sub(/^ /,""); print }')
+fi
 
-echo "$moved moved"
+if [ "$moved" -eq 0 ]; then
+    echo "apply: zero-action (no files at or beyond AGE_DAYS=$AGE_DAYS)"
+fi
 exit 0
 

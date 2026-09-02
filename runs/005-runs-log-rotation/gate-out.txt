@@ -1,3 +1,1 @@
-rotated: 001-old/gate-out.txt -> 001-old/gate-out.txt
-1 moved
-GATE PASS
+GATE FAIL: dry-run did not list the stale file

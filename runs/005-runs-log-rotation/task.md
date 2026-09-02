@@ -15,7 +15,10 @@ Deliverable (all files in one artifact dir):
   to the newest KEEP archived files (oldest removed first); dry-run prunes
   nothing; env HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR override the config; refuses
   degenerate/overlapping paths (identity, containment either way) with a
-  cited A-number; idempotent
+  cited A-number; idempotent. Stale means floor(age in days) >= AGE_DAYS: a
+  file aged exactly AGE_DAYS rotates; note GNU find's bare `-mtime +N`
+  excludes ages in the [N, N+1) day band, so implement the boundary
+  explicitly
 - verify-rotation.sh — exits 0 only when the tree is consistent: config
   parses, no rotation pending, archive listing intact (intact = the newest
   KEEP archived files are present and match their recorded listing)

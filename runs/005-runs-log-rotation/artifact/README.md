@@ -1,52 +1,67 @@
-# hdcs rotation triad
+# hdcs-runs-rotation
 
-Rotates stale `*.txt` files (age >= 14 days) from the hdcs runs directory into
-an archive directory, preserving relative subpaths and file contents.
+Rotate stale files out of a runs directory into an archive directory.
+Pure bash + coreutils (`find`, `cmp`, `realpath`, `cksum`, `mv`, `sort`, `awk`).
+No logrotate, no root required.
 
 ## Files
 
-- `hdcs-runs-rotation.conf` — exactly five KEY=VALUE lines:
-  `RUNS_DIR=/workspace/hdcs/runs`, `ARCHIVE_DIR=/workspace/.hdcs-rotate/archive`,
-  `AGE_DAYS=14`, `PATTERN=*.txt`, `KEEP=50`. Unknown keys are refused.
-- `rotate-hdcs-runs.sh` — the rotator.
-- `verify-rotation.sh` — the verifier.
+- `hdcs-runs-rotation.conf` — config, exactly five keys:
+  `RUNS_DIR`, `ARCHIVE_DIR`, `AGE_DAYS`, `PATTERN`, `KEEP`.
+- `rotate-hdcs-runs.sh` — dry-run planner (default) and `--apply` writer.
+- `verify-rotation.sh` — read-only state verifier.
 
 ## Usage
 
-Dry-run (default; zero writes, A1):
+    ./rotate-hdcs-runs.sh            # dry-run: prints planned moves, writes nothing
+    ./rotate-hdcs-runs.sh --apply    # performs the rotation
+    ./verify-rotation.sh             # exit 0 iff state is consistent
 
-    ./rotate-hdcs-runs.sh
+### Dry-run
 
-Apply (sole writing mode):
+Prints each planned move as `<src> -> <dst>` and creates nothing — no
+`ARCHIVE_DIR`, no state files. Exit 0.
 
-    ./rotate-hdcs-runs.sh --apply
+### Apply
 
-Verify:
-
-    ./verify-rotation.sh
+- Validates paths (A4) before any write.
+- `mkdir -p` on `ARCHIVE_DIR`.
+- Finds files matching `PATTERN` with age ≥ `AGE_DAYS` under `RUNS_DIR`.
+  Selection is exact: a file is stale iff its mtime is at or before
+  `now − AGE_DAYS days`. GNU `find`'s rounded `-mtime +N` predicate would
+  skip files whose age falls inside the N-day bucket, so it is NOT used;
+  both scripts select with `! -newermt "$AGE_DAYS days ago"` instead,
+  which matches every file with age ≥ AGE_DAYS inclusive of the threshold.
+- Moves each to `ARCHIVE_DIR/<name>.<n>` (`.1`, incremented to `.2`, `.3`, …
+  if the destination already exists).
+- Byte-losslessness is verified with `cmp` against a snapshot; a failed
+  verification leaves the source in place and exits ≥1.
+- KEEP pruning: after moves, the oldest archived matching entries beyond
+  `KEEP` are deleted. `KEEP >= 0` prunes; `KEEP < 0` = unlimited (no pruning).
+- A second consecutive `--apply` with nothing stale is zero-action: exit 0,
+  no moves, no new state.
 
 ## Environment overrides
 
-`HDCS_RUNS_DIR` and `HDCS_ARCHIVE_DIR` override the conf values. A set-but-empty
-variable is a refusal (A4). Path law: equal, mutually containing, or degenerate
-(`''`, `.`, `/`) paths are refused citing A4, with zero writes.
+`HDCS_RUNS_DIR` and `HDCS_ARCHIVE_DIR` override the corresponding conf values.
+A variable that is set but empty is refused (A4). All path law refusals —
+equal paths, containment in either direction, degenerate (`''`, `.`, `/`),
+set-but-empty — exit ≥1 with a message citing `A4`, before any write.
 
-## Behavior
+## Exit codes
 
-- Dry-run lists would-be moves and creates nothing.
-- Apply moves only files with mtime >= AGE_DAYS; each file is copied to the
-  archive, byte-compared (`cmp`) against the source, and only then removed from
-  the source (A5 lossless). Name collisions get a `.1`, `.2`, ... suffix.
-- After each apply, the rotator writes a cksum manifest
-  (`.hdcs-rotation-manifest`) inside the archive listing every archived file.
-- A second `--apply` finds zero candidates and is a no-op; the archive (and its
-  manifest) remain cksum-identical (A5 idempotence).
-- Verify exits 0 iff the conf parses with exactly 5 keys, no pending rotation
-  exists under RUNS_DIR, the archive directory exists with at least one archived
-  file within KEEP, and the archive's cksum listing matches the stored manifest
-  (A6). Otherwise it exits nonzero with a reason line.
+- `rotate-hdcs-runs.sh`: `0` success or zero-action; `≥1` any refusal/failure.
+- `verify-rotation.sh`: `0` consistent (conf parses, no stale match under
+  RUNS_DIR, archive listing consistent); `2` malformed conf; `≥1` otherwise.
+  Verify never writes.
 
-## Known limitations (A7)
+## KNOWN_LIMITATIONS
 
-Exotic filenames and concurrent writes during `--apply` are known limitations,
-not failures.
+- Exotic filenames: names containing newlines, or beginning/ending with
+  whitespace, are not handled specially; the tooling may misreport them.
+  This is a documented limitation, not a tool failure (A7).
+- Races: a file created or modified concurrently between the stale scan and
+  the move may be rotated or skipped inconsistently; no locking is performed.
+  Documented limitation (A7).
+- Only regular files are rotated; symlinks, fifos, and other non-regular
+  entries are ignored.

@@ -1,39 +1,30 @@
-reg: {domain: cs-shell-ops, canon: bash/coreutils file-ops vocabulary — find -mtime, realpath, cmp, cksum, mkdir -p, KEY=VALUE conf parsing via source-safe read}
-intent: >
-  deliver self-contained rotation pair for /workspace/hdcs/runs: conf file
-  (exactly RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP), rotate-hdcs-runs.sh
-  (DRY-RUN default zero-write; --apply moves PATTERN files age ≥ AGE_DAYS from
-  RUNS_DIR into ARCHIVE_DIR preserving relative path, env overrides, path-law
-  refusals citing A-numbers, idempotent move-once), verify-rotation.sh
-  (exit 0 iff A6 conjunct holds), README.md (install, configure, dry-run test,
-  schedule). No root, no logrotate, bash + coreutils only.
+reg: {domain: cs-shell-ops, canon: "bash+coreutils rotation tooling; nouns = find -mtime, realpath, cmp, cksum, KEY=VALUE conf, exit-status contract"}
+intent: "deliver self-contained rotation pair for /workspace/hdcs/runs text artifacts: conf (exactly 5 keys), rotate-hdcs-runs.sh (DRY default / --apply move->archive->prune), verify-rotation.sh (consistency gate), README.md; constraints per A1..A7"
 must_keep:
   - "default mode is dry-run that performs no writes"
   - "no root required and no logrotate dependency"
   - "archived originals land outside the runs directory"
   - "the config defines exactly the five keys RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP"
 resolved:
-  - "Q1: is dry-run allowed to create ARCHIVE_DIR or state files? -> A: no; A1: dry-run zero-write, --apply sole writing mode"
-  - "Q2: toolchain envelope? -> A: A2: pure bash + coreutils (find, cmp, realpath, cksum); logrotate invocation = defect; no root"
-  - "Q3: path safety law? -> A: A4: refuse identity, containment ∀ direction, degenerate ('', '.', '/'); refusal cites A-number, zero writes; env set-but-empty refuses"
-  - "Q4: idempotence semantics? -> A: A5: move-once by age threshold; 2nd --apply zero-action no-op, ARCHIVE_DIR byte-identical via cksum; bytes verified with cmp; rotation suffix preserves names"
-  - "Q5: verify exit criteria? -> A: A6: exit 0 iff conf parses ∧ no pending rotation ∧ archive listing intact; else nonzero"
-  - "Q6: exotic filenames / concurrency? -> A: A7: KNOWN_LIMITATIONS, not FAIL; document in README"
-  - "Q7: precedence? -> A: env HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR override conf; conf overrides built-in defaults"
+  - "Q1: which modes write? -> A: DRY zero-write incl. no ARCHIVE_DIR/state creation; --apply sole writer (A1)"
+  - "Q2: toolchain? -> A: pure bash + coreutils (find, cmp, realpath, cksum); logrotate forbidden (A2)"
+  - "Q3: path safety? -> A: refuse equality, containment either way, degenerate '', '.', '/'; cite A-numbers; zero writes on refusal (A4)"
+  - "Q4: env override? -> A: HDCS_RUNS_DIR/HDCS_ARCHIVE_DIR override conf; set-but-empty refuses (A4)"
+  - "Q5: idempotence contract? -> A: move-once age threshold; 2nd --apply zero-action, ARCHIVE_DIR byte-identical; bytes verified cmp; name+rotation suffix (A5)"
+  - "Q6: verify contract? -> A: exit 0 iff conf parses AND no stale-matching file under RUNS_DIR AND archived listing consistent; else nonzero (A6)"
+  - "Q7: race/exotic names? -> A: KNOWN_LIMITATIONS documented, not FAIL (A7)"
 workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
-handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+handoff: {state: "S_0 + Delta -> S_1", report: [+done, -resolved, +open, +validation]}
 constraints:
-  - "dry-run default performs zero writes (A1) — MUST_KEEP"
-  - "no root, no logrotate dependency (A2) — MUST_KEEP"
-  - "archived originals land outside runs dir (A4 containment law) — MUST_KEEP"
-  - "conf defines exactly five keys RUNS_DIR, ARCHIVE_DIR, AGE_DAYS, PATTERN, KEEP — MUST_KEEP"
-  - "path law A4: refuse degenerate/overlap with cited A-number, zero writes on refusal"
-  - "idempotence A5: second --apply byte-identical no-op"
+  - "no logrotate invocation, no root, plain bash + coreutils only"
+  - "dry-run default performs zero filesystem writes"
+  - "path law A4 enforced pre-write; refusals cite A-numbers"
+  - "idempotence per A5_move_once/A5_bytes; no_resurrect: [A1,A4,A5,A6]"
 paths:
-  - /workspace/hdcs/runs
-  - /workspace/.hdcs-rotate/archive
-  - "<artifact-dir>/hdcs-runs-rotation.conf"
-  - "<artifact-dir>/rotate-hdcs-runs.sh"
-  - "<artifact-dir>/verify-rotation.sh"
-  - "<artifact-dir>/README.md"
-budgets: {tokens: 4000, lines: 60, fix_cycles: 2, questions: 2}
+  - "<artifact_dir>/hdcs-runs-rotation.conf"
+  - "<artifact_dir>/rotate-hdcs-runs.sh"
+  - "<artifact_dir>/verify-rotation.sh"
+  - "<artifact_dir>/README.md"
+  - "/workspace/hdcs/runs"
+  - "/workspace/.hdcs-rotate/archive"
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
