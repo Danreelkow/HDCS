@@ -29,3 +29,19 @@ CONF TOLERANCE SEMANTICS (operator, precise): "conf parses" means — exactly th
 KEY=VALUE lines are present; blank lines and #-comment lines are IGNORED; any other
 non-empty, non-comment line (garbage, duplicate keys, malformed KEY=VALUE) is a PARSE
 FAILURE and verify exits nonzero. Tolerant of whitespace, strict about content.
+
+A8 (2026-09-02, APPROVED — operator Danreelkow): A verifier's verdict must be derived by
+    re-reading the artifact tree itself; state the same toolchain wrote earlier may index but
+    never attest. AND the recorded notes must be cross-checked against the tree on every run:
+    re-derive the facts from disk, compare with the notes — any drift between notes and disk is
+    itself a failure. Recorded state names paths to re-check and must agree with what the
+    re-check finds. Refusal wording builders must emit: fail \"A8: verdict attested by
+    self-written state, not artifact re-read\" or fail \"A8: recorded notes drifted from
+    artifact re-read\". Gate-testable: no — pure register law, S4-enforced (LOCK3-proven
+    non-catchable class, 12 recurrences).
+
+    Change-detection (operator, 2026-09-02): the verifier first fingerprints the tree on
+    disk (cksum/mtime) and compares against recorded state. Fingerprints match -> record
+    verified-no-change and skip the deep re-check. Anything differs (or no record) -> full
+    re-derive + notes cross-check. The match decision itself comes from disk evidence,
+    never from the notes asserting it.

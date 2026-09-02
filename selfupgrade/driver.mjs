@@ -35,17 +35,44 @@ function route(task, exitCode) {
   return v;
 }
 
-function tick() {
+
+const once = process.argv.includes('--once');
+const workersArg = process.argv.find(a => /^--workers=\d+$/.test(a));
+const N = workersArg ? parseInt(workersArg.split('=')[1], 10) : 1;
+
+// Atomic claim: rename TASK-x.json -> TASK-x.json.claimed (same fs). Disjoint tasks run
+// concurrently; the same task can never be claimed twice. Claims are released by the
+// routing step (rename back before route/requeue).
+const claim = () => {
   const entries = fs.readdirSync(QUEUE)
     .filter(f => /^TASK-.+\.json$/.test(f))
     .map(f => ({ f, m: fs.statSync(path.join(QUEUE, f)).mtimeMs }))
-    .sort((a, b) => a.m - b.m); // oldest first
-  if (!entries.length) return false;
-  const { f } = entries[0];
-  const p = path.join(QUEUE, f);
+    .sort((a, b) => a.m - b.m);
+  for (const { f } of entries) {
+    const p = path.join(QUEUE, f);
+    const claimed = p + '.claimed';
+    try { fs.renameSync(p, claimed); } catch { continue; } // lost the race — try next
+    let entry = null;
+    try { entry = JSON.parse(fs.readFileSync(claimed, 'utf8')); } catch { entry = { task: f, unparseable: true, error: 'bad json' }; }
+    return { json: f, claimed, entry };
+  }
+  return null;
+};
+const release = c => { try { fs.renameSync(c.claimed, path.join(QUEUE, c.json)); } catch {} };
+const releaseAs = (c, dstDir, note) => {
+  fs.mkdirSync(dstDir, { recursive: true });
+  const dst = path.join(dstDir, c.json);
+  try { fs.renameSync(c.claimed, dst); } catch {}
+  if (note) fs.writeFileSync(dst.replace(/\.json$/, '.note.txt'), note + '\n');
+};
+
+function tick() {
+  const c = claim();
+  if (!c) return false;
+  const p = path.join(QUEUE, c.json);
   let e;
-  try { e = JSON.parse(fs.readFileSync(p, 'utf8')); } catch (err) {
-    move(p, parked, `unparseable queue entry: ${err.message}`);
+  try { e = c.entry; } catch (err) {
+    releaseAs(c, parked, `unparseable queue entry: ${err.message}`);
     return true;
   }
   const task = e.task;
@@ -61,7 +88,7 @@ function tick() {
   const v = route(task, code);
   const remaining = maxLaps - (lapsDone + 1);
   if (v.verdict === 'delivered') {
-    move(p, parked, `DELIVERED (exit 0) — ${v.reason || 'loop reported delivery'}`);
+    releaseAs(c, parked, `DELIVERED (exit 0) — ${v.reason || 'loop reported delivery'}`);
   } else if (v.verdict === 'promote') {
     if (process.env.HDCS_PROMOTE !== '0') {
       const pr = spawnSync('node', [new URL('./promote.mjs', import.meta.url).pathname, task], {
@@ -70,31 +97,57 @@ function tick() {
       let pv = null; try { pv = JSON.parse((pr.stdout || '').trim().split('\n').pop()); } catch {}
       console.log(`[driver] promote flow: ${pv ? pv.reason : 'unparseable'}`);
       const dstNote = `PROMOTED — ${v.reason} | promote-flow: ${pv ? pv.reason : 'failed'}`;
-      if (v.taskParked) move(p, parked, `PARKED (task) — ${dstNote}`);
-      else move(p, promoted, dstNote);
+      releaseAs(c, v.taskParked ? parked : promoted, dstNote);
       return { verdict: 'promote', reason: v.reason, promoteFlow: pv };
     }
-    move(p, promoted, `PROMOTED — ${v.reason}`);
+    releaseAs(c, promoted, `PROMOTED — ${v.reason}`);
   } else if (v.verdict === 'park') {
-    move(p, parked, `PARKED — ${v.reason}`);
+    releaseAs(c, parked, `PARKED — ${v.reason}`);
   } else if (remaining <= 0) {
-    move(p, parked, `EXHAUSTED — maxLaps reached while verdict was ${v.verdict}: ${v.reason || ''}`);
+    releaseAs(c, parked, `EXHAUSTED — maxLaps reached while verdict was ${v.verdict}: ${v.reason || ''}`);
   } else {
-    fs.writeFileSync(p, JSON.stringify({ ...e, laps: lapsDone + 1 }, null, 2) + '\n');
+    // write updated entry into the CLAIMED file, then release — no race window
+    fs.writeFileSync(c.claimed, JSON.stringify({ ...e, laps: lapsDone + 1 }, null, 2) + '\n');
+    release(c);
     console.log(`[driver] requeued ${task} (verdict ${v.verdict}, ${remaining} lap(s) left): ${v.reason || ''}`);
   }
   return true;
 }
 
-const once = process.argv.includes('--once');
-let busy = false;
-const run = () => {
-  if (busy) return;
-  busy = true;
-  try { tick(); } catch (err) { console.error('[driver] tick error:', err.message); }
-  busy = false;
-};
-if (once) { const ran = tick(); console.log(ran ? '[driver] --once: ran one tick' : '[driver] --once: queue empty'); process.exit(0); }
-setInterval(run, TICK_MS);
-console.log(`[driver] watching ${QUEUE} every ${TICK_MS / 60000} min`);
-run();
+if (once && N === 1) { const ran = tick(); console.log(ran ? '[driver] --once: ran one tick' : '[driver] --once: queue empty'); process.exit(0); }
+if (N > 1) {
+  // N-worker drain: TRUE parallelism via N child driver processes. Each child loops
+  // sync ticks on disjoint atomically-claimed tasks (spawnSync blocks, so concurrency
+  // must come from processes, not promises). Parent exits when all children drain.
+  console.log(`[driver] ${N} workers draining ${QUEUE}`);
+  const { spawn } = await import('node:child_process');
+  const kids = [];
+  for (let i = 0; i < N; i++) {
+    kids.push(new Promise(res => {
+      const kid = spawn(process.execPath, [new URL('./driver.mjs', import.meta.url).pathname, '--worker'], {
+        cwd: ROOT, env: { ...process.env, HDCS_WORKER_ID: String(i) }, stdio: ['ignore', 'inherit', 'inherit'],
+      });
+      kid.on('exit', code => { console.log(`[driver] worker-${i} drained (exit ${code})`); res(); });
+    }));
+  }
+  Promise.all(kids).then(() => { console.log('[driver] queue drained'); process.exit(0); });
+} else if (process.env.HDCS_WORKER_ID !== undefined) {
+  // child worker: drain the queue synchronously, then exit
+  while (true) {
+    let more = false;
+    try { more = tick() !== false; } catch (err) { console.error('[driver] worker tick error:', err.message); process.exit(1); }
+    if (!more) break;
+  }
+  process.exit(0);
+} else {
+  let busy = false;
+  const run = () => {
+    if (busy) return;
+    busy = true;
+    try { tick(); } catch (err) { console.error('[driver] tick error:', err.message); }
+    busy = false;
+  };
+  setInterval(run, TICK_MS);
+  console.log(`[driver] watching ${QUEUE} every ${TICK_MS / 60000} min`);
+  run();
+}
