@@ -1,0 +1,121 @@
+=== query-code-index.mjs ===
+#!/usr/bin/env node
+// Query the dsh-src code index.
+// Usage: node query-code-index.mjs <substring> [--kind class|function|interface|type|const|enum|method|property] [--pkg <name>] [--limit N]
+//
+// Internal structure (behavior preserved byte-for-byte vs baseline):
+//   [argParse]       — CLI flag loop, usage/die semantics
+//   [freshnessCheck] — pull-based staleness detection + inline rebuild (best-effort)
+//   [telemetry]      — one JSONL line per query, best-effort
+//   [renderHits]     — double-space-joined stdout rows + stderr summary
+
+import fs from 'node:fs'
+import { execSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
+
+const REPO_PATH = '/workspace/dsh-src'
+const INDEX_PATH = fileURLToPath(new URL('../code-index/index.json', import.meta.url))
+const USAGE_LOG_PATH = fileURLToPath(new URL('../code-index/usage.log', import.meta.url))
+const BUILDER_PATH = fileURLToPath(new URL('./build-code-index.mjs', import.meta.url))
+
+const usage = () => {
+  console.error('usage: node query-code-index.mjs <substring> [--kind class|function|interface|type|const|enum|method|property] [--pkg <name>] [--limit N]')
+}
+const die = (msg, code = 1) => { console.error(msg); process.exit(code) }
+
+// ---------------------------------------------------------------------------
+// [argParse] — first positional = substring, second positional → die exit 2;
+// --kind/--pkg/--limit, -h/--help (usage → stderr, exit 0); limit finite and
+// >= 1, clamped to 200.
+// ---------------------------------------------------------------------------
+function argParse(argv) {
+  let sub = null
+  let kind = null
+  let pkg = null
+  let limit = 10
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]
+    if (a === '--kind') kind = argv[++i]
+    else if (a === '--pkg') pkg = argv[++i]
+    else if (a === '--limit') limit = parseInt(argv[++i], 10)
+    else if (a === '-h' || a === '--help') { usage(); process.exit(0) }
+    else if (sub === null) sub = a
+    else die(`unexpected argument: ${a}\n`, 2)
+  }
+  if (!sub) { usage(); process.exit(2) }
+  if (!Number.isFinite(limit) || limit < 1) die('--limit must be a positive integer', 2)
+  return { sub, kind, pkg, limit: Math.min(limit, 200) } // bounded output
+}
+
+// ---------------------------------------------------------------------------
+// [freshnessCheck] — pull-based freshness: if the repo moved since the build,
+// rebuild inline (~2.5s) so every query serves current data even without the
+// cron watchdog. Best-effort — a failed rebuild must never block a query
+// (stale beats dead).
+// ---------------------------------------------------------------------------
+function freshnessCheck() {
+  try {
+    const cur = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8'))
+    const liveHead = execSync(`git -C ${REPO_PATH} rev-parse --short=7 HEAD`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
+    const liveDirty = createHash('sha1').update(execSync(`git -C ${REPO_PATH} status --porcelain`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString()).digest('hex').slice(0, 10)
+    const meta = cur.meta || {}
+    if (meta.repoHead !== liveHead || meta.repoDirtyHash !== liveDirty) {
+      console.error('-- index stale (repo moved since build); rebuilding inline... --')
+      execSync('node ' + BUILDER_PATH, { stdio: ['ignore', 'inherit', 'inherit'] })
+    }
+  } catch (e) {
+    console.error(`-- freshness check skipped: ${e.message} --`)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// [telemetry] — usage telemetry (JSONL, one line per query) — answers "is the
+// index used?" Best-effort only: a logging failure must never break a query.
+// Appended before any hit/miss output.
+// ---------------------------------------------------------------------------
+function appendTelemetry(query) {
+  try {
+    fs.appendFileSync(
+      USAGE_LOG_PATH,
+      JSON.stringify({ ts: new Date().toISOString(), sub: query.sub, kind: query.kind, pkg: query.pkg, hits: query.hitCount, ms: Date.now() - query.t0 }) + '\n',
+    )
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// [renderHits] — stdout rows: double-space join of
+// [name, kind, pkg, file:line, doc||'']; miss → verbatim die exit 1;
+// otherwise stderr summary `-- N hit(s), showing M --`.
+// ---------------------------------------------------------------------------
+function renderHits(hits, query, totalSymbols, generatedAt) {
+  if (hits.length === 0) {
+    die(`no symbols matching "${query.sub}"${query.kind ? ` [kind=${query.kind}]` : ''}${query.pkg ? ` [pkg=${query.pkg}]` : ''} in index (${totalSymbols} symbols, generated ${generatedAt})`)
+  }
+  for (const h of hits.slice(0, query.limit)) {
+    console.log([h.name, h.kind, h.pkg, `${h.file}:${h.line}`, h.doc || ''].join('  '))
+  }
+  console.error(`-- ${hits.length} hit(s), showing ${Math.min(query.limit, hits.length)} --`)
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+const query = argParse(process.argv.slice(2))
+
+freshnessCheck()
+
+let index
+try { index = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8')) } catch (e) { die(`cannot read index at ${INDEX_PATH}: ${e.message}`) }
+
+const needle = query.sub.toLowerCase()
+const t0 = Date.now()
+const hits = index.symbols.filter((s) =>
+  (!query.kind || s.kind === query.kind) &&
+  (!query.pkg || s.pkg === query.pkg || s.pkg.includes(query.pkg)) &&
+  s.name.toLowerCase().includes(needle),
+)
+
+appendTelemetry({ sub: query.sub, kind: query.kind, pkg: query.pkg, hitCount: hits.length, t0 })
+
+renderHits(hits, query, index.symbols.length, index.generated)

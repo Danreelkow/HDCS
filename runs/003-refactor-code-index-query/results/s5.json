@@ -1,0 +1,36 @@
+{
+  "seat": "s5",
+  "model": "amazon/nova-micro-v1",
+  "http": 200,
+  "ms": 3217,
+  "usage": {
+    "prompt_tokens": 1146,
+    "completion_tokens": 487,
+    "total_tokens": 1633,
+    "cost": 0.00010829,
+    "is_byok": false,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost_details": {
+      "upstream_inference_cost": 0.00010829,
+      "upstream_inference_prompt_cost": 0.00004011,
+      "upstream_inference_completions_cost": 0.00006818
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0,
+      "audio_tokens": 0
+    }
+  },
+  "finish": "stop",
+  "error": null,
+  "system": "You are the S5 seat (egress). The loop ran in a dense technical register; the human reads only plain English. Reverse-translate: hcdl -> plain idiomatic English.\n1. LOSSLESS — every requirement, constraint, path, and resolved answer must survive in plain words.\n2. ZERO notation — no math symbols, no arrows, no :=, no state markers. Plain sentences only.\n3. Plain prose, under 40 lines, simple headings or short paragraphs.\n4. No preamble, no meta-commentary — just the translation.\n\n## REVERSE-GATE CONTRACT (hard requirement)\nYour debrief is mechanically checked for LOSSLESSNESS: every requirement name in the input (e.g. 'no-writes-in-dry-run', 'mirror', 'recursive') must appear VERBATIM — never paraphrase a named requirement. Keep the load-bearing claims in hcdl notation (∀/∃/->/= where natural, at least a few register tokens); plain prose wraps the register, it does not replace it.\n",
+  "user": "LOSSLESS TERMS — your debrief is mechanically probed; EACH requirement below must appear using one of its acceptable forms, verbatim:\n- behavior-preservation — acceptable forms: behavior-preserving / observable behavior / identical behavior\n- exit-codes — acceptable forms: exit codes / exit code\n- telemetry-kept — acceptable forms: telemetry / usage log\n- freshness-check — acceptable forms: freshness / stale\n- single-file-scope — acceptable forms: single file / one file\n- no-new-dependencies — acceptable forms: node: builtins / no new dependencies / builtins only\n\n=== hdcs/1 PACKET (reverse-translate this) ===\nreg: {domain: cs-programming, canon: \"exact Node ESM identifiers (process.exit, __dirname/import.meta.url, fs.appendFileSync, JSON.parse), CLI flags --kind/--pkg/--limit/-h, exit codes 0/1/2, JSONL telemetry, md5 baseline hashing\"}\nintent: \"behavior-preserving refactor of 73-line query-code-index.mjs; restructure/rename/delete-dead-code internally; ∀ observable behavior == baseline source/query-code-index.mjs — flags, exit codes (0 hit, 1 miss, 2 usage), stdout double-space-joined rows, stderr '-- N hit(s) --', 1 JSONL telemetry line -> sibling code-index/usage.log per query, pull freshness check stale-beats-dead non-blocking, index path resolved vs script location\"\nmust_keep:\n  - \"preserves every documented CLI flag, exit code, and output format of the baseline\"\n  - \"keeps usage telemetry appended to kb/code-index/usage.log on every query\"\n  - \"keeps the pull-based freshness check with stale-beats-dead degradation\"\nresolved:\n  - \"Q1: which file is baseline of record, scope of replacement? -> A: source/query-code-index.mjs, md5 must equal live tool at gate; refactor replaces exactly that one file (A1)\"\n  - \"Q2: exit code semantics? -> A: 0 hit, 1 no-symbols miss, 2 usage error — contract, verbatim (A2)\"\n  - \"Q3: telemetry + freshness check — feature or accident? -> A: features, preserve observably; 1 JSONL line per query; try/catch pull check, stale-beats-dead (A4)\"\n  - \"Q4: exact stdout row format? -> A: double-space join over name, kind, pkg, file:line, doc (A6)\"\n  - \"Q5: where does gate testing run? -> A: tmp layout replica; gate never writes workspace except run-dir bookkeeping (A9)\"\n  - \"Q6: who judges internal quality? -> A: S4 judges structure/naming/dead-code; behavior wins ties (A10)\"\nworkflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}\nhandoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}\nconstraints:\n  - \"baseline md5 == live tool md5 at gate (no_resurrect: forbid reverting baseline or editing source/query-code-index.mjs)\"\n  - \"replacement touches exactly one file — query-code-index.mjs; no other workspace writes by build (no_resurrect: A9)\"\n  - \"exit ∈ {0,1,2}; row join double-space; stderr summary verbatim; telemetry JSONL append; freshness try/catch non-blocking\"\npaths:\n  - /workspace/kb/tools/query-code-index.mjs\n  - source/query-code-index.mjs\n  - /workspace/kb/code-index/usage.log\n  - /workspace/dsh-src\nbudgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}",
+  "text": "### Reverse-Gate Contract\n\nYour debrief must ensure that every requirement below is preserved in plain words, exactly as listed:\n\n- **Behavior-preserving**: The refactor must maintain the exact behavior of the original 73-line query-code-index.mjs file. This includes all CLI flags, exit codes, and output formats.\n- **Exit codes**: The program must return exit codes 0 for a hit, 1 for a no-symbols miss, and 2 for a usage error.\n- **Telemetry-kept**: Usage telemetry must be appended to kb/code-index/usage.log on every query.\n- **Freshness-check**: The pull-based freshness check must be preserved, ensuring that stale data is handled non-blocking.\n- **Single-file-scope**: The refactor must replace exactly one file, query-code-index.mjs, without writing to any other files in the workspace.\n- **No-new-dependencies**: The refactor must use only the built-in Node ESM identifiers and not introduce any new dependencies.\n\nThe refactor must:\n- Preserve every documented CLI flag, exit code, and output format of the baseline.\n- Keep the usage telemetry appended to kb/code-index/usage.log on every query.\n- Maintain the pull-based freshness check with stale-beats-dead degradation.\n\nThe exact file to be replaced is source/query-code-index.mjs, and its md5 hash must match the live tool at the gate. The exit code semantics are 0 for a hit, 1 for no-symbols miss, and 2 for a usage error. The telemetry and freshness check are features to be preserved, with one JSONL line per query and a try/catch non-blocking pull check.\n\nThe exact stdout format must be double-space joined over name, kind, pkg, file:line, and doc. Gate testing runs in a temporary layout replica, and the gate never writes to the workspace except for run-dir bookkeeping. Internal quality is judged by S4 for structure, naming, and dead code, with behavior winning ties.\n\nThe workflow consists of plan, scoped-build, verify, and deliver phases with dynamic builders and a decorrelated verifier. The gate is ready for testing, and the maximum fix cycles allowed are 2.",
+  "reasoning": null,
+  "reasoning_details": null
+}

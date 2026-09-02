@@ -1,0 +1,39 @@
+```yaml
+reg: {domain: cs-programming, canon: "exact Node ESM identifiers (process.exit, __dirname/import.meta.url, fs.appendFileSync, JSON.parse), CLI flags --kind/--pkg/--limit/-h, exit codes 0/1/2, JSONL telemetry, md5 baseline hashing"}
+intent: "behavior-preserving refactor of 73-line query-code-index.mjs; restructure/rename/delete-dead-code internally; ∀ observable behavior == baseline source/query-code-index.mjs — flags, exit codes (0 hit, 1 miss, 2 usage), stdout double-space-joined rows, stderr '-- N hit(s) --', 1 JSONL telemetry line -> sibling code-index/usage.log per query, pull freshness check stale-beats-dead non-blocking, index path resolved vs script location"
+must_keep:
+  - "preserves every documented CLI flag, exit code, and output format of the baseline"
+  - "keeps usage telemetry appended to kb/code-index/usage.log on every query"
+  - "keeps the pull-based freshness check with stale-beats-dead degradation"
+resolved:
+  - "Q1: which file is baseline of record, scope of replacement? -> A: source/query-code-index.mjs, md5 must equal live tool at gate; refactor replaces exactly that one file (A1)"
+  - "Q2: exit code semantics? -> A: 0 hit, 1 no-symbols miss, 2 usage error — contract, verbatim (A2)"
+  - "Q3: telemetry + freshness check — feature or accident? -> A: features, preserve observably; 1 JSONL line per query; try/catch pull check, stale-beats-dead (A4)"
+  - "Q4: exact stdout row format? -> A: double-space join over name, kind, pkg, file:line, doc (A6)"
+  - "Q5: where does gate testing run? -> A: tmp layout replica; gate never writes workspace except run-dir bookkeeping (A9)"
+  - "Q6: who judges internal quality? -> A: S4 judges structure/naming/dead-code; behavior wins ties (A10)"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "baseline md5 == live tool md5 at gate (no_resurrect: forbid reverting baseline or editing source/query-code-index.mjs)"
+  - "replacement touches exactly one file — query-code-index.mjs; no other workspace writes by build (no_resurrect: A9)"
+  - "exit ∈ {0,1,2}; row join double-space; stderr summary verbatim; telemetry JSONL append; freshness try/catch non-blocking"
+paths:
+  - /workspace/kb/tools/query-code-index.mjs
+  - source/query-code-index.mjs
+  - /workspace/kb/code-index/usage.log
+  - /workspace/dsh-src
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+```
+
+=== context.hcdl ===
+defs: B behavior-surface := {flags --kind/--pkg/--limit/-h, exit ∈ {0,1,2}, stdout rows (double-space join), stderr "-- N hit(s) --", telemetry 1 JSONL line/query -> code-index/usage.log, freshness pull check}
+invariants:
+  A1: baseline-of-record := source/query-code-index.mjs; md5 == live tool at gate
+  A2: exit semantics {0: hit, 1: no-symbols miss, 2: usage error}, verbatim contract
+  A4: telemetry ∧ freshness are features → preserve observably; freshness try/catch, stale-beats-dead, non-blocking
+  A6: stdout row := double-space join [name, kind, pkg, file:line, doc]
+  A9: gate tests run in tmp layout replica; gate writes no workspace except run-dir bookkeeping
+  A10: S4 judges internal quality (structure/naming/dead-code); behavior wins ties
+  INV_bx: ∀ input ∈ behavior-surface -> Δ == ∅ vs baseline, recursive
+open: ∅ — ∀ ambiguity resolved by operator answers A1,A2,A4,A6,A9,A10; certified no-ambiguity

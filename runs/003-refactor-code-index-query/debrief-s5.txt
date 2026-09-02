@@ -1,0 +1,21 @@
+### Reverse-Gate Contract
+
+Your debrief must ensure that every requirement below is preserved in plain words, exactly as listed:
+
+- **Behavior-preserving**: The refactor must maintain the exact behavior of the original 73-line query-code-index.mjs file. This includes all CLI flags, exit codes, and output formats.
+- **Exit codes**: The program must return exit codes 0 for a hit, 1 for a no-symbols miss, and 2 for a usage error.
+- **Telemetry-kept**: Usage telemetry must be appended to kb/code-index/usage.log on every query.
+- **Freshness-check**: The pull-based freshness check must be preserved, ensuring that stale data is handled non-blocking.
+- **Single-file-scope**: The refactor must replace exactly one file, query-code-index.mjs, without writing to any other files in the workspace.
+- **No-new-dependencies**: The refactor must use only the built-in Node ESM identifiers and not introduce any new dependencies.
+
+The refactor must:
+- Preserve every documented CLI flag, exit code, and output format of the baseline.
+- Keep the usage telemetry appended to kb/code-index/usage.log on every query.
+- Maintain the pull-based freshness check with stale-beats-dead degradation.
+
+The exact file to be replaced is source/query-code-index.mjs, and its md5 hash must match the live tool at the gate. The exit code semantics are 0 for a hit, 1 for no-symbols miss, and 2 for a usage error. The telemetry and freshness check are features to be preserved, with one JSONL line per query and a try/catch non-blocking pull check.
+
+The exact stdout format must be double-space joined over name, kind, pkg, file:line, and doc. Gate testing runs in a temporary layout replica, and the gate never writes to the workspace except for run-dir bookkeeping. Internal quality is judged by S4 for structure, naming, and dead code, with behavior winning ties.
+
+The workflow consists of plan, scoped-build, verify, and deliver phases with dynamic builders and a decorrelated verifier. The gate is ready for testing, and the maximum fix cycles allowed are 2.

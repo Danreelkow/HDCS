@@ -1,0 +1,27 @@
+# Debrief: query-code-index.mjs refactor
+
+**What was asked.** A behavior-preserving refactor of a 73-line Node script that queries a code index. You may restructure, rename, and delete dead code inside the file, but the observable behavior must be identical to the baseline `source/query-code-index.mjs` — same flags, same outputs, same exit codes, same telemetry.
+
+**What must not change.**
+- Every documented CLI flag works exactly as before: `--kind`, `--pkg`, `--limit`, and `-h`.
+- Exit codes: 0 when a symbol is found, 1 when the query misses (no symbols), 2 when the usage is wrong.
+- Standard output rows are the fields name, kind, pkg, file:line, and doc, joined with a double space.
+- Standard error prints the summary line `-- N hit(s) --` verbatim.
+- Every query appends exactly one JSONL telemetry line to the sibling `code-index/usage.log` file.
+- The pull-based freshness check stays: it runs in a try/catch so a failed check never blocks the query, and a stale index still beats a dead one (stale results are shown rather than nothing).
+- The index path is resolved relative to the script's own location (`import.meta.url` / `__dirname`), not the caller's working directory.
+
+**Scope and safety rules.**
+- The refactor replaces exactly one file: `query-code-index.mjs`. The build may not write anywhere else in the workspace.
+- The baseline's md5 must equal the live tool's md5 at the gate — no reverting the baseline, no editing the source file (no_resurrect).
+- No new dependencies: node: builtins only (`fs.appendFileSync`, `JSON.parse`, `process.exit`).
+
+**Resolved questions.**
+1. The baseline of record is `source/query-code-index.mjs`; the refactor swaps out that single file.
+2. Exit code semantics are a contract: 0 hit, 1 miss, 2 usage error.
+3. Telemetry and the freshness check are features, not accidents — preserve both observably.
+4. Row format is the double-space join described above.
+5. Gate testing runs in a temporary layout replica; the gate never writes to the workspace except its own run-dir bookkeeping.
+6. Internal quality (structure, naming, dead code) is judged by S4, but behavior wins any tie.
+
+**Process.** Four phases — plan, scoped build, verify, deliver — with dynamic builders, a decorrelated verifier, and a READY or NOT_READY gate. Up to two fix cycles. The handoff carries what's done, what's resolved, what's open, and validation results. Budget: about 60 lines, two fix cycles, at most two questions.

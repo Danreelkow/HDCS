@@ -1,0 +1,10 @@
+defs: B behavior-surface := {flags --kind/--pkg/--limit/-h, exit ∈ {0,1,2}, stdout rows (double-space join), stderr "-- N hit(s) --", telemetry 1 JSONL line/query -> code-index/usage.log, freshness pull check}
+invariants:
+  A1: baseline-of-record := source/query-code-index.mjs; md5 == live tool at gate
+  A2: exit semantics {0: hit, 1: no-symbols miss, 2: usage error}, verbatim contract
+  A4: telemetry ∧ freshness are features → preserve observably; freshness try/catch, stale-beats-dead, non-blocking
+  A6: stdout row := double-space join [name, kind, pkg, file:line, doc]
+  A9: gate tests run in tmp layout replica; gate writes no workspace except run-dir bookkeeping
+  A10: S4 judges internal quality (structure/naming/dead-code); behavior wins ties
+  INV_bx: ∀ input ∈ behavior-surface -> Δ == ∅ vs baseline, recursive
+open: ∅ — ∀ ambiguity resolved by operator answers A1,A2,A4,A6,A9,A10; certified no-ambiguity
