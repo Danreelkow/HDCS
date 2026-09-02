@@ -88,4 +88,4 @@ selfupgrade/    the zero-LLM self-upgrade loop
 ## License
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — free to use, study, modify, and share for any
-noncommercial purpose. No selling.
+noncommercial purpose. No selling.  -  Plant a tree commit to opensource
