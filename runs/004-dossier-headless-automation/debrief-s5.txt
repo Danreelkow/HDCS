@@ -1,0 +1,89 @@
+## Reverse-Gate Contract (mandatory requirement)
+
+Your debrief must be checked for LOSSLESSNESS: each requirement name in the input must appear exactly as listed below. Here are the key terms and their acceptable forms:
+
+- route model: route class / route model / Pyrocrawl / Camoufox
+- per-URL table: per-URL register / one row per / register table
+- exact commands: exact local command / command that fetches
+- botwall documentation: bot-wall / bot-walled / 403
+- re-verify procedure: re-verify / maintenance / add a URL
+
+### Reverse-Gate Packet
+
+**Domain:** cs-programming/headless-web-automation
+
+**Canonical identifiers:** exact local identifiers from scrapers-README.md (Pyrocrawl, Camoufox, node fetch), HTTP status codes (401/403/404/418/429/5xx), TAB-separated register parsing
+
+**Intent:**
+
+Create DOSSIER.md for the operator with the following details:
+
+1. Route model citing scrapers-README.md:
+   - Tier 1: plain node fetch when stack_file deems it sufficient
+   - Tier 2: local Pyrocrawl service when stack_file specifies it for challenging routes
+   - Tier 3: Camoufox browser engine when stack_file specifies it for botwall-class pages
+
+2. Per-URL register: For each URL in the register file, include:
+   - URL
+   - Expected class
+   - Observed status
+   - Exact local command
+
+   Ensure claims match observed reality.
+
+3. Maintenance: 
+   - Re-verify loop
+   - Add-URL procedure
+   - Route-class-change semantics
+
+No flags or routes outside the stack_file. Botwalls are findings with observed codes; dead entries are network errors or statuses 404 or 5xx, with a maximum of one tolerated and explicitly labeled.
+
+**Must Keep:**
+
+- Classify every registered URL with an observed, re-verifiable status
+- Name the exact local command that fetches each registered page
+- Document bot-walled entries as bot-walled with the observed code
+
+**Resolved:**
+
+- Q1: Which artifact is the register of record? Answer: source/urls.txt, TAB-separated URL + expected class (A1)
+- Q2: Ground truth for routes/commands/flags? Answer: source/scrapers-README.md exclusively; no invented flags/routes (A4)
+- Q3: Observed vs expected class mismatch? Answer: Document observed as finding, not error (A4)
+- Q4: What counts as dead vs botwall? Answer: Botwall = {401,403,418,429} documented with code; dead = network_error ∨ 404 ∨ 5xx (A5)
+- Q5: Gate enforcement? Answer: Gate re-fetches all URLs; contradicting route-class claim FAILS (A9)
+- Q6: Dead-URL tolerance? Answer: ≤1 at gate time; dead row explicitly labeled (A10)
+- Q7: Remaining ambiguities? Answer: None — route tiers, command syntax, and class semantics all resolve against stack_file verbatim; builder extracts exact commands at build time
+
+**Workflow:**
+
+Phases: plan, scoped-build, verify, deliver
+Builders: dynamic
+Verifier: decorrelated
+Gate: READY|NOT_READY
+Max fix cycles: 2
+
+**Handoff:**
+
+State: S_0 + Delta -> S_1
+Report: [+done, -resolved, +open, +validation]
+
+**Constraints:**
+
+- All route/flag/command definitions from scrapers-README.md; no resurrected invented flags
+- All per-URL claims re-observable at gate run time; no resurrected unverifiable status
+- Botwall rows carry observed code verbatim; dead rows explicitly labeled; count(dead) ≤ 1
+- DOSSIER.md section order fixed: route model, per-URL register, maintenance
+- Observed ≠ expected ⇒ documented finding, ¬ correction to expected
+
+**Paths:**
+
+- DOSSIER.md
+- source/urls.txt
+- source/scrapers-README.md
+
+**Budgets:**
+
+- Tokens: 60000
+- Lines: 60
+- Fix cycles: 2
+- Questions: 2

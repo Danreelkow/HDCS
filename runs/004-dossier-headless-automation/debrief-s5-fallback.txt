@@ -1,0 +1,21 @@
+# What was asked, in plain English
+
+The task: write a DOSSIER.md for an operator, based on a headless-web-automation project. The document needs three sections, in a fixed order: a route model, a per-URL register table, and maintenance instructions.
+
+**The route model.** The dossier explains how the project routes each web request, citing only what scrapers-README.md actually says. There are three route classes. The first is a plain node fetch, used when the stack file says that's good enough for a page. The second is a local Pyrocrawl service, for routes the stack file marks as needing it. The third is the Camoufox browser engine, reserved for bot-walled pages — pages that block automated access and return a 403 or similar. Nothing else is allowed: every route, flag, and command in the dossier must come from scrapers-README.md verbatim. Inventing flags or routes is forbidden (the no_resurrect: invented-flags rule).
+
+**The per-URL register.** The register of record is source/urls.txt, which is TAB-separated with one row per URL: the URL plus its expected route class (15 URLs total). For every one of those URLs, the dossier must add a register table row showing the URL, the expected class, the status actually observed, and the exact local command that fetches that page. Every claim must match what really happens when the command is run — anything not re-verifiable at gate time is disallowed (no_resurrect: unverifiable-status).
+
+**Bot-walls and dead pages.** A page counts as bot-walled if it returns 401, 403, 418, or 429; those rows must be documented as bot-walled with the observed status code written out exactly. A page counts as dead if it has a network error, a 404, or a 5xx server error. At most one dead URL is tolerated in the whole register, and that dead row must be explicitly labeled as dead.
+
+**Mismatch handling.** If the observed route class differs from the expected one, the dossier records that as a documented finding — it does not quietly "correct" the expected value to match.
+
+**Maintenance section.** This covers the re-verify loop, how to add a URL to the register, and what it means when a route's class changes over time.
+
+## Checks and decisions along the way
+
+The workflow ran in four phases: plan, scoped build, verify, deliver. The builder was chosen dynamically; the verifier was deliberately different from the builder. The gate re-fetched all the URLs itself; if any route-class claim in the dossier contradicted what the re-fetch showed, the run failed. Up to two fix cycles were allowed. The final gate verdict was READY.
+
+Other resolved questions: the ground truth for routes, commands, and flags is scrapers-README.md exclusively. The builder extracted the exact commands at build time so nothing was typed from memory. Budgets were 60,000 tokens, 60 lines, two fix cycles, and two questions. Files involved: DOSSIER.md, source/urls.txt, and source/scrapers-README.md.
+
+All ambiguities were resolved: the route tiers, the command syntax, and the class semantics all come straight from the stack file, and no open questions remain.

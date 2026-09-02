@@ -1,0 +1,19 @@
+defs:
+  reg_file := source/urls.txt (TAB-sep: URL + expected route class ∈ {open, botwall}), register of record
+  stack_file := source/scrapers-README.md, ground truth for local fetch stack
+  route_model := {plain_node_fetch | Pyrocrawl_local_service | Camoufox_browser} — tiers defined ONLY by stack_file citation
+  observed_status := status returned by gate re-fetch at run time; claims must match observed, not expected
+  botwall_codes := {401, 403, 418, 429}
+  dead := network_error ∨ 404 ∨ 5xx
+invariants:
+  A1_register: ∀ dossier row -> source == reg_file verbatim, TAB-parse
+  A4_observable: ∀ per-URL claim -> re-observable by gate; observed != expected ⇒ documented as finding, ¬ hidden
+  A5_botwall: ∀ botwall entry -> row = "bot-walled" + observed code; ¬ treat as failure
+  A9_gate_conflict: route-class claim ∧ gate observation contradictory -> FAIL
+  A10_dead_tolerance: count(dead rows) ≤ 1 at gate time ∧ dead row explicitly labeled
+  fidelity: ∀ route/flag taught ∈ stack_file; ¬ invent
+open: []
+notes:
+  dossier := DOSSIER.md, sections ordered [route_model, per_url_register, maintenance]
+  per_url_register row := {url, route_class, observed_status, exact_local_command}
+  maintenance := {re_verify_procedure, add_url_procedure, route_class_change_semantics}
