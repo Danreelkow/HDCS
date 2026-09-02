@@ -26,6 +26,18 @@ install -D step). The rollback section must give a concrete data-restore action
 for a bad sync (remove or re-sync HERMES_CONTEXT_DST from a known-good source),
 not merely disabling the timer.
 
+CLI and citation register (closed world):
+- The tool's own flags are exactly --dry-run and --verify. The strings
+  --checksum / --delete / --itemize-changes in the source are rsync's internal
+  invocation flags, not user-facing tool flags; do not teach them.
+- Refusal A-number register (cite only these, only where true): A8 set-but-empty
+  env var; A9 source/destination identity, ancestry, or symlink traversal; A10
+  degenerate paths; A14 log-path conflict; A14c staging overlap; A22 destination
+  is a symlink; A23 production default paths. If a refusal's citation is not in
+  this register, describe the refusal condition without a citation.
+- Known-good source means the configured HERMES_CONTEXT_SRC: after removing a
+  bad HERMES_CONTEXT_DST, re-syncing from it is the documented restore.
+
 MUST_KEEP: documents HERMES_CONTEXT_SRC and HERMES_CONTEXT_DST exactly
 MUST_KEEP: includes a --dry-run test the operator can run before installing
 MUST_KEEP: states the documented rollback for a bad sync
