@@ -166,9 +166,12 @@ for (const attempt of s3attempts) {
   if (attempt === 's3-repair') {
     outcomes.s3 = 'FAIL'; state.gate_pass = false;
     if (fs.existsSync('artifact-build.gatepass.txt')) {
+      const snap = fs.readFileSync('artifact-build.gatepass.txt', 'utf8');
       fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
-      state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
-      log('restored gate-passing snapshot — next lap repairs from the clean baseline');
+      fs.mkdirSync('artifact', { recursive: true });
+      for (const [name, body] of extractSections(snap)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+      state.gate_pass = true; state.s3_hash = digest(snap);
+      log('restored gate-passing snapshot (files + text) — next lap repairs from the clean baseline');
     }
   }
   else log('S3 gate failed; running repair round');
@@ -212,9 +215,12 @@ if (outcomes.s3 === 'PASS' || outcomes.s3.startsWith('NO GATE')) {
         outcomes.s3 = 'FAIL'; state.gate_pass = false;
         log('feedback repair broke the mechanical gate');
         if (fs.existsSync('artifact-build.gatepass.txt')) {
+          const snap = fs.readFileSync('artifact-build.gatepass.txt', 'utf8');
           fs.copyFileSync('artifact-build.gatepass.txt', 'artifact-build.txt');
-          state.gate_pass = true; state.s3_hash = digest(fs.readFileSync('artifact-build.txt', 'utf8'));
-          log('restored gate-passing snapshot — next lap repairs from the clean baseline with S4 evidence');
+          fs.mkdirSync('artifact', { recursive: true });
+          for (const [name, body] of extractSections(snap)) if (!name.includes('/') && !name.includes('..')) fs.writeFileSync(path.join('artifact', name), body.trimStart() + '\n');
+          state.gate_pass = true; state.s3_hash = digest(snap);
+          log('restored gate-passing snapshot (files + text) — next lap repairs from the clean baseline with S4 evidence');
         }
         break;
       }
