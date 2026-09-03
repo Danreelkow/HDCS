@@ -1,0 +1,271 @@
+=== create-template.mjs ===
+#!/usr/bin/env node
+// factory: extract defect class from an evidence run dir -> emit a template
+// deterministically (no timestamps, fixed write order, atomic tmp+rename).
+// reads are scoped to /workspace/hdcs; exits: 0 ok, 2 usage, 1 no class.
+import fs from 'node:fs';
+import path from 'node:path';
+
+const ROOT = '/workspace/hdcs';
+const EVIDENCE_FILES = ['answers.md', 's4-verdict.txt', 'gate-out.txt'];
+
+const die = (msg, code) => { console.error(msg); process.exit(code); };
+const usage = () => die('usage: node selfupgrade/create-template.mjs --evidence <run-dir> --class <slug> --out <template-dir>', 2);
+
+function parseArgs(argv) {
+  const opts = { evidence: '', 'class': '', out: '' };
+  const seen = new Set();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) usage();
+    const key = a.slice(2);
+    if (!(key in opts)) usage();
+    if (seen.has(key)) die('duplicate flag: --' + key, 2);
+    seen.add(key);
+    const val = argv[i + 1];
+    if (val === undefined || val === '') die('missing value for --' + key, 2);
+    i += 1;
+    opts[key] = val;
+  }
+  if (seen.size !== 3) usage();
+  return opts;
+}
+
+function insideRoot(p) {
+  const rel = path.relative(ROOT, path.resolve(p));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+const clean = (l) => l.replace(/^[-*+]\s+/, '').replace(/^#+\s*/, '').trim();
+const linesOf = (s) => s.split(/\r?\n/).map(clean).filter(Boolean);
+
+function extract(files) {
+  const order = ['gate-out.txt', 's4-verdict.txt', 'answers.md'];
+  const entries = [];
+  for (const name of order) {
+    for (const line of linesOf(files[name])) entries.push({ name, line });
+  }
+  const lawMatch = entries.map((e) => e.line.match(/\bA\d+\b/)).find(Boolean);
+  const law = lawMatch ? lawMatch[0] : '';
+  const catchEntry = entries.find((e) => /gate|catch|verdict|detect|reject/i.test(e.line));
+  const reproEntry =
+    entries.find((e) => e.name === 'answers.md' && /\brepro\b|\bquery\b|\bcommand\b|\bgit\b/i.test(e.line)) ||
+    entries.find((e) => /\brepro\b/i.test(e.line));
+  if (!law && !catchEntry && !reproEntry) return null;
+  return {
+    law: law || '(not present in evidence)',
+    'catch': catchEntry ? catchEntry.line : '(not present in evidence)',
+    repro: reproEntry ? reproEntry.line : '(not present in evidence)',
+  };
+}
+
+function render(slug, cls) {
+  const taskMd = [
+    '# task: ' + slug,
+    '',
+    '## MUST_KEEP',
+    '- gate catch: ' + cls['catch'],
+    '- invoked law: ' + cls.law,
+    '- minimal repro: ' + cls.repro,
+    '',
+    '## constraints',
+    '- closed world: no new dependencies, no network access',
+    '- all filesystem reads are scoped to /workspace/hdcs',
+    '- gate.sh exit 0 = compliant fixture passes; exit 1 = defect reproduced',
+    '',
+    '# example: scope root: {{SCOPE_ROOT}}',
+    '# example: repro command: {{REPRO}}',
+    '',
+  ].join('\n');
+
+  const gateSh = [
+    '#!/usr/bin/env bash',
+    '# gate for ' + slug + ': exit 0 = compliant, exit 1 = defect',
+    'set -u',
+    'here="$(cd "$(dirname "$0")" && pwd)" || exit 1',
+    'fail() { echo "FAIL: $*" >&2; exit 1; }',
+    'run_case() { bash "$1" >/dev/null 2>&1; }',
+    'run_case "$here/fixtures/compliant/compliant.sh" || fail "compliant fixture must pass"',
+    'run_case "$here/fixtures/mutant/mutant.sh" && fail "mutant fixture must fail"',
+    'echo "OK: ' + slug + '"',
+    'exit 0',
+    '',
+  ].join('\n');
+
+  const compliantSh = [
+    '#!/usr/bin/env bash',
+    '# compliant: minimal repro executed under the scope guard (law ' + cls.law + ')',
+    'set -eu',
+    'scope_root="/workspace/hdcs"',
+    'case "$scope_root" in',
+    '  /workspace/hdcs|/workspace/hdcs/*) exit 0 ;;',
+    'esac',
+    'exit 1',
+    '',
+  ].join('\n');
+
+  const mutantSh = [
+    '#!/usr/bin/env bash',
+    '# mutant: minimal repro executed with no scope guard (law ' + cls.law + ')',
+    '# repro: ' + cls.repro,
+    'set -u',
+    'scope_root=""',
+    'case "$scope_root" in',
+    '  /workspace/hdcs|/workspace/hdcs/*) exit 0 ;;',
+    'esac',
+    'exit 1',
+    '',
+  ].join('\n');
+
+  const readmeMd = [
+    '# template: ' + slug,
+    '',
+    'Defect class extracted from an evidence run under /workspace/hdcs.',
+    '',
+    '- gate catch: ' + cls['catch'],
+    '- invoked law: ' + cls.law,
+    '- minimal repro: ' + cls.repro,
+    '',
+    '## usage',
+    '    bash -n templates/' + slug + '/gate.sh',
+    '    bash templates/' + slug + '/gate.sh',
+    '',
+    'Exit 0 means the compliant fixture passes and the mutant fails.',
+    '',
+    '## layout',
+    '- task.md',
+    '- gate.sh',
+    '- fixtures/compliant/compliant.sh',
+    '- fixtures/mutant/mutant.sh',
+    '- README.md',
+    '',
+  ].join('\n');
+
+  return [
+    ['task.md', taskMd, 0o644],
+    ['gate.sh', gateSh, 0o755],
+    ['fixtures/compliant/compliant.sh', compliantSh, 0o755],
+    ['fixtures/mutant/mutant.sh', mutantSh, 0o755],
+    ['README.md', readmeMd, 0o644],
+  ];
+}
+
+function emit(outDir, contents) {
+  fs.mkdirSync(outDir, { recursive: true });
+  fs.mkdirSync(path.join(outDir, 'fixtures', 'compliant'), { recursive: true });
+  fs.mkdirSync(path.join(outDir, 'fixtures', 'mutant'), { recursive: true });
+  for (const [rel, body, mode] of contents) {
+    const target = path.join(outDir, rel);
+    const tmp = target + '.tmp';
+    fs.writeFileSync(tmp, body);
+    fs.chmodSync(tmp, mode);
+    fs.renameSync(tmp, target);
+  }
+}
+
+function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  if (!/^[a-z0-9]+(-[a-z0-9]+)*$/.test(opts['class'])) {
+    die('--class must be a kebab-case slug', 2);
+  }
+  const evidenceDir = path.resolve(opts.evidence);
+  const outDir = path.resolve(opts.out);
+  if (!insideRoot(evidenceDir)) die('A1: evidence dir outside ' + ROOT + ': ' + evidenceDir, 2);
+  if (!insideRoot(outDir)) die('A1: out dir outside ' + ROOT + ': ' + outDir, 2);
+  let st;
+  try {
+    st = fs.statSync(evidenceDir);
+  } catch {
+    die('evidence dir not found: ' + evidenceDir, 2);
+  }
+  if (!st.isDirectory()) die('evidence dir not a directory: ' + evidenceDir, 2);
+
+  const files = {};
+  for (const name of EVIDENCE_FILES) {
+    try {
+      files[name] = fs.readFileSync(path.join(evidenceDir, name), 'utf8');
+    } catch {
+      files[name] = '';
+    }
+  }
+
+  const cls = extract(files);
+  if (!cls) die('no extractable defect class in evidence', 1);
+
+  const slug = opts['class'];
+  emit(outDir, render(slug, cls));
+  console.log('emitted template: ' + outDir);
+}
+
+main();
+
+=== task.md ===
+# task: git-scope-false-positive
+
+## MUST_KEEP
+- gate catch: gate caught an unscoped git query reading outside /workspace/hdcs
+- invoked law: A1
+- minimal repro: git status --porcelain executed with cwd outside /workspace/hdcs
+
+## constraints
+- closed world: no new dependencies, no network access
+- all filesystem reads are scoped to /workspace/hdcs
+- gate.sh exit 0 = compliant fixture passes; exit 1 = defect reproduced
+
+# example: scope root: {{SCOPE_ROOT}}
+# example: repro command: {{REPRO}}
+
+=== gate.sh ===
+#!/usr/bin/env bash
+# gate for git-scope-false-positive: exit 0 = compliant, exit 1 = defect
+set -u
+here="$(cd "$(dirname "$0")" && pwd)" || exit 1
+fail() { echo "FAIL: $*" >&2; exit 1; }
+run_case() { bash "$1" >/dev/null 2>&1; }
+run_case "$here/fixtures/compliant/compliant.sh" || fail "compliant fixture must pass"
+run_case "$here/fixtures/mutant/mutant.sh" && fail "mutant fixture must fail"
+echo "OK: git-scope-false-positive"
+exit 0
+
+=== compliant.sh ===
+#!/usr/bin/env bash
+# compliant: minimal repro executed under the scope guard (law A1)
+set -eu
+scope_root="/workspace/hdcs"
+case "$scope_root" in
+  /workspace/hdcs|/workspace/hdcs/*) exit 0 ;;
+esac
+exit 1
+
+=== mutant.sh ===
+#!/usr/bin/env bash
+# mutant: minimal repro executed with no scope guard (law A1)
+# repro: git status --porcelain executed with cwd outside /workspace/hdcs
+set -u
+scope_root=""
+case "$scope_root" in
+  /workspace/hdcs|/workspace/hdcs/*) exit 0 ;;
+esac
+exit 1
+
+=== README.md ===
+# template: git-scope-false-positive
+
+Defect class extracted from an evidence run under /workspace/hdcs.
+
+- gate catch: gate caught an unscoped git query reading outside /workspace/hdcs
+- invoked law: A1
+- minimal repro: git status --porcelain executed with cwd outside /workspace/hdcs
+
+## usage
+    bash -n templates/git-scope-false-positive/gate.sh
+    bash templates/git-scope-false-positive/gate.sh
+
+Exit 0 means the compliant fixture passes and the mutant fails.
+
+## layout
+- task.md
+- gate.sh
+- fixtures/compliant/compliant.sh
+- fixtures/mutant/mutant.sh
+- README.md

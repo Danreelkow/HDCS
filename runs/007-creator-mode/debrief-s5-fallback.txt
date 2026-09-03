@@ -1,0 +1,35 @@
+## What we're building
+
+A factory CLI, `selfupgrade/create-template.mjs`, in the house style — a node ESM CLI using spawnSync, bash gate scripts, fixture-based canary testing, atomic file writes, kebab-case slugs, and {{PARAM}} template slots. It reads a finished run's evidence (answers.md, s4-verdict.txt, gate-out.txt), pulls out the defect class — what the gate caught, which law was invoked, the minimal repro — and emits a template: task.md (must-keep rules plus closed-world constraints and {{PARAM}} slots flagged `# example:`), a bash -n clean gate.sh (exit 0=compliant, 1=defect), a compliant fixture, a mutant fixture, and a README. Output is deterministic, and the tool exits 0|2|1 per spec.
+
+## The five non-negotiables (must_keep)
+
+1. gate.sh must FAIL on fixtures/mutant and PASS on fixtures/compliant (A4 law, no exceptions).
+2. template generation must be deterministic: same run evidence -> byte-identical template.
+3. no placeholders outside `# example:`-marked lines (A10).
+4. factory exits 0 on success, 2 on usage error, 1 if it cannot extract a class from evidence.
+5. works from arbitrary cwd (A9); reads only files under /workspace/hdcs (A1 scope-and-report).
+
+## Questions already answered
+
+- Q1 — the reference template comes from runs/006-backup-doctor-git-scope -> templates/git-scope-false-positive, the operator's acceptance item b.
+- Q2 — missing or partial evidence isn't fatal: the factory proceeds with an ∃-subset; zero extractable class -> exit 1.
+- Q3 — the slug is the kebab-case of the --class string; colliding with an existing template dir overwrites deterministically (byte-identical anyway).
+- Q4 — gate.sh portability: bash only, bash -n clean, POSIX-safe fixture invocation, exit codes 0/1 only.
+- Q5 — determinism mechanism: no timestamps, fixed file write order, stable serialization; proven by diffing two runs (acceptance d).
+
+## Ground rules
+
+- closed world: only this task statement and existing loop source define behavior; new deps or network = defect (A9).
+- behavior preservation: driver/classify/promote paths untouched (A2).
+- we reuse kernel patterns: spawnSync and atomic writes over invention.
+- acceptance gate (a)-(d): the factory exists and its emitted gate.sh is bash -n clean; the reference instantiation produces 5 files; the canary pair's exit codes are verified; the determinism diff is clean.
+- no_resurrect: A1, A2, A4, A9, A10 cited.
+
+## Process and handoff
+
+Four phases — plan, scoped-build, verify, deliver — with dynamic builders, a decorrelated verifier, a READY|NOT_READY gate, and max_fix_cycles: 2. Handoff moves S_0 + Delta -> S_1 with a report of +done, -resolved, +open, +validation. Budgets: tokens estimate only, lines 60, fix_cycles 2, questions 2.
+
+## Files in play
+
+selfupgrade/create-template.mjs; templates/git-scope-false-positive/ (task.md, gate.sh, fixtures/compliant/, fixtures/mutant/, README.md); runs/006-backup-doctor-git-scope/.

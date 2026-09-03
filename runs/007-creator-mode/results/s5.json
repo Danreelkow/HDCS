@@ -1,0 +1,36 @@
+{
+  "seat": "s5",
+  "model": "amazon/nova-micro-v1",
+  "http": 200,
+  "ms": 1920,
+  "usage": {
+    "prompt_tokens": 1168,
+    "completion_tokens": 438,
+    "total_tokens": 1606,
+    "cost": 0.0001022,
+    "is_byok": false,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0,
+      "audio_tokens": 0,
+      "video_tokens": 0
+    },
+    "cost_details": {
+      "upstream_inference_cost": 0.0001022,
+      "upstream_inference_prompt_cost": 0.00004088,
+      "upstream_inference_completions_cost": 0.00006132
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "image_tokens": 0,
+      "audio_tokens": 0
+    }
+  },
+  "finish": "stop",
+  "error": null,
+  "system": "You are the S5 seat (egress). The loop ran in a dense technical register; the human reads only plain English. Reverse-translate: hcdl -> plain idiomatic English.\n1. LOSSLESS — every requirement, constraint, path, and resolved answer must survive in plain words.\n2. ZERO notation — no math symbols, no arrows, no :=, no state markers. Plain sentences only.\n3. Plain prose, under 40 lines, simple headings or short paragraphs.\n4. No preamble, no meta-commentary — just the translation.\n\n## REVERSE-GATE CONTRACT (hard requirement)\nYour debrief is mechanically checked for LOSSLESSNESS: every requirement name in the input (e.g. 'no-writes-in-dry-run', 'mirror', 'recursive') must appear VERBATIM — never paraphrase a named requirement. Keep the load-bearing claims in hcdl notation (∀/∃/->/= where natural, at least a few register tokens); plain prose wraps the register, it does not replace it.\n",
+  "user": "LOSSLESS TERMS — your debrief is mechanically probed; EACH requirement below must appear using one of its acceptable forms, verbatim:\n\n\n=== hdcs/1 PACKET (reverse-translate this) ===\nreg: {domain: cs-programming, canon: \"node ESM CLI, spawnSync, bash gate scripts, fixture-based canary testing, atomic file writes, kebab-case slugs, {{PARAM}} template slots\"}\nintent: >\n  build factory CLI create-template.mjs: ingest run evidence (answers.md, s4-verdict.txt,\n  gate-out.txt) -> extract defect class (gate catch, invoked law, minimal repro) ->\n  emit templates/<slug>/ with task.md (MUST_KEEP + closed-world constraints + {{PARAM}}\n  slots marked `# example:`), bash -n clean gate.sh (exit 0=compliant | 1=defect),\n  fixtures/compliant (gate PASSES), fixtures/mutant (gate FAILS, A4), README.md.\n  Deterministic output; exit 0|2|1 per spec. Reference instantiation:\n  runs/006-backup-doctor-git-scope -> templates/git-scope-false-positive/.\nmust_keep:\n  - \"gate.sh must FAIL on fixtures/mutant and PASS on fixtures/compliant (A4 law, no exceptions)\"\n  - \"template generation must be deterministic: same run evidence -> byte-identical template\"\n  - \"no placeholders outside `# example:`-marked lines (A10)\"\n  - \"factory exits 0 on success, 2 on usage error, 1 if it cannot extract a class from evidence\"\n  - \"works from arbitrary cwd (A9); reads only files under /workspace/hdcs (A1 scope-and-report)\"\nresolved:\n  - \"Q1: which run seeds the reference template? -> A: runs/006-backup-doctor-git-scope -> templates/git-scope-false-positive (operator-specified acceptance item b)\"\n  - \"Q2: what if evidence files are missing/partial? -> A: factory proceeds with ∃-subset; zero extractable class -> exit 1\"\n  - \"Q3: slug derivation? -> A: kebab-case of --class string; collision with existing template dir -> overwrite deterministically (byte-identical anyway)\"\n  - \"Q4: gate.sh portability? -> A: bash, bash -n clean, POSIX-safe fixtures invocation, exit codes 0/1 only\"\n  - \"Q5: determinism mechanism? -> A: no timestamps, fixed file write order, stable serialization; verified via diff of two runs (acceptance d)\"\nworkflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}\nhandoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}\nconstraints:\n  - \"closed world: behaviors from this task statement + existing loop source only; new deps/network = defect (A9)\"\n  - \"behavior preservation: driver/classify/promote paths untouched (A2)\"\n  - \"reuse kernel patterns: spawnSync, atomic writes over invention\"\n  - \"acceptance gate (a)-(d): factory exists + emitted gate.sh bash -n clean; reference instantiation produces 5 files; canary pair exit codes verified; determinism diff clean\"\n  - \"no_resurrect: A1, A2, A4, A9, A10 cited\"\npaths:\n  - selfupgrade/create-template.mjs\n  - templates/git-scope-false-positive/task.md\n  - templates/git-scope-false-positive/gate.sh\n  - templates/git-scope-false-positive/fixtures/compliant/\n  - templates/git-scope-false-positive/fixtures/mutant/\n  - templates/git-scope-false-positive/README.md\n  - runs/006-backup-doctor-git-scope/\nbudgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}",
+  "text": "### Reverse-Gate Contract\n\nThe CLI tool `create-template.mjs` is designed to generate templates based on specific evidence files. Here's what it does:\n\n- **Purpose**: The tool reads evidence files like `answers.md`, `s4-verdict.txt`, and `gate-out.txt` to extract defect classes and invoke minimal reproductions. It then generates templates in a specific directory structure.\n  \n- **Output**: The tool produces:\n  - `templates/<slug>/task.md` with required details and example slots.\n  - A bash script `gate.sh` that runs checks and exits with status codes indicating compliance or defects.\n  - `fixtures/compliant` and `fixtures/mutant` directories to test the script.\n  - A `README.md` file.\n\n- **Requirements**:\n  - The script must fail on `fixtures/mutant` and pass on `fixtures/compliant`.\n  - Template generation must be deterministic, ensuring the same input produces the same output.\n  - No placeholders outside `# example:`-marked lines.\n  - The tool exits with 0 on success, 2 on usage errors, and 1 if it fails to extract a class from evidence.\n  - It works from any current directory and reads only files under `/workspace/hdcs`.\n\n- **Behavior**:\n  - The tool uses `spawnSync` and atomic file writes.\n  - It adheres to kebab-case slugs for directories.\n  - It relies on existing loop sources and avoids new dependencies or network calls to prevent defects.\n  - The bash script `gate.sh` is POSIX-safe and uses `bash -n clean` for verification.\n  - Determinism is ensured without timestamps and by maintaining a fixed file write order.\n\n- **Workflow**:\n  - The process includes planning, building, verifying, and delivering the output.\n  - The tool can handle up to two fix cycles and answers up to two questions during its execution.\n\nThis tool ensures that the generated templates are consistent, reliable, and adhere to the specified requirements.",
+  "reasoning": null,
+  "reasoning_details": null
+}

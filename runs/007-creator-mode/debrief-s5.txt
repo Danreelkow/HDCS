@@ -1,0 +1,31 @@
+### Reverse-Gate Contract
+
+The CLI tool `create-template.mjs` is designed to generate templates based on specific evidence files. Here's what it does:
+
+- **Purpose**: The tool reads evidence files like `answers.md`, `s4-verdict.txt`, and `gate-out.txt` to extract defect classes and invoke minimal reproductions. It then generates templates in a specific directory structure.
+  
+- **Output**: The tool produces:
+  - `templates/<slug>/task.md` with required details and example slots.
+  - A bash script `gate.sh` that runs checks and exits with status codes indicating compliance or defects.
+  - `fixtures/compliant` and `fixtures/mutant` directories to test the script.
+  - A `README.md` file.
+
+- **Requirements**:
+  - The script must fail on `fixtures/mutant` and pass on `fixtures/compliant`.
+  - Template generation must be deterministic, ensuring the same input produces the same output.
+  - No placeholders outside `# example:`-marked lines.
+  - The tool exits with 0 on success, 2 on usage errors, and 1 if it fails to extract a class from evidence.
+  - It works from any current directory and reads only files under `/workspace/hdcs`.
+
+- **Behavior**:
+  - The tool uses `spawnSync` and atomic file writes.
+  - It adheres to kebab-case slugs for directories.
+  - It relies on existing loop sources and avoids new dependencies or network calls to prevent defects.
+  - The bash script `gate.sh` is POSIX-safe and uses `bash -n clean` for verification.
+  - Determinism is ensured without timestamps and by maintaining a fixed file write order.
+
+- **Workflow**:
+  - The process includes planning, building, verifying, and delivering the output.
+  - The tool can handle up to two fix cycles and answers up to two questions during its execution.
+
+This tool ensures that the generated templates are consistent, reliable, and adhere to the specified requirements.

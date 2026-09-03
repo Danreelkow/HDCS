@@ -1,0 +1,10 @@
+defs: factory := selfupgrade/create-template.mjs; evidence := {answers.md, s4-verdict.txt, gate-out.txt} ∈ runs/<slug>/; template := {task.md, gate.sh, fixtures/compliant/, fixtures/mutant/, README.md} ∈ templates/<slug>/
+invariants:
+  A4_canary: ∀ fixture pair -> gate.sh(fixtures/compliant)=0 ∧ gate.sh(fixtures/mutant)=1
+  A_det: ∀ same evidence input -> byte-identical template output (no timestamps, fixed write order)
+  A_exit: exit ∈ {0 success, 2 usage, 1 no-class-extractable}
+  A1_scope: ∀ fs read -> path ∈ /workspace/hdcs
+  A9_cwd: ∀ cwd -> factory operates; closed world, no new deps
+  A10_slots: ∀ {{PARAM}} occurrence -> line marked `# example:`
+  A2_preserve: driver/classify/promote paths untouched
+open: ∅ — all ambiguities resolved via Q1–Q5 operator answers; gate READY
