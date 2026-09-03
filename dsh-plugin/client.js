@@ -1,13 +1,14 @@
-// HDCS reasoning tool card + Control Room — CLIENT half (hdcs-1/pkg-7)
+// HDCS reasoning tool card + phase cues + Control Room — CLIENT half (hdcs-1/pkg-9)
 // Remount: paste into cordis_define code.client (plugin kind:'existing', pluginId 'hdcs-1').
 //
-// Two surfaces, both DSH-native (per operator directive 2026-09-03: no extra
+// Three surfaces, all DSH-native (per operator directive 2026-09-03: no extra
 // windows — extend what DSH already has):
-//   1. tool.call.toolview keyed 'hdcs_reasoning' — the card for the dynamic
-//      hdcs_reasoning tool. Renders IN the conversation flow, collapsed to a
-//      one-line header (Think-style), expands in place to the register/brief/
-//      gate/verdict sections. No overlay, no dock.
-//   2. settings.section 'hdcs-control-room' — the Control Room page.
+//   1. tool.call.toolview keyed 'hdcs_reasoning' — Think-style collapsible card
+//      for the reasoning tool (register/brief/gate/verdict), in the flow.
+//   2. tool.call.toolview keyed 'hdcs_phase' — compact S1→S5 phase-pipeline
+//      card; each hdcs_phase call renders one, so the operator watches the
+//      loop progress in the chat (the tool itself is a permanent preset row).
+//   3. settings.section 'hdcs-control-room' — the Control Room page.
 //
 // Card contract: reads props.result (execute's value). If the card ever
 // receives rendered content blocks instead, it falls back to rendering their
@@ -56,7 +57,15 @@ return {
       '.hdcs-tv .hdcs-tv-body { border-top:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18)); padding:8px 12px 10px; display:flex; flex-direction:column; gap:8px; }',
       '.hdcs-tv .hdcs-tv-lbl { font-size:9.5px; text-transform:uppercase; letter-spacing:.14em; color:var(--dsw-alias-label-secondary,#888); }',
       '.hdcs-tv pre { margin:0; white-space:pre-wrap; word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:11.5px; line-height:1.6; color:var(--dsw-alias-label-secondary,#b8b8bc); }',
-      '.hdcs-tv .hdcs-tv-sec.verdict pre { color:var(--dsw-alias-label-primary,#ddd); }'
+      '.hdcs-tv .hdcs-tv-sec.verdict pre { color:var(--dsw-alias-label-primary,#ddd); }',
+      '.hdcs-ph { margin:2px 0; padding:7px 12px; border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22)); border-radius:9px; background:var(--dsw-alias-bg-layer-1,rgba(127,127,127,.05)); display:flex; align-items:center; gap:10px; flex-wrap:wrap; }',
+      '.hdcs-ph .hdcs-ph-glyph { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--dsw-alias-brand-primary,#58a6ff); font-size:11px; }',
+      '.hdcs-ph .hdcs-ph-chip { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:10.5px; padding:2px 8px; border-radius:6px; border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.25)); color:var(--dsw-alias-label-secondary,#888); opacity:.55; }',
+      '.hdcs-ph .hdcs-ph-chip.cur { opacity:1; font-weight:600; }',
+      '.hdcs-ph .hdcs-ph-chip.start { color:var(--dsw-alias-brand-primary,#58a6ff); border-color:currentColor; }',
+      '.hdcs-ph .hdcs-ph-chip.done { color:var(--dsw-alias-state-success-primary,#3fb950); border-color:currentColor; }',
+      '.hdcs-ph .hdcs-ph-chip.fail { color:var(--dsw-alias-state-error-primary,#f85149); border-color:currentColor; }',
+      '.hdcs-ph .hdcs-ph-note { font-size:11.5px; color:var(--dsw-alias-label-secondary,#999); flex-basis:100%; }'
     ].join('\n'))
 
     function extractResult(props) {
@@ -94,9 +103,31 @@ return {
           })) : null)
     }
 
+    const PHASES = ['S1', 'S2', 'S3', 'S4', 'S5']
+
+    function PhaseCard(props) {
+      const r = extractResult(props)
+      if (!r || !r.phase) return null
+      const phase = String(r.phase).toUpperCase()
+      const status = String(r.status || '').toLowerCase()
+      return React.createElement('div', { className: 'hdcs-ph' },
+        React.createElement('span', { className: 'hdcs-ph-glyph' }, '∴'),
+        PHASES.map(function (p) {
+          return React.createElement('span', {
+            className: 'hdcs-ph-chip' + (p === phase ? ' cur ' + status : ''),
+            key: p
+          }, p)
+        }),
+        r.note ? React.createElement('span', { className: 'hdcs-ph-note' }, String(r.note)) : null)
+    }
+
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'hdcs_reasoning' },
       (props) => React.createElement(HdcsToolCard, props)))
+
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'hdcs_phase' },
+      (props) => React.createElement(PhaseCard, props)))
 
     function ControlRoom() {
       const [snap, setSnap] = React.useState(null)
