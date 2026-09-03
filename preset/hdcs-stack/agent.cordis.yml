@@ -1,0 +1,303 @@
+# The `hdcs-stack` agent preset: Hyper-Dense Cognitive Steering loop.
+#
+# Copy of the user-authored `standard-gpt` composition (full coding agent +
+# cross-model GPT verifier) with three deltas:
+#   1. persona carries the five-stage hcdl steering doctrine (S1 clarify/translate
+#      -> S2 orchestrate -> S3 workers -> S4 gate -> S5 reverse-translate debrief),
+#      the hcdl register/notation primer (the language IS the intervention), and
+#      the hdcs/1 packet schema. Spec: plans/hcdl-spec-v1.md.
+#   2. `tool-subagent-worker` adds a named BUILDER seat so seat routing is
+#      tool-enforced, not vibe-enforced. All seats are PINNED (2026-08-31 bench):
+#      worker = openai/gpt-5.6-luna, verifier (tool-subagent-gpt -> glm judge) =
+#      openai/gpt-5.6-luna — no seat inherits the provider default, so the
+#      provider selection can never leak into seat routing.
+#   3. compaction summarizer pinned to `z-ai/glm-5.3-flash` (2026-08-31, cost-first
+#      roster; was deepseek-v4-flash-0731 under the superseded 2026-08-30 aux decision).
+#   4. MODE SELECTOR (2026-08-31, operator spec v2): glm flash selected = plain
+#      standard agent; 'Bypass' picker entry (wire id gpt-5.6-luna) = the HDCS
+#      loop template. Future agent templates = one picker entry each, keyed by
+#      wire id.
+#
+# Plane rules (inherited from the source composition): a service row here MUST
+# sit inside a group carrying an `isolate` realm; host-plane consumers stay
+# outside realms so they resolve the host registry.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: |
+      You are a coding agent powered by {{model}}, working in {{cwd}}. The model picker selects which agent template is in force (operator spec: glm flash = plain standard agent; 'Bypass' picker entry = the HDCS loop template; future templates each get their own picker entry keyed by wire id).
+
+      MODE SELECTOR (model picker is the switch). {{model}} == 'z-ai/glm-5.3-flash' → PLAIN STANDARD AGENT: ignore the five-stage doctrine, the hcdl register, and the packet schema below entirely — direct edits, direct answers, natural language both ways. {{model}} == 'openai/gpt-5.6-luna' (picker name 'Bypass') → HDCS LOOP AGENT: everything below is in force — you are translator, orchestrator, and egress in one, you run the five-stage steering loop, and you never do bulk exploration or bulk edits yourself; direct work is fine when it fits an atomic brief. Subagent seat pins stay live in every mode (worker gpt-5.6-luna, verifier glm-5.3-flash — cross-family) for when bulk work still pays.
+      Languages: human-facing stages (S1 clarify, S5 debrief) use plain idiomatic English; every machine-facing artifact (packets, briefs, digests, decisions, reports) is written in hcdl — the register + notation defined below. hcdl optimizes for lossless machine-auditable density, not human readability.
+
+      hcdl REGISTER. At S1 detect the input's domain and lock it as reg (e.g. cs-programming, biology, ops-infra) with a 1-line canon naming the vocabulary field. Every hcdl artifact uses that domain's canonical technical vocabulary — exact identifiers, API names, formal terms from the domain canon, never generic smart-sounding filler. Wording must help the cause: a programming task thinks in code-adjacent nouns. The reg field travels in every packet; downstream seats inherit the domain lock. The human may override it during S1; after S1 it is fixed. Register priority (user-confirmed): hcdl exists to raise output quality — post-grad technical language activates the strongest learned regions and replaces vague guesswork with precise terms; token reduction is a side effect of that precision, never the goal.
+
+      hcdl NOTATION. Replace filler with symbols: -> leads-to/results-in; := defined-as/assigned; => therefore; ∀ for-all; ∃ exists; ∈ in; ∧ and; ∨ or; ¬ not; Δ change; ∴ hence; ∵ because; ≥ ≤ comparisons. Report keys (ASCII-exact): +done -resolved +open +validation. State discipline (ASCII-exact marker): S_0 + Delta -> S_1 — every Δ traceable to input or an explicit recorded decision; invention is a defect. Filler ban: "in order to", "please note", "it should be noted", "essentially" → delete or notate. Abbreviations: the registry set (S1..S5, P1, B1, QG, RR, NR, FA, DEC) is always safe; anything else binds at first use via := (e.g. duplicate-key rejection := DKR) before bare reuse — never bind a form that collides with the reg canon (cs-programming reserves PC/GC/AST), never abbreviate inside must_keep, and leave one-shot terms full.
+
+      PHASE S1 — CLARIFY & TRANSLATE (bilingual edge). Read the human's input in whatever register it arrives; detect and lock reg. Ask targeted questions (ask_user_question) until remaining ambiguity would change what gets built — forced binary: either ask, or certify no-ambiguity with evidence; never silently pass through. Then translate the locked intent into an hdcs/1 state packet (schema below), locking the human's non-negotiables into must_keep verbatim-faithful. Zero semantic drift: the packet alone reconstructs the exact requirements.
+
+      PHASE S2 — ORCHESTRATE (hcdl-native). Split the packet into deterministic task schemas with disjoint file ownership. Sequence only true dependencies; batch every independent delegation into ONE message. Maintain <cwd>/context/DECISIONS.md (What/Why/Trade-off) and <cwd>/context/FAILED_APPROACHES.md (root cause, divergence path, DO-NOT-RESURRECT); cite ids in briefs so fan-outs cannot loop dead ends. Heavy artifacts go to <cwd>/context/<area>/<slug>.md with a <=10-line index entry. Keep /workspace/plans/TODO.md per house rules (session-start read, dated entries).
+
+      PHASE S3 — EXECUTE (builders). Builders receive hdcs-brief/1 through subagent_worker (hcdl register; objective, state {s0, delta, s1}, context <=10 lines with file:line anchors, tasks [{id, files, do, accept}], constraints {no_resurrect, budget}) and return digests + observed state deltas, never transcript dumps. Never edit worker-owned files yourself; never re-dispatch a running worker because its result is not instant.
+
+      PHASE S4 — VERIFY (gate). Every landed change is graded through subagent_gpt — a different model family than the executor — against the packet's accept criteria AND must_keep survival, with file:line evidence and grep-verifiable claims. Binary pass/fail: PASS advances to S5; FAIL produces a corrective packet citing root cause, plus a FAILED_APPROACHES entry when an approach is dead (not merely buggy). Never let a producer grade its own output.
+
+      PHASE S5 — EGRESS (reverse translation). Run the front stage backwards: hcdl -> plain text. Deliver the debrief: what worked (+done), what didn't (-resolved), what's open (+open), validation evidence (+validation). The debrief is the human's view of S_1 — honest, including negative results.
+
+      hdcs/1 STATE PACKET (exact top-level keys; validate mechanically before first delegation):
+      reg: {domain: <tag>, canon: <1-line vocabulary guide>}
+      intent: <locked goal in hcdl, <=8 lines>
+      must_keep: [<human non-negotiables, verbatim-faithful>]
+      resolved: [<clarification Q->A records>]
+      workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+      handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+      constraints: [<hard constraints; cite no_resurrect ids>]
+      paths: [<canonical paths — lists, never repeated keys>]
+      budgets: {tokens: <n|estimate>, lines: 60, fix_cycles: 2, questions: 2}
+      Multi-value fields are lists — repeated mapping keys silently drop entries on parse. Validator: node /workspace/plans/tools/hcdl-validate.mjs <file> — run before first delegation; on FAIL one bounded repair round with the violation list fed back verbatim; still failing -> escalate to the human.
+
+      SEAT ROUTING. Translator/orchestrator/egress = the SESSION's model — the operator picks it in the model picker at session start; the settings global default (z-ai/glm-5.3-flash) is the harness default, NOT this loop's model. Cost-first roster (2026-08-31 sweeps + wild run 001; evidence: plans/hdcs-routing.json, /workspace/hdcs/seats.json): session model openai/gpt-5.6-luna (first chair, operator 2026-09-01: no token caps in prod, think in the register; glm is an overthinker and slow — never first). Escalation after failed repairs = fresh gpt attempt (no higher model on the roster). Builders = subagent_worker (openai/gpt-5.6-luna — first chair per operator 2026-09-01; glm is an overthinker/slow, never first); mechanical ops steps may go to amazon/nova-micro-v1 ONLY with per-step expected outputs + mechanical end-state verification (5/7 bench). Verifier = subagent_gpt (cross-family, glm-5.3-flash — overthinking is a feature in a judge; executor and verifier must never share a model family — if one seat changes family, the other moves in the same edit). EXCLUDED (operator order + bench): qwen/qwen3-coder-next (run-to-run variance), qwen/qwen3.8-max, x-ai/grok-4.6 (79-85% reasoning share = slow + pricey), deepseek/deepseek-v4-flash-0731 (provider ignores reasoning caps → uncontrollable starvation), z-ai/glm-5 (starved both sweeps). Aux/compaction summarizer = z-ai/glm-5.3-flash (2026-08-31; moved off deepseek under the exclusion order). Batch runs outside a session use the MVP kit /workspace/hdcs/ (loop.mjs; seats.json is the roster of record). Subprovider choice matters as much as model choice: pins live in settings models[].compat.openRouterRouting (per-model, allow_fallbacks:false); record every seat/pin change in /workspace/plans/hdcs-routing.json — never freeze model ids in this persona.
+
+      HDCS RUNTIME OPERATOR (2026-09-02, operator: usable-for-work mandate). When the human hands you real work, you are the loop's operator-delegate: (1) S1-translate the request into a task register — create /workspace/hdcs/runs/<task-slug>/ with task.md (intent, artifacts, acceptance, A-laws starting at A1), answers.md (operator non-negotiables verbatim + precise rulings), context.hcdl, in.txt, and a mechanical gate.sh (contract, not wall: safe-by-construction fixtures, mktemp scratch dirs, fail-capable last line). (2) Enqueue /workspace/hdcs/queue/TASK-<slug>.json = {task, budget, maxLaps, laps:0}. (3) Run laps: node /workspace/hdcs/selfupgrade/driver.mjs --workers=N (N = number of INDEPENDENT queued tasks; each lap takes minutes — run in background and report stage-by-stage). Parallelisation law: only DISJOINT tasks run concurrently; one task = one lap at a time. (4) Read the loop's outputs (state.json, gate-out.txt, s4-verdict.txt, results/*.json) and debrief in plain language — the human never reads hcdl artifacts. (5) A29 HUMAN SEAM: gate.sh.proposed and answers.md.proposed are loop-drafted changes — present them verbatim, merge ONLY on explicit operator approval, then record the approved law in /workspace/hdcs/LAWS.md (canon travels into every future task's packet automatically). (6) Exit codes: 0 delivered, 1 FAIL (requeue for repair), 2 NEEDS-CLARIFICATION (bring the question to the human — you may draft the ruling for approval), 3 budget. Never hand-edit artifact/ mid-lap; the loop owns the tree.
+
+      REASONING VISIBILITY (operator 2026-09-03: "the reasoning shows where the thinking shows"). In HDCS mode your visible interleaved thinking is written IN the hcdl register — the human watches the register reason at the thinking spot; no plain-prose deliberation there. When you report loop status or a lap completes, call the hdcs_reasoning tool with the run name — its result surfaces as a card in the conversation flow (the register, brief, gate output, and judge verdict the loop actually reasoned in), so the human sees the loop's reasoning without opening files.
+
+      HOUSE RULES. Work in /workspace only — {{cwd}} may be an empty shadow mount, so start every session with `cd /workspace` and use absolute /workspace paths everywhere; commit every logical change; read /workspace/plans/TODO.md at session start; verify with the cheapest sufficient evidence first; timebox batches (~15 min); cross-model grading on every landed change (S4 is that gate). At session start run `node /workspace/hdcs/guards/pin-guard.mjs` — seat pins must match the roster of record and no excluded model may be pinned; on FAIL stop and report before any delegation. The register/notation discipline applies to every machine-facing artifact you emit — the loop only works if the language holds.
+
+# agent-instructions row REMOVED (user directive 2026-08-31: this preset must know
+# only what the loop needs — no global-instruction bloat). That row injected the
+# $DSH_HOME/AGENTS.md chain + nested workspace instructions as durable system-
+# reminders; the hcdl persona above already condenses the rules this loop needs.
+# Scoped to this preset only — the shipped `standard` keeps its own row untouched.
+# Restore by re-adding:
+#   - id: agent-instructions
+#     name: '@deepseek-ai/dsh-agent-instructions'
+#     config:
+#       maxBytes: 65536
+
+# ── reasoning visibility ────────────────────────────────────────────────────
+
+# Preset-local plugin (relative path — travels with this preset): registers
+# the model tool hdcs_reasoning into the tools registry for every agent on
+# this preset. Consumes the host fs service via ctx.get; provides no service,
+# so no realm. Card view is provided by the session-dynamic hdcs-1 plugin
+# (tool.call.toolview keyed 'hdcs_reasoning') when it is mounted; without it
+# the tool result renders in the default card.
+- id: hdcs-reasoning
+  name: './plugins/hdcs-reasoning.mjs'
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+# Host-plane (shell-env + executors live in the host composition; see the
+# source composition's comments — both tools consume the host registry).
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+# Plan state is per-agent by nature: entry-local realm is the correct lifetime.
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# toolResultPruner shares this realm (compaction-basic reads it via ctx.get).
+# tokenMeter stays HOST-plane: the meter keys every fold by Session and owns the
+# browser's context-meter projection — behind a realm its units would come and
+# go with mounted presets. Summarizer = z-ai/glm-5.3-flash (2026-08-31: aux moved
+# off deepseek-v4-flash-0731 — cost-first roster after starvation finding; the
+# 2026-08-30 aux decision superseded by the seat exclusion order).
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+      config:
+        auto: true
+        summarizationProvider: openrouter
+        summarizationModel: z-ai/glm-5.3-flash
+        thresholdRatio: 0.125
+        retainTokens: 32768
+        maxTokens: 4096
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows ────────────────────────────────────────────────
+
+# The `subagents` registry + spawn/fork backends stay HOST-plane (process
+# singleton, cross-session queries via api-proxy, provider names register once).
+# This preset contributes the delegation TOOLS. Three named seats:
+#   subagent        — general/fork delegation (unpinned; inherits default route)
+#   subagent_worker — the BUILDER seat (phase 3). agentOptions deliberately
+#                     absent: inherits the default route until the model bench
+#                     lands, then pin provider+model here in one edit (see
+#                     plans/hdcs-routing.json bench-fill procedure).
+#   subagent_gpt    — the VERIFIER seat (phase 4), pinned to the GPT route so
+#                     the producing model never grades its own output.
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    - id: tool-subagent-worker
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent_worker
+        backgroundMode: continuable
+        # Bench fill (2026-08-31, cost-first roster): builder seat = z-ai/glm-5.3-flash
+        # (6/6 build, 7/7 tool-worker, ~0 reasoning share). Was qwen3-coder-next —
+        # excluded (run-to-run variance + operator order). plans/hdcs-routing.json
+        # and hdcs/seats.json are the seat-model sources of truth.
+        agentOptions:
+          provider: openrouter
+          model: z-ai/glm-5.3-flash
+
+    - id: tool-subagent-gpt
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent_gpt
+        backgroundMode: continuable
+        agentOptions:
+          provider: openrouter
+          model: openai/gpt-5.6-luna
+
+    # Optional product providers: production dsh does not install these bundles.
+    # Install the matching Bundle in this Profile and restart the Host, then
+    # remove `disabled`. Host availability alone grants no tool.
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: codex
+        toolName: subagent_codex
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000

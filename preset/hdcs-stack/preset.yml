@@ -1,0 +1,14 @@
+name: HDCS Stack
+description: >-
+  Hyper-Dense Cognitive Steering loop: S1 clarify/translate (plain language in ->
+  hdcs/1 packet) -> S2 orchestrate -> S3 builder workers (subagent_worker) ->
+  S4 cross-model verify gate (subagent_gpt, executor/verifier family divergence
+  enforced) -> S5 plain-text debrief. Cost-first seat roster per
+  plans/hdcs-routing.json + hdcs/seats.json: glm-5.3-flash backbone, gpt
+  verifier, nova tool-worker bench; qwen/grok/deepseek excluded by measurement.
+  Elastic state layer (context/DECISIONS.md, FAILED_APPROACHES.md with
+  DO-NOT-RESURRECT); mechanical validators before every delegation.
+  Reasoning visibility (2026-09-03): HDCS-mode thinking is written in the
+  hcdl register at the thinking spot; hdcs_reasoning tool (preset-local row
+  plugins/hdcs-reasoning.mjs) surfaces loop run reasoning as a card in the
+  conversation flow.
