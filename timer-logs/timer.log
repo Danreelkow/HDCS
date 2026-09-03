@@ -1,3 +1,4 @@
 [2026-09-02T11:56:31.799Z] trigger=initial ERROR=Cannot destructure property 'mode' of 'policy' as it is undefined.
 [2026-09-02T11:57:35.045Z] trigger=initial exit=1
 [2026-09-02T17:57:30.046Z] trigger=interval exit=1
+[2026-09-02T23:57:30.066Z] trigger=interval exit=1
