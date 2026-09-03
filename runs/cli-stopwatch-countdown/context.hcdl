@@ -1,0 +1,9 @@
+reg:{domain:cs-programming,canon:POSIX CLI behavior, Python stdlib, subprocess verification}
+intent: two separate dependency-free executable Python CLIs -> stopwatch(no args,laps) ∧ countdown(minutes,seconds,final zero message)
+must_keep:["Build me two small CLI tools in /workspace/tools/: a stopwatch and a countdown timer. Stopwatch takes no args and supports laps; countdown takes minutes and seconds and prints a final message at zero. Keep them in separate files, make them testable, verify they actually run before you call it done."]
+resolved:[ambiguity->none; certify acceptance from direct request]
+workflow:{phases:[plan,scoped-build,verify,deliver],builders:dynamic,verifier:decorrelated,gate:READY,max_fix_cycles:2}
+handoff:{state:S_0 + Delta -> S_1,report:[+done,-resolved,+open,+validation]}
+constraints:[stdlib-only, separate files, no_resurrect:A1]
+paths:[/workspace/tools/stopwatch.py,/workspace/tools/countdown.py]
+budgets:{tokens:estimate,lines:60,fix_cycles:2,questions:2}
