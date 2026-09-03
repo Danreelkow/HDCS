@@ -66,6 +66,11 @@ behind the seats above: GPT-5.6-luna planner/verifier 6/6; Nova Micro tool-worke
 share; every densifier candidate failed the YAML contract until the hcdl spec
 pinned the exact schema — the register, not the model, was the missing piece.
 
+**Bench candidate, not seated:** `gemini-3.8-flash` — flagged 2026-09-03 by the
+operator as the replacement for the 3.7-flash verifier profile (3.7 benched 5/6 + 1/1).
+It stays a candidate until it runs its own bench profile; a model never gets a seat
+on announcement, only on evidence.
+
 ## Retargeting it
 
 Swap any seat by editing its pin (preset delegation rows / `seats.json`) — keep the
