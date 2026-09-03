@@ -89,6 +89,56 @@ The point is not that the second is shorter. It is that the second **cannot be
 misread** — "older than" now has exactly one meaning (`≥ AGE_DAYS`, the boundary case
 included), and the set it quantifies over is explicit.
 
+### Read it three ways
+
+The loop's core trick, performed on this repo's own claims. Top line: what a human
+says. Middle: what the machine-facing stages read (S1's translation). Bottom: what S5
+hands back (reverse-translation). The interesting part is what changes on the way
+back out — the deltas are exactly the ambiguities the register removed.
+
+```
+human  : HDCS moves everything machine-facing into a dense, domain-locked register and
+         translates for humans at both edges. The claim is quality; token saving is a
+         side effect.
+hcdl   : HDCS := translate_in ∘ build ∘ verify_mech ∘ verify_adv ∘ translate_out;
+         ∀ stage s ∉ {S1, S5}: language(s) = hcdl ∧ domain_lock(s) = domain(t);
+         claim := quality(out) ↑; tokens(out) ↓ ∵ precision
+human' : HDCS is a pipeline — translate in, build, verify mechanically, verify
+         adversarially, translate out. Every stage between the two translators speaks
+         hcdl in the task's own domain. The claim: higher-quality output, with fewer
+         tokens falling out of that as a side effect.
+```
+
+```
+human  : The verifier has to re-derive every claim from what's actually on disk. Notes
+         can point at evidence but can never vouch for it — and if notes and disk
+         disagree, the disk wins.
+hcdl   : ∀ claim c: verdict(c) := rederive(c, disk);
+         notes(c) -> pointer(c) ∧ ¬attests(notes, c);
+         notes(disk) ≠ disk -> FAIL ∵ register_of_record = disk
+human' : For every claim, the verdict is whatever re-deriving it from disk produces.
+         Notes may carry pointers to evidence and never count as attestation. If the
+         notes disagree with the disk, the check fails — because the register of
+         record is the disk itself.
+```
+
+```
+human  : A failed check is never a dead end. It goes back for repair with the failure
+         as feedback, at most twice, and only then does a human see it.
+hcdl   : gate_fail -> repair(feedback := gate_output); laps(repair) ≤ 2;
+         laps > 2 -> parked(human_seam) ∧ evidence ⊇ gate_output
+human' : A gate failure routes back to repair with the gate output as feedback; no
+         more than two repair laps; beyond that, the task parks at the human seam
+         with the evidence attached.
+```
+
+Three things the register pinned that prose left loose: "at most twice" now has a
+boundary (`≤ 2` — is the second repair included? yes); "the disk wins" is now an
+explicit precedence **with its reason attached** (`∵ register_of_record = disk`);
+"every stage" now carries its exception set (`{S1, S5}` — the two human seams) instead
+of hoping you remember. Humans only ever need the top and bottom lines; the middle is
+the machine's, and it is where the misreadings died.
+
 ## Design doctrine
 
 - **Gate, not wall** — a failed gate triggers a repair round with the failure output, not
