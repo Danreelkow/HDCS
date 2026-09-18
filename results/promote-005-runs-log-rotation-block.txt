@@ -1,0 +1,7 @@
+FX=/tmp/hdcs-fx-$$
+trap 'rm -rf -- "$FX"' EXIT
+mkdir -p "$FX/runs" || fail "A1: fixture setup failed; dry-run probe cannot establish zero-write paths"
+HDCS_RUNS_DIR="$FX/runs" HDCS_ARCHIVE_DIR="$FX/archive" bash artifact/rotate-hdcs-runs.sh >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 0 ] || fail "A1: default dry-run must execute successfully without writes; a non-executable rotation build cannot honor zero-write mode"
+[ ! -e "$FX/archive" ] || fail "A1: default dry-run created ARCHIVE_DIR, violating zero-write mode"

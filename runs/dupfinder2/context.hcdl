@@ -1,0 +1,4 @@
+reg:=cs-programming; canon:=Python CLI/filesystem/hash APIs.
+S_0 + Delta -> S_1: goal locked; paths=/workspace/dupfinder2/{scanner.py,dupfinder.py,README.md}.
+Acceptance:=recursive walk ∧ SHA-256 grouping ∧ CLI path input ∧ duplicate groups print byte sizes ∧ usage docs.
+no_resurrect:=A1,A2; gate:=READY; max_fix_cycles:=2.

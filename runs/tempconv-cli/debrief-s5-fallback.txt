@@ -1,0 +1,34 @@
+# What we're building
+
+A small command-line temperature converter written in JavaScript for Node.js, saved at /workspace/tempconv2/src/index.js. It uses no external libraries — only what Node already provides.
+
+# How it's used
+
+You run it by typing: `node src/index.js <value> <from> <to>` — exactly three pieces of information after the script name, in that order: the number to convert, the unit it's coming from, and the unit it's going to.
+
+It converts between Celsius, Fahrenheit, and Kelvin. You can write the unit as a letter (C, F, or K) or as the full word (Celsius, Fahrenheit, Kelvin), and capitalization doesn't matter.
+
+# What happens
+
+If everything is fine, the program prints the converted number to standard output and exits with status code 0.
+
+If something is wrong, it prints an explanation to standard error and exits with status code 1. Wrong things are:
+- The wrong number of arguments on the command line.
+- The first argument isn't a number, or isn't a finite number (so things like "abc" or "Infinity" are rejected).
+- A unit name the program doesn't recognize.
+- The starting temperature is below absolute zero. The absolute-zero limits are: Celsius at -273.15, Fahrenheit at -459.67, and Kelvin at 0. A temperature exactly at the limit is fine — only strictly below it is rejected (this was ruled on explicitly).
+
+# Rules and boundaries
+
+- The exact three-argument command format must be preserved as-is.
+- No external dependencies; only Node's built-in features.
+- Nothing outside the tempconv2 folder may be touched: the older /workspace/tempconv project must never be reused or modified (the no_resurrect / tempconv-isolation rule). All file writes stay within /workspace/tempconv2.
+- The program should be about 60 lines. If verification finds a problem, there are at most 2 fix attempts.
+
+# Decisions already made
+
+1. A value exactly at the absolute-zero threshold is valid; only strictly-below values are rejected.
+2. Bad input means: wrong argument count, a non-numeric or non-finite value, or an unknown unit.
+3. Full unit names are accepted alongside the single letters, case-insensitively.
+
+The work proceeds in four stages — plan, scoped-build, verify, deliver — with an independent checker before delivery, and a READY/NOT_READY gate at the end.

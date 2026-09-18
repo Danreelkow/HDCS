@@ -1,0 +1,1 @@
+Build dupfinder2: scanner module, CLI entry, README. Recursive directory scan; hash files; group duplicates. CLI path input; print groups with sizes. Exactly three files.

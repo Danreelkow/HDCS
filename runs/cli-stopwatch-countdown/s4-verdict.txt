@@ -1,0 +1,6 @@
+PASS
+verifier_session_id: unavailable in runtime tool output; parent delegated session id: 0c07a1df-05e4-4024-ba8d-ceadb692de21 (NOT_READY, superseded)
+verifier_model: openai/gpt-5.6-luna via subagent_gpt
+authoritative_s4_session: subagent_gpt delegated session id unavailable; model explicit above
+commands: ./gate.sh; stopwatch no-arg/lap/quit; countdown 0:01 with COUNTDOWN_TICK_SECS=0; malformed bad
+result: smoke PASS; all acceptance checks PASS; /workspace/tools untouched

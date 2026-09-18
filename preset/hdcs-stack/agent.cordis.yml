@@ -179,7 +179,9 @@
       config:
         auto: true
         summarizationProvider: openrouter
-        summarizationModel: z-ai/glm-5.3-flash
+        # 2026-09-18: glm-5.3-flash truncated 2/6 summaries at the 4096 cap
+        # (reasoning ate the budget) → compaction storm; swap to deepseek-v4-flash-0731.
+        summarizationModel: deepseek/deepseek-v4-flash-0731
         thresholdRatio: 0.125
         retainTokens: 32768
         maxTokens: 4096

@@ -1,0 +1,40 @@
+### Reverse-Translated hdcs/1 PACKET
+
+**Objective:**
+
+Create a zero-dependency Node.js command-line interface (CLI) for temperature conversion.
+
+**Specification:**
+
+- Write a file at `/workspace/tempconv2/src/index.js`.
+- The CLI should be invoked exactly as `node src/index.js <value> <from> <to>`.
+- Units accepted: C, F, K, Celsius, Fahrenheit, Kelvin, case-insensitive.
+- Valid input results in a numeric output on stdout and an exit code of 0.
+- Invalid input (wrong number of arguments, non-numeric/non-finite values, unknown units, or values below absolute zero) results in an error message on stderr and an exit code of 1.
+- Do not import any dependencies; use only Node.js built-ins.
+- Do not modify or reuse any code from `/workspace/tempconv`.
+
+**Requirements:**
+
+- Ensure the exact positional interface `node src/index.js <value> <from> <to>` is maintained.
+- Use zero dependencies; rely only on Node.js built-ins.
+- Respect absolute-zero thresholds: C >= -273.15, F >= -459.67, K >= 0 (boundary values are valid).
+- Do not reuse or modify any code from `/workspace/tempconv`.
+
+**Resolved Questions:**
+
+- **Q1:** Is a source value exactly at the absolute-zero threshold valid? **A:** Yes; below-absolute-zero means strictly less than the threshold.
+- **Q2:** What counts as bad input? **A:** Invalid arity, non-numeric/non-finite values, or unknown units.
+- **Q3:** Are full unit names accepted? **A:** Yes, C/F/K and Celsius/Fahrenheit/Kelvin, case-insensitive.
+
+**Workflow:**
+
+- Follow the phases: plan, scoped-build, verify, deliver.
+- Use dynamic builders and a decorrelated verifier.
+- The gate status can be READY or NOT_READY.
+- Maximum of 2 fix cycles allowed.
+
+**Handoff:**
+
+- Transition from state S_0 to S_1.
+- Report includes [+done, -resolved, +open, +validation].

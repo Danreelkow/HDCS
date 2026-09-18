@@ -1,0 +1,69 @@
+#!/usr/bin/env node
+'use strict';
+
+function threshold(u) {
+  if (u === 'C') return -273.15;
+  if (u === 'F') return -459.67;
+  return 0;
+}
+
+function normalize(s) {
+  switch (s.toUpperCase()) {
+    case 'C':
+    case 'CELSIUS':
+      return 'C';
+    case 'F':
+    case 'FAHRENHEIT':
+      return 'F';
+    case 'K':
+    case 'KELVIN':
+      return 'K';
+    default:
+      return null;
+  }
+}
+
+function toC(v, u) {
+  if (u === 'C') return v;
+  if (u === 'F') return (v - 32) * 5 / 9;
+  return v - 273.15;
+}
+
+function fromC(c, u) {
+  if (u === 'C') return c;
+  if (u === 'F') return c * 9 / 5 + 32;
+  return c + 273.15;
+}
+
+const argv = process.argv;
+if (argv.length !== 5) {
+  console.error('usage: node src/index.js <value> <from> <to>');
+  process.exit(1);
+}
+
+const value = Number(argv[2]);
+if (!Number.isFinite(value)) {
+  console.error('invalid value');
+  process.exit(1);
+}
+
+const fromUnit = normalize(argv[3]);
+if (fromUnit === null) {
+  console.error('unknown unit');
+  process.exit(1);
+}
+
+const toUnit = normalize(argv[4]);
+if (toUnit === null) {
+  console.error('unknown unit');
+  process.exit(1);
+}
+
+if (value < threshold(fromUnit)) {
+  console.error('below absolute zero');
+  process.exit(1);
+}
+
+console.log(fromC(toC(value, fromUnit), toUnit));
+process.exit(0);
+

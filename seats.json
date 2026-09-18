@@ -1,4 +1,5 @@
 {
+  "first_chair": "openai/gpt-5.6-luna",
   "s1": "z-ai/glm-5.3-flash",
   "s1_escalate": "openai/gpt-5.6-luna",
   "s2": "z-ai/glm-5.3-flash",
@@ -9,7 +10,7 @@
   "s5_fallback": "z-ai/glm-5.3-flash",
   "fixture_author": "openai/gpt-5.6-luna",
   "law_drafter": "z-ai/glm-5.3-flash",
-  "doctrine": "operator 2026-09-01 trial (guards off): glm BACK on first chair uncapped to isolate cause — caps/muzzling vs model. Cross-family: builder glm -> judge gpt.",
+  "doctrine": "operator 2026-09-01 trial (guards off): glm BACK on first chair uncapped to isolate cause — caps/muzzling vs model. Cross-family: builder glm -> judge gpt. BYPASS SEAT (operator 2026-09-07c 'make it bypass properly'): the picker selection is VOID — the bypass endpoint (127.0.0.1:3199) routes session turns to first_chair; the loop handles its own model routing. glm-as-orchestrator was tried and failed (operator: 'trust me that didnt work thats why we used gpt').",
   "aux": {
     "titler": "nvidia/nemotron-3.5-lightning:free",
     "session_context": "thinkingmachines/inkling-small:free",

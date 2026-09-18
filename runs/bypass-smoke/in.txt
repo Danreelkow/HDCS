@@ -1,0 +1,1 @@
+HDCS smoke test: create /workspace/hdcs/runs/bypass-smoke/hello.mjs, zero-dependency Node.js, exact stdout `bypass smoke ok`, run once with node, report output. No ambiguity; do not ask questions.

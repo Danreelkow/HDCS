@@ -1,0 +1,28 @@
+reg:
+  domain: cs-programming
+  canon: POSIX CLI behavior, Python standard library, subprocess acceptance
+intent: "Build two separate dependency-free executable Python CLIs in /workspace/tools2/: stopwatch(no args, lap support) and countdown(minutes + seconds, final message at zero)."
+must_keep:
+  - "Build two small CLI tools in /workspace/tools2/: a stopwatch and a countdown timer. Stopwatch takes no args and supports laps; countdown takes minutes and seconds and prints a final message at zero. Keep them in separate files, make them testable, verify they actually run before you call it done."
+  - Do not modify /workspace/tools/.
+resolved:
+  - output path -> /workspace/tools2/ per explicit user ruling; fresh directory
+  - acceptance -> separate executable files, stdlib-only, subprocess smoke
+workflow:
+  phases: [plan, scoped-build, verify, deliver]
+  builders: dynamic
+  verifier: decorrelated
+  gate: "READY|NOT_READY"
+  max_fix_cycles: 2
+handoff:
+  state: S_0 + Delta -> S_1
+  report: [+done, -resolved, +open, +validation]
+constraints: [stdlib-only, separate files, no_resurrect:A1, no modification of /workspace/tools/]
+paths:
+  - /workspace/tools2/stopwatch.py
+  - /workspace/tools2/countdown.py
+budgets:
+  tokens: estimate
+  lines: 60
+  fix_cycles: 2
+  questions: 2

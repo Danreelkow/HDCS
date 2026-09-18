@@ -1,0 +1,9 @@
+reg: cs-programming; canon: Node.js CLI identifiers — process.argv, process.exit, stdout/stderr, Number.isFinite, exact positional interface.
+A1_iface: ∀ invocation -> argv shape [node, src/index.js, value, from, to] exact.
+A2_deps: ∀ import -> ∈ Node built-ins ∨ ∅; zero package deps.
+A3_abszero: ∀ source v,u -> v ≥ threshold(u) where threshold := {C: -273.15, F: -459.67, K: 0}; boundary valid.
+A4_isolation: ∀ write path -> path ∈ /workspace/tempconv2/**; /workspace/tempconv untouched, no reuse.
+A5_units: unit ∈ {C,F,K,celsius,fahrenheit,kelvin} case-insensitive; else reject.
+A6_reject: bad arity ∨ ¬Number.isFinite(Number(value)) ∨ unknown unit ∨ v < threshold(u) -> stderr msg ∧ exit 1.
+A7_success: valid conversion -> numeric result on stdout ∧ exit 0.
+open: ∅ — operator rulings resolve boundary semantics and bad-input taxonomy.

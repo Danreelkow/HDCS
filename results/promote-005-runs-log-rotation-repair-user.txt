@@ -1,0 +1,378 @@
+FINDING (repeated 12x, class: see evidence):
+EVIDENCE: `hdcs-runs-rotation.conf:1-5` contains exactly the required five keys and exact values. `rotate-hdcs-runs.sh:1-16, 188-219` implements dry-run by default, `--apply` as the sole write mode, explicit epoch-second age calculation, and no root/logrotate dependency. `rotate-hdcs-runs.sh:85-116` enforces A4 degenerate, identity, canonicalization, and containment checks before writes; `:226-269` performs cmp-verified copies before source removal, uses numeric rotation suffixes, and accumulates apply/prune failures. `rotate-hdcs-runs.sh:271-305` prunes only the archive to newest KEEP and preserves zero-write dry-run behavior. `verify-rotation.sh:31-79` implements strict five-key parsing with blank/comment handling and malformed-line rejection. `verify-rotation.sh:115-157` applies A4 path-law checks; `:190-240` uses accumulator-based stale scanning with explicit boundary arithmetic; `:243-322` records and re-verifies archive entries, checks cksum/size/mtime, rejects orphan suffixes, and enforces KEEP; `:347-360` maps any accumulated failure to fixed nonzero exit status. `README.md:1-133` documents the required usage, zero-write policy, path law, idempotence, verification semantics, and A7 known limitations.
+
+=== REGISTER RULINGS (answers.md — your block MUST NOT contradict these) ===
+A1: Dry-run is the default and is zero-write: it may not create ARCHIVE_DIR, the
+    archive, or any state file. --apply is the only writing mode.
+A2: Pure bash + coreutils (find, cmp, realpath, cksum). logrotate does not exist
+    on this host; invoking it is a defect. No root anywhere.
+A4: Path law mirrors run 001: refuse RUNS_DIR == ARCHIVE_DIR, containment in
+    either direction, degenerate paths ('', '.', '/'); refusals cite A-numbers
+    and perform zero writes. Env HDCS_RUNS_DIR / HDCS_ARCHIVE_DIR override the
+    conf; set-but-empty refuses.
+A5: Idempotence: rotation is move-once (age threshold); a second --apply must be
+    a zero-action no-op leaving ARCHIVE_DIR byte-identical. Archived bytes must
+    equal originals (cmp), file names preserved with a rotation suffix.
+A6: verify-rotation.sh: exit 0 only when (a) conf parses, (b) no file matching
+    PATTERN is older than AGE_DAYS still under RUNS_DIR, (c) every archived file
+    exists and is listed consistently; nonzero otherwise.
+A7: Exotic filenames / concurrent writes during apply are KNOWN_LIMITATIONS, not FAIL.
+
+OPERATOR RULING (2026-09-02, Danreelkow): A6 extends — verify-rotation.sh must run
+against a STRICTLY READ-ONLY artifact dir (rotated tree included): it reads, never
+writes. Any scratch/state/output it needs goes to a fresh temp dir (mktemp -d),
+never the artifact dir, never RUNS_DIR/ARCHIVE_DIR. A verifier grades; it does not
+edit. Non-destructive by construction.
+
+CONF FORMAT (S4 finding, accepted): hdcs-runs-rotation.conf may contain blank lines
+and comments (#). verify-rotation.sh counts KEY=VALUE lines and ignores blanks/
+comments — a trailing blank line is NOT a parse failure. The conf artifact itself
+must still ship as exactly the 5 KEY=VALUE lines (no stray blanks).
+
+CONF TOLERANCE SEMANTICS (operator, precise): "conf parses" means — exactly the 5
+KEY=VALUE lines are present; blank lines and #-comment lines are IGNORED; any other
+non-empty, non-comment line (garbage, duplicate keys, malformed KEY=VALUE) is a PARSE
+FAILURE and verify exits nonzero. Tolerant of whitespace, strict about content.
+
+
+=== GATE (current gate.sh, verbatim) ===
+#!/usr/bin/env bash
+# gate.sh — 005: rotation triad — dry-run zero-write, apply lossless+idempotent, verify honest. exit 0 = GATE PASS.
+set -u; cd "$(dirname "$0")" || exit 1
+fail() { echo "GATE FAIL: $1"; exit 1; }
+for f in hdcs-runs-rotation.conf rotate-hdcs-runs.sh verify-rotation.sh README.md; do
+  [ -f "artifact/$f" ] || fail "$f missing"; done
+bash -n artifact/rotate-hdcs-runs.sh || fail "rotate syntax error"
+bash -n artifact/verify-rotation.sh || fail "verify syntax error"
+for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+  grep -qE "^${k}=" artifact/hdcs-runs-rotation.conf || fail "config missing key $k"; done
+R=/tmp/hdcs-rot-runs; A=/tmp/hdcs-rot-archive; rm -rf "$R" "$A"; mkdir -p "$R/001-old" "$R/002-new"
+printf 'stale log line\n' > "$R/001-old/gate-out.txt"; printf 'fresh\n' > "$R/002-new/gate-out.txt"
+touch -d '30 days ago' "$R/001-old/gate-out.txt"
+mkdir -p "$R/003-boundary"; printf 'boundary\n' > "$R/003-boundary/gate-out.txt"; touch -d '14 days ago' "$R/003-boundary/gate-out.txt"
+DRY=$(HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh 2>&1) || fail "dry-run nonzero: $DRY"
+echo "$DRY" | grep -q "001-old/gate-out.txt" || fail "dry-run did not list the stale file"
+echo "$DRY" | grep -q "003-boundary/gate-out.txt" || fail "boundary file (age == AGE_DAYS) not listed (A5: stale = floor(age_days) >= AGE_DAYS)"
+[ -e "$A" ] && fail "dry-run created archive dir (A1)"
+[ -f "$R/001-old/gate-out.txt" ] || fail "dry-run moved files (A1)"
+cp "$R/001-old/gate-out.txt" /tmp/hdcs-rot-orig; cp "$R/003-boundary/gate-out.txt" /tmp/hdcs-rot-orig-bnd
+HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh --apply 2>&1 || fail "apply nonzero"
+[ -f "$R/001-old/gate-out.txt" ] && fail "stale file not rotated"
+[ -f "$R/003-boundary/gate-out.txt" ] && fail "boundary file (age == AGE_DAYS) not rotated (A5: >= law)"
+ARC=$(find "$A/001-old" -type f -name 'gate-out.txt*' 2>/dev/null | head -1); [ -n "$ARC" ] || fail "nothing archived (001-old)"
+[ -f "$A/001-old/gate-out.txt" ] || [ -f "$A/001-old/gate-out.txt.1" ] || fail "archive flattened relative path (A5_mirror: RUNS_DIR/<rel> must archive to ARCHIVE_DIR/<rel>)"
+ls "$A"/gate-out.txt* >/dev/null 2>&1 && fail "archive has flat top-level entries (A5_mirror)"
+cmp -s "$ARC" /tmp/hdcs-rot-orig || fail "archived bytes differ (A5 lossless)"
+BRC=$(find "$A/003-boundary" -type f -name 'gate-out.txt*' 2>/dev/null | head -1); [ -n "$BRC" ] || fail "nothing archived (003-boundary)"
+cmp -s "$BRC" /tmp/hdcs-rot-orig-bnd || fail "boundary archived bytes differ (A5 lossless)"
+[ -f "$R/002-new/gate-out.txt" ] || fail "fresh file rotated (AGE_DAYS violated)"
+M1=$(find "$A" -type f | sort | cksum)
+HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh --apply >/dev/null 2>&1 || fail "2nd apply nonzero"
+[ "$M1" = "$(find "$A" -type f | sort | cksum)" ] || fail "second apply changed archive (A5 idempotence)"
+G=$(HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$R/archive" bash artifact/rotate-hdcs-runs.sh --apply 2>&1)
+[ $? -eq 0 ] && fail "archive inside RUNS_DIR accepted (A4)"
+[ -e "$R/archive" ] && fail "guard wrote before refusing (A4)"
+G=$(HDCS_RUNS_DIR="/tmp/../.." HDCS_ARCHIVE_DIR="$A" bash artifact/rotate-hdcs-runs.sh 2>&1); [ $? -eq 0 ] && fail "A4: degenerate check must hold AFTER realpath canonicalization ('/tmp/../..' resolves to '/')"
+grep -qE '2?> *"\$\(\s*dirname|2?> *"\$\{?DIR' artifact/verify-rotation.sh && fail "verify redirects stderr INTO the artifact dir (read-only contract: mktemp outside the tree or fd indirection, never \$DIR/<tempfile>)"
+ART_BEFORE=$(find "$(cd artifact && pwd)" -type f | sort | xargs cksum 2>/dev/null)
+chmod -R a-w "$(cd artifact && pwd)" 2>/dev/null
+HDCS_RUNS_DIR="$R" HDCS_ARCHIVE_DIR="$A" bash artifact/verify-rotation.sh >/dev/null 2>&1 || fail "verify failed on rotated tree (artifact dir was read-only — verify must not need write access)"
+chmod -R u+w "$(cd artifact && pwd)" 2>/dev/null
+[ "$ART_BEFORE" = "$(find "$(cd artifact && pwd)" -type f | sort | xargs cksum 2>/dev/null)" ] || fail "verify left new/changed files behind (verify is read-only)"
+R2=/tmp/hdcs-rot-bad; rm -rf "$R2"; mkdir -p "$R2/x"; printf 'old\n' > "$R2/x/gate-out.txt"; touch -d '30 days ago' "$R2/x/gate-out.txt"
+HDCS_RUNS_DIR="$R2" HDCS_ARCHIVE_DIR="$A" bash artifact/verify-rotation.sh >/dev/null 2>&1 && fail "verify missed pending rotation"
+echo "GATE PASS"
+
+
+=== ARTIFACT (convicted build = canary) ===
+=== hdcs-runs-rotation.conf ===
+RUNS_DIR=/workspace/hdcs/runs
+ARCHIVE_DIR=/workspace/.hdcs-rotate/archive
+AGE_DAYS=14
+PATTERN=*.txt
+KEEP=50
+=== rotate-hdcs-runs.sh ===
+#!/usr/bin/env bash
+# rotate-hdcs-runs.sh — hdcs runs rotation.
+# Default (no args): DRY-RUN — prints planned moves/prunes, performs ZERO writes (A1).
+# --apply: sole writing mode. Toolchain: bash + coreutils only (A2). No root, no logrotate.
+# Stale law (A5): stale <=> floor((now - mtime)/86400) >= AGE_DAYS — explicit epoch
+# arithmetic, never bare -mtime +N.
+# Env overrides: HDCS_RUNS_DIR, HDCS_ARCHIVE_DIR ONLY (unset -> conf defaults;
+# set-but-empty -> refuse, A4). AGE_DAYS/PATTERN/KEEP are operator-fixed conf values
+# and are never overridden by the environment.
+# KEEP=0 prunes the ENTIRE archive (KEEP is a hard bound, never skipped).
+# Prune uses only POSIX-portable find/stat (no -printf).
+# Scratch discipline (A1/L_modes): the scratch dir is created via mktemp -d at a
+# base that is VERIFIED (component test, not string prefix) to be OUTSIDE RUNS_DIR,
+# ARCHIVE_DIR, and any owned path — before AND after instantiation. A TMPDIR pointing
+# into either protected tree is rejected; /tmp is used instead. Zero writes ever
+# land inside RUNS_DIR/ARCHIVE_DIR, in any mode.
+# Traversal discipline: every find writes its listing to a scratch file so its
+# EXIT STATUS is captured — a failed/truncated traversal is a hard refusal, never
+# a silent skip. prune_select's status is NEVER consumed through a pipeline whose
+# last command would mask it: its output goes to a file and its exit status is
+# tested explicitly.
+# FAILURE DISCIPLINE (apply): every step in the --apply writing path (parent mkdir,
+# cp, cmp, rm of source, rm of pruned file) is status-checked; ANY failure sets
+# APPLY_FAIL and the script exits NONZERO after finishing — --apply never reports
+# success while a stale file remained unrotated, a copy was not verified, or a
+# prune removal failed.
+set -u
+
+APPLY=0
+if [ "${1:-}" = "--apply" ]; then
+  APPLY=1
+elif [ $# -gt 0 ]; then
+  echo "usage: rotate-hdcs-runs.sh [--apply]" >&2
+  exit 2
+fi
+
+die() { echo "REFUSE (A4): $1" >&2; exit 1; }
+
+# --- conf parse (L_conf): strictly 5 KEY=VALUE lines; blank lines and lines
+# starting with '#' are ignored; ANY other non-empty, non-comment line is a
+# parse failure -> nonzero exit, zero writes. Each of the 5 keys must appear
+# EXACTLY once (missing key or duplicate key = parse failure). ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+CONF="$SCRIPT_DIR/hdcs-runs-rotation.conf"
+CONF_RUNS=""; CONF_ARCH=""; CONF_AGE=""; CONF_PAT=""; CONF_KEEP=""
+SEEN_RUNS=0; SEEN_ARCH=0; SEEN_AGE=0; SEEN_PAT=0; SEEN_KEEP=0
+CONF_LINES=0
+if [ ! -r "$CONF" ]; then
+  echo "CONF PARSE FAILURE (L_conf): conf unreadable: $CONF" >&2
+  exit 1
+fi
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    '') continue;;
+    \#*) continue;;
+    RUNS_DIR=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_RUNS" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key RUNS_DIR" >&2; exit 1
+      fi
+      SEEN_RUNS=1; CONF_RUNS="${line#RUNS_DIR=}";;
+    ARCHIVE_DIR=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_ARCH" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key ARCHIVE_DIR" >&2; exit 1
+      fi
+      SEEN_ARCH=1; CONF_ARCH="${line#ARCHIVE_DIR=}";;
+    AGE_DAYS=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_AGE" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key AGE_DAYS" >&2; exit 1
+      fi
+      SEEN_AGE=1; CONF_AGE="${line#AGE_DAYS=}";;
+    PATTERN=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_PAT" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key PATTERN" >&2; exit 1
+      fi
+      SEEN_PAT=1; CONF_PAT="${line#PATTERN=}";;
+    KEEP=*)
+      CONF_LINES=$((CONF_LINES + 1))
+      if [ "$SEEN_KEEP" -ne 0 ]; then
+        echo "CONF PARSE FAILURE (L_conf): duplicate key KEEP" >&2; exit 1
+      fi
+      SEEN_KEEP=1; CONF_KEEP="${line#KEEP=}";;
+    *)
+      echo "CONF PARSE FAILURE (L_conf): malformed non-empty non-comment line: $line" >&2
+      exit 1;;
+  esac
+done < "$CONF"
+if [ "$CONF_LINES" -ne 5 ]; then
+  echo "CONF PARSE FAILURE (L_conf): expected exactly 5 KEY=VALUE lines, found $CONF_LINES" >&2
+  exit 1
+fi
+for k in RUNS_DIR ARCHIVE_DIR AGE_DAYS PATTERN KEEP; do
+  case "$k" in
+    RUNS_DIR) [ "$SEEN_RUNS" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    ARCHIVE_DIR) [ "$SEEN_ARCH" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    AGE_DAYS) [ "$SEEN_AGE" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    PATTERN) [ "$SEEN_PAT" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+    KEEP) [ "$SEEN_KEEP" -eq 1 ] || { echo "CONF PARSE FAILURE (L_conf): missing key $k" >&2; exit 1; };;
+  esac
+done
+
+# --- resolve effective dirs: env override allowed; unset -> default; set-but-empty -> refuse (A4) ---
+RUNS_SRC="${HDCS_RUNS_DIR-$CONF_RUNS}"
+ARCH_SRC="${HDCS_ARCHIVE_DIR-$CONF_ARCH}"
+[ -z "$RUNS_SRC" ] && die "HDCS_RUNS_DIR is set-but-empty"
+[ -z "$ARCH_SRC" ] && die "HDCS_ARCHIVE_DIR is set-but-empty"
+
+# --- path law (A4): degenerate '', '.', '/' — checked on the original string AND after canonicalization ---
+case "$RUNS_SRC" in ''|.|/) die "degenerate RUNS_DIR '$RUNS_SRC'";; esac
+case "$ARCH_SRC" in ''|.|/) die "degenerate ARCHIVE_DIR '$ARCH_SRC'";; esac
+
+RUNS="$(realpath -m -- "$RUNS_SRC")" || die "RUNS_DIR not resolvable"
+ARCH="$(realpath -m -- "$ARCH_SRC")" || die "ARCHIVE_DIR not resolvable"
+# degenerate AFTER canonicalization too: './', 'foo/..', trailing-slash cwd forms
+# all canonicalize to the current directory (or '/') and must be refused (A4).
+# realpath -m NEVER returns the literal string '.' — it returns the absolute cwd —
+# so the post-canonicalization test compares against the canonicalized CURRENT
+# DIRECTORY (obtained the same way), not against the literal '.' string.
+CWD="$(realpath -m -- '.')" || die "cannot canonicalize current directory"
+[ "$RUNS" = "$CWD" ] && die "RUNS_DIR '$RUNS_SRC' canonicalizes to the current directory (degenerate)"
+[ "$ARCH" = "$CWD" ] && die "ARCHIVE_DIR '$ARCH_SRC' canonicalizes to the current directory (degenerate)"
+[ "$RUNS" = "/" ] && die "RUNS_DIR canonicalizes to '/'"
+[ "$ARCH" = "/" ] && die "ARCHIVE_DIR canonicalizes to '/'"
+[ "$RUNS" = "$ARCH" ] && die "RUNS_DIR and ARCHIVE_DIR are identical"
+
+# containment (either direction), component-safe via realpath'd canonical paths
+case "$RUNS" in "$ARCH"|"$ARCH"/*) die "RUNS_DIR '$RUNS' is inside ARCHIVE_DIR '$ARCH'";; esac
+case "$ARCH" in "$RUNS"|"$RUNS"/*) die "ARCHIVE_DIR '$ARCH' is inside RUNS_DIR '$RUNS'";; esac
+
+AGE_DAYS="$CONF_AGE"
+PATTERN="$CONF_PAT"
+KEEP="$CONF_KEEP"
+case "$AGE_DAYS" in ''|*[!0-9]*) die "AGE_DAYS not a non-negative integer";; esac
+case "$KEEP" in ''|*[!0-9]*) die "KEEP not a non-negative integer";; esac
+
+# --- component-inside test: $1 inside $2 (path COMPONENTS, never string prefix) ---
+comp_inside() {
+  local a="${1%/}" b="${2%/}"
+  [ "${a#"$b"/}" != "$a" ] || [ "$a" = "$b" ]
+}
+
+# --- scratch dir for find listings (A1/L_modes): NEVER inside RUNS_DIR/ARCHIVE_DIR.
+# The BASE is checked first, then the INSTANTIATED mktemp result is re-checked
+# (a base outside the trees does not guarantee the instantiated path is, and the
+# check must hold on the concrete created path). Candidate order: TMPDIR, then /tmp. ---
+mk_scratch() {
+  local base cand
+  for base in "${TMPDIR-}" /tmp; do
+    [ -n "$base" ] || continue
+    cand="$(realpath -m -- "$base" 2>/dev/null)" || continue
+    comp_inside "$cand" "$RUNS" && continue
+    comp_inside "$cand" "$ARCH" && continue
+    cand="$(mktemp -d "${cand%/}/hdcs-rotate.XXXXXX" 2>/dev/null)" || continue
+    # re-validate the INSTANTIATED stage path against both protected trees
+    if comp_inside "$cand" "$RUNS" || comp_inside "$cand" "$ARCH"; then
+      rm -rf -- "$cand"
+      continue
+    fi
+    printf '%s' "$cand"
+    return 0
+  done
+  return 1
+}
+SCRATCH=""
+if ! SCRATCH="$(mk_scratch)"; then
+  die "cannot create scratch dir outside RUNS_DIR/ARCHIVE_DIR"
+fi
+trap 'rm -rf -- "$SCRATCH"' EXIT
+
+NOW="$(date +%s)"
+MOVES=()
+# find status is captured: a failed traversal refuses rather than silently
+# skipping stale files (a skipped stale file would violate the rotation law).
+FIND_ERR="$SCRATCH/find-runs-err"
+: > "$FIND_ERR"
+if ! find "$RUNS" -type f -name "$PATTERN" -print0 2>"$FIND_ERR" > "$SCRATCH/stale-list"; then
+  echo "REFUSE (A4): RUNS_DIR traversal failed" >&2
+  cat "$FIND_ERR" >&2
+  exit 1
+fi
+if [ -s "$FIND_ERR" ]; then
+  echo "REFUSE (A4): RUNS_DIR traversal reported errors" >&2
+  cat "$FIND_ERR" >&2
+  exit 1
+fi
+while IFS= read -r -d '' f; do
+  if ! mt="$(stat -c %Y -- "$f" 2>/dev/null)"; then
+    echo "REFUSE (A4): cannot stat RUNS file: ${f#"$RUNS"/}" >&2
+    exit 1
+  fi
+  age=$(( (NOW - mt) / 86400 ))
+  if [ "$age" -ge "$AGE_DAYS" ]; then
+    MOVES+=("$f")
+  fi
+done < "$SCRATCH/stale-list"
+
+# portable prune-list builder: emits "<mtime> <seq> <path>" lines sorted newest-first,
+# trimmed to KEEP entries; paths printed from field 3 on (spaces tolerated).
+# KEEP=0 -> every archived file is a prune candidate (the bound always applies).
+# find status captured: a failed archive traversal refuses (never silently prunes
+# from a partial listing). The function's EXIT STATUS reflects traversal success —
+# callers MUST test it directly (never through a pipeline whose last stage would
+# mask it).
+prune_select() { # $1 = archive dir, $2 = KEEP; prints paths to prune (newline-delimited);
+                 # returns nonzero on traversal failure (a refusal was already printed)
+  local p mt i=0 keep="$2" lerr="$SCRATCH/prune-find-err"
+  local -a payload=()
+  : > "$lerr"
+  if ! find "$1" -type f -print0 2>"$lerr" > "$SCRATCH/prune-list"; then
+    echo "REFUSE (A4): ARCHIVE_DIR traversal failed" >&2
+    cat "$lerr" >&2
+    return 1
+  fi
+  if [ -s "$lerr" ]; then
+    echo "REFUSE (A4): ARCHIVE_DIR traversal reported errors" >&2
+    cat "$lerr" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' p; do
+    [ -n "$p" ] || continue
+    if ! mt="$(stat -c %Y -- "$p" 2>/dev/null)"; then
+      echo "REFUSE (A4): cannot stat archive file: $p — pruning from a partial listing would violate losslessness" >&2
+      return 1
+    fi
+    payload+=("$mt $i $p")
+    i=$((i+1))
+  done < "$SCRATCH/prune-list"
+  local n="${#payload[@]}"
+  [ "$n" -gt "$keep" ] || return 0
+  if [ "$keep" -eq 0 ]; then
+    printf '%s\n' "${payload[@]}" | sort -k1,1nr -k2,2n | cut -d' ' -f3-
+  else
+    printf '%s\n' "${payload[@]}" | sort -k1,1nr -k2,2n | tail -n +"$((keep+1))" | cut -d' ' -f3-
+  fi
+  return 0
+}
+
+if [ "$APPLY" -eq 0 ]; then
+  # ---------------- DRY-RUN: zero writes (A1) ----------------
+  if [ "${#MOVES[@]}" -eq 0 ]; then
+    echo "dry-run: no stale files (stale <=> floor(age_days) >= $AGE_DAYS)"
+  else
+    for f in "${MOVES[@]}"; do
+      rel="${f#"$RUNS"/}"
+      echo "move: $rel -> ARCHIVE_DIR/$rel"
+    done
+  fi
+  # prune_select status is tested EXPLICITLY — output is captured to a scratch file
+  # and iterated from there, so a traversal failure can never be masked by the
+  # pipeline's last command (a hidden failure would exit 0 and misreport the plan).
+  if [ -d "$ARCH" ]; then
+    if ! prune_select "$ARCH" "$KEEP" > "$SCRATCH/prune-out"; then
+      echo "REFUSE (A4): dry-run prune plan aborted — ARCHIVE_DIR traversal failed" >&2
+      exit 1
+    fi
+    while IFS= read -r rel; do
+      [ -n "$rel" ] || continue
+      echo "prune: ${rel#"$ARCH"/} (oldest beyond KEEP=$KEEP)"
+    done < "$SCRATCH/prune-out"
+  fi
+  exit 0
+fi
+
+# ---------------- APPLY: sole writing mode ----------------
+# APPLY_FAIL accumulates every failure in the writing path; the run exits NONZERO
+# if any step failed — success is only reported when the rotation truly completed.
+APPLY_FAIL=0
+
+mkdir -p -- "$ARCH" || { echo "REFUSE (A4): cannot create ARCHIVE_DIR" >&2; exit 1
+=== LOCK3 CONTRACT ===
+Your block MUST make the gate FAIL on this canary build (RED) while the current gate-passing snapshot stays GREEN. Target the defect the canary actually exhibits.
+
+=== YOUR PREVIOUS BLOCK ===
+FX=/tmp/hdcs-fx-$$
+trap 'rm -rf -- "$FX"' EXIT
+mkdir -p "$FX/runs" "$FX/archive" || fail "A1: fixture setup failed; dry-run probe cannot establish zero-write paths"
+HDCS_RUNS_DIR="$FX/runs" HDCS_ARCHIVE_DIR="$FX/archive" bash artifact/rotate-hdcs-runs.sh >/dev/null 2>&1 ||
+  fail "A1: default dry-run must execute successfully without writes; a non-executable rotation build cannot honor zero-write mode"
+=== WHY IT WAS REJECTED ===
+block grammar: last non-comment line must carry a fail invocation (gate-not-wall: a fixture must be able to fail)
+Fix ONLY this violation. The block must still pass the gate-passing snapshot GREEN and fail the canary RED. Output ONE fenced block, nothing else.

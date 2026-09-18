@@ -1,0 +1,44 @@
+=== context.hcdl ===
+reg: cs-programming; canon: Node.js CLI identifiers — process.argv, process.exit, stdout/stderr, Number.isFinite, exact positional interface.
+A1_iface: ∀ invocation -> argv shape [node, src/index.js, value, from, to] exact.
+A2_deps: ∀ import -> ∈ Node built-ins ∨ ∅; zero package deps.
+A3_abszero: ∀ source v,u -> v ≥ threshold(u) where threshold := {C: -273.15, F: -459.67, K: 0}; boundary valid.
+A4_isolation: ∀ write path -> path ∈ /workspace/tempconv2/**; /workspace/tempconv untouched, no reuse.
+A5_units: unit ∈ {C,F,K,celsius,fahrenheit,kelvin} case-insensitive; else reject.
+A6_reject: bad arity ∨ ¬Number.isFinite(Number(value)) ∨ unknown unit ∨ v < threshold(u) -> stderr msg ∧ exit 1.
+A7_success: valid conversion -> numeric result on stdout ∧ exit 0.
+open: ∅ — operator rulings resolve boundary semantics and bad-input taxonomy.
+=== packet ===
+```yaml
+reg: {domain: cs-programming, canon: "Node.js CLI vocabulary: process.argv, process.exit(code), stdout/stderr, Number.isFinite, exact positional interface, zero-dependency"}
+intent: >
+  Build /workspace/tempconv2/src/index.js: zero-dependency Node.js CLI.
+  Invocation := `node src/index.js <value> <from> <to>` exact positional.
+  Units: C/F/K and Celsius/Fahrenheit/Kelvin, case-insensitive.
+  Valid -> numeric result on stdout, exit 0.
+  Bad arity ∨ non-finite/non-numeric value ∨ unknown unit ∨ source below absolute-zero
+  (C ≥ -273.15, F ≥ -459.67, K ≥ 0; boundary valid) -> stderr, exit 1.
+  No dependency imports; /workspace/tempconv untouched.
+must_keep:
+  - Build /workspace/tempconv2/src/index.js.
+  - Zero-dependency node CLI.
+  - positional args `node src/index.js <value> <from> <to>`.
+  - converting between Celsius, Fahrenheit, Kelvin.
+  - accept C/F/K and full names, case-insensitive.
+  - reject below-absolute-zero and bad input with stderr + exit 1.
+  - Do NOT reuse or modify /workspace/tempconv.
+resolved:
+  - "Q1: Is a source value exactly at the absolute-zero threshold valid? -> A: yes; below-absolute-zero := strictly less than threshold (operator ruling)"
+  - "Q2: What counts as bad input? -> A: invalid arity, non-numeric/non-finite value, or unknown unit (operator ruling)"
+  - "Q3: Are full unit names accepted? -> A: yes, C/F/K and Celsius/Fahrenheit/Kelvin, case-insensitive"
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: READY|NOT_READY, max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - "A1: preserve exact positional interface `node src/index.js <value> <from> <to>`"
+  - "A2: zero dependencies; Node built-ins only"
+  - "A3: absolute-zero thresholds C >= -273.15, F >= -459.67, K >= 0; boundary valid"
+  - "A4 (no_resurrect: tempconv-isolation): all writes ∈ /workspace/tempconv2/**; never reuse or modify /workspace/tempconv"
+paths:
+  - /workspace/tempconv2/src/index.js
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 2}
+```

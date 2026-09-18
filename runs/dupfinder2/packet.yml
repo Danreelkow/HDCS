@@ -1,0 +1,33 @@
+reg:
+  domain: cs-programming
+  canon: Python filesystem traversal, hashing, CLI, and Markdown documentation.
+intent: "Build /workspace/dupfinder2 with scanner.py, dupfinder.py, and README.md; recursively scan files, hash contents, group duplicates, and print duplicate groups with byte sizes from a path argument."
+must_keep:
+  - "build a duplicate-file finder in /workspace/dupfinder2/"
+  - "scanner module, CLI entry, and a README, three separate files"
+  - "Scanner walks a directory, hashes files, groups duplicates; CLI takes a path, prints groups with sizes; README documents usage."
+resolved:
+  - "Implementation language -> Python standard library"
+  - "Hash algorithm -> SHA-256"
+workflow:
+  phases: [plan, scoped-build, verify, deliver]
+  builders: dynamic
+  verifier: decorrelated
+  gate: "READY|NOT_READY"
+  max_fix_cycles: 2
+handoff:
+  state: "S_0 + Delta -> S_1"
+  report: [+done, -resolved, +open, +validation]
+constraints:
+  - "A1: exactly three deliverable files"
+  - "A2: standard-library-only implementation"
+  - "A3: fresh cross-model S4 verdict required"
+paths:
+  - /workspace/dupfinder2/scanner.py
+  - /workspace/dupfinder2/dupfinder.py
+  - /workspace/dupfinder2/README.md
+budgets:
+  tokens: 1200
+  lines: 60
+  fix_cycles: 2
+  questions: 2

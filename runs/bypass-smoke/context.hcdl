@@ -1,0 +1,16 @@
+reg: {domain: cs-programming, canon: Node.js executable scripts; ECMAScript modules; stdout exactness; filesystem paths}
+intent: Create zero-dependency Node.js script at /workspace/hdcs/runs/bypass-smoke/hello.mjs; print exactly `bypass smoke ok`; execute once with node.
+must_keep:
+  - Exact path: /workspace/hdcs/runs/bypass-smoke/hello.mjs
+  - Zero-dependency node script
+  - Exact output: bypass smoke ok
+  - Run once with node and report output
+resolved:
+  - "Q: Is request ambiguous? A: No; exact path, runtime, dependency constraint, output, and execution count are specified."
+workflow: {phases: [plan, scoped-build, verify, deliver], builders: dynamic, verifier: decorrelated, gate: "READY|NOT_READY", max_fix_cycles: 2}
+handoff: {state: S_0 + Delta -> S_1, report: [+done, -resolved, +open, +validation]}
+constraints:
+  - no_resurrect: none
+paths:
+  - /workspace/hdcs/runs/bypass-smoke/hello.mjs
+budgets: {tokens: estimate, lines: 60, fix_cycles: 2, questions: 0}
